@@ -1,0 +1,108 @@
+server:
+  # 后端端口：8080（前端 Vite 代理 /api、/uploads 指向 8080，两端保持一致；历史约定 8081 已废弃）
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: holzyn-actor
+  # ===== 数据源（默认本地 H2 嵌入式，MySQL 兼容模式；远程 MySQL 预留，见 application-remote.yml）=====
+  datasource:
+    # 本地 H2 文件库（主）：数据存 <工作目录>/data/holzyn-actor（exe 化时改 %APPDATA%\HolzynActor\data）
+    # MODE=MySQL 兼容模式：支持 LONGTEXT/JSON/DATETIME 等 MySQL 语法，JPA 业务层零改动
+    url: ${HOLOZYN_ACTOR_DB_URL:jdbc:h2:file:${HOLOZYN_ACTOR_DATA_DIR:./data}/holzyn-actor;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE}
+    username: ${HOLOZYN_DB_USER:sa}
+    password: ${HOLOZYN_DB_PASSWORD:}
+    driver-class-name: org.h2.Driver
+  # 文件上传限制（头像/图片，单文件 5MB、请求 6MB）
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 20MB
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        # 本地 H2 方言（MySQL 兼容模式）；远程 MySQL 由 application-remote.yml 覆盖为 MySQLDialect
+        dialect: org.hibernate.dialect.H2Dialect
+  jackson:
+    default-property-inclusion: non_null
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+# HolzynActor 模块配置
+holzyn:
+  actor:
+    # 本地数据目录（H2 文件库与上传文件根目录；exe 化时设为 %APPDATA%\HolzynActor\data）
+    data-dir: ${HOLOZYN_ACTOR_DATA_DIR:./data}
+    # AI 供应商 api_key 加密密钥（本地运行需配置，生产必须通过环境变量注入）
+    api-key-secret: ${HOLOZYN_ACTOR_API_KEY_SECRET:local-dev-secret-change-me}
+    # 上传文件根目录（头像等）
+    upload-dir: ${HOLOZYN_ACTOR_UPLOAD_DIR:./uploads}
+    # 默认 AI 供应商（P1 起使用，首接 DeepSeek 等 OpenAI 兼容服务）
+    default-provider: ${HOLOZYN_ACTOR_DEFAULT_PROVIDER:}
+    # 对话/事件后自动评估行动的总开关（成本控制；false 仅手动 + scheduled 触发）
+    action:
+      auto-evaluate: ${HOLOZYN_ACTOR_ACTION_AUTO_EVALUATE:true}
+    # P3 知识库 RAG 总开关（true=对话自动检索注入知识片段 + 人群环境摘要；false=行为与 P2 完全一致）
+    rag:
+      enabled: ${HOLOZYN_ACTOR_RAG_ENABLED:true}
+    # embedding 单次请求最多 input 条数（供应商限制，如 doubao-embedding 单次≤10；超出自动拆分多次调用）
+    embedding:
+      batch-size: ${HOLOZYN_ACTOR_EMBEDDING_BATCH_SIZE:10}
+    # P4 长期记忆总开关（true=每轮回复后 AI 抽取关键事实/摘要写入并注入；false=行为与 P3 完全一致）
+    memory:
+      enabled: ${HOLOZYN_ACTOR_MEMORY_ENABLED:true}
+      # 记忆注入 top-K：每轮注入的角色级事实记忆条数（重要度 desc + 较新优先）
+      top-k: ${HOLOZYN_ACTOR_MEMORY_TOP_K:8}
+      # 记忆注入 top-K：每轮注入的项目级记忆条数（世界大事记，所有角色可见）
+      project-top-k: ${HOLOZYN_ACTOR_MEMORY_PROJECT_TOP_K:4}
+      # 记忆预算：每角色/项目记忆条数上限，超限按「重要度×新旧」滚动淘汰低价值记忆
+      budget: ${HOLOZYN_ACTOR_MEMORY_BUDGET:50}
+      # 会话摘要生成间隔：每 N 轮（user+assistant 各一条计 1 轮）生成一条 summary 记忆（S2 上下文压缩承接）
+      summary-interval: ${HOLOZYN_ACTOR_MEMORY_SUMMARY_INTERVAL:10}
+      # 去重阈值：新事实与已有记忆的文本重叠度（Dice 二元组系数 0~1）高于该值则判定重复丢弃
+      dedup-threshold: ${HOLOZYN_ACTOR_MEMORY_DEDUP_THRESHOLD:0.6}
+      # 记忆门控（2026-08-18）：寒暄/无实质信息的轮次跳过提取，连 AI 都不调用（省 token）
+      gate:
+        # 门控总开关（true=寒暄跳过；false=回到每轮无条件提取）
+        enabled: ${HOLOZYN_ACTOR_MEMORY_GATE_ENABLED:true}
+        # 单聊寒暄最大字符数：最新用户消息含寒暄词且长度 ≤ 该值 → 视为寒暄跳过
+        greeting-max-len: ${HOLOZYN_ACTOR_MEMORY_GATE_GREETING_MAX_LEN:20}
+        # 群聊寒暄最大字符数（群聊更容易产生实质信息，阈值更宽松：≤8 字且含寒暄词才算寒暄）
+        group-greeting-max-len: ${HOLOZYN_ACTOR_MEMORY_GATE_GROUP_GREETING_MAX_LEN:8}
+        # AI 复核开关（默认 false）：开启后启发式通过后再让 AI 判断一次是否有值得记住的事实
+        ai-review: ${HOLOZYN_ACTOR_MEMORY_GATE_AI_REVIEW:false}
+      # 会话结束懒检查阈值（真实分钟）：距上条消息超过该值视为上次会话已结束，
+      # 下次对话开始前异步补提一次完整记忆（事实+摘要，门控过滤寒暄）
+      session-timeout-minutes: ${HOLOZYN_ACTOR_MEMORY_SESSION_TIMEOUT_MINUTES:30}
+    # P4 世界持续模拟总开关（true=定时推进活跃项目的角色/人群/世界事件；false=行为与 P3 完全一致）
+    world:
+      sim-enabled: ${HOLOZYN_ACTOR_WORLD_SIM_ENABLED:true}
+      # 世界时钟速率：每真实小时推进的游戏小时数（默认 24=1真实小时推进1游戏日；每项目可单独覆盖）
+      time-rate: ${HOLOZYN_ACTOR_WORLD_TIME_RATE:24}
+      # 模拟扫描周期（真实毫秒，默认 180000=3 分钟）
+      scan-interval-ms: ${HOLOZYN_ACTOR_WORLD_SCAN_INTERVAL_MS:180000}
+      # 单次补算封顶（游戏小时，默认 24，防长时间离线后雪崩）
+      max-catch-up-hours: ${HOLOZYN_ACTOR_WORLD_MAX_CATCH_UP_HOURS:24}
+      # 每 tick AI 调用上限（角色行动 + 世界事件生成，默认 5；超限走程序化兜底）
+      max-ai-calls: ${HOLOZYN_ACTOR_WORLD_MAX_AI_CALLS:5}
+      # 活跃项目窗口（真实分钟，默认 30：仅推进最近有对话的项目）
+      active-window-minutes: ${HOLOZYN_ACTOR_WORLD_ACTIVE_WINDOW_MINUTES:30}
+  cors:
+    # CORS 允许的来源模式（逗号分隔），默认 * 允许所有（本地桌面/本地 Web 场景）
+    allowed-origins: ${HOLOZYN_CORS_ORIGINS:*}
+
+logging:
+  level:
+    com.holzyn.actor: INFO
+    org.hibernate.SQL: WARN
+    org.hibernate.orm.deprecation: ERROR
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

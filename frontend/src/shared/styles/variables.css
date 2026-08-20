@@ -1,0 +1,271 @@
+/* ============================================================
+   HolzynActor · 设计令牌（DSH 风格分层体系 · 浅/深双主题 + 可换肤主色）
+   用法：
+   - 浅色：:root 默认；深色：<html data-theme="dark">（JS 设置）
+   - 主色：--accent 由 JS 动态设置（默认 DeepSeek 蓝 #4176E6），
+     衍生色用 CSS color-mix 自动生成 → 换肤只需改 --accent
+   - 世界题材联动 / 个性化配色：JS 修改 --accent 即全局生效
+   ============================================================ */
+
+/* ===== HarmonyOS Sans SC 字体（2026-08-18 接入，华为鸿蒙字体）
+   来源：docs/public/HarmonyOS-Sans.zip（HarmonyOS Sans Fonts License Agreement：
+   可随软件打包使用，需保留版权声明，不可修改字体、不可单独转售）。
+   字重：Thin 100 / Light 300 / Regular 400 / Medium 500 / Bold 700 / Black 900。
+   font-display: swap —— 字体异步加载，就绪前用系统字体兜底，不阻塞首屏。 */
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Thin.ttf') format('truetype'); font-weight: 100; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Light.ttf') format('truetype'); font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Medium.ttf') format('truetype'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Black.ttf') format('truetype'); font-weight: 900; font-style: normal; font-display: swap; }
+
+:root {
+  /* ===== 字体（正文/UI 用 HarmonyOS Sans SC；代码等宽字体保留原栈） ===== */
+  --dsw-font-family: "HarmonyOS Sans SC", "HarmonyOS Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --dsw-font-family-code: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
+    "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
+  --dsw-ease: cubic-bezier(.4, 0, .2, 1);
+
+  /* ===== 主色（accent，可换肤）===== */
+  --accent: #4176e6;                                  /* 默认：DeepSeek 蓝 */
+  --accent-strong: color-mix(in srgb, var(--accent) 82%, #000 18%);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-softer: color-mix(in srgb, var(--accent) 7%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 38%, transparent);
+  --accent-contrast: #fff;                            /* accent 底上的文字色 */
+  --accent-text: var(--accent);                       /* 强调文字 */
+
+  /* ===== 语义色 ===== */
+  --state-success: #22c55e;
+  --state-warn: #f59e0b;
+  --state-error: #ef4444;
+  --state-danger-bg: color-mix(in srgb, var(--state-error) 12%, transparent);
+  /* 语义色浅底（成功提醒/标签浅底；深色主题下由 [data-theme="dark"] 覆盖为深色底） */
+  --state-success-bg: color-mix(in srgb, var(--state-success) 12%, transparent);
+
+  /* ===== 分层背景（浅色；V1.9 全局加深：页面底更深、次级面/内嵌面更分明） ===== */
+  --bg-base: #e8ebf1;                                 /* 页面底（带轻微蓝灰层次） */
+  --bg-layer-1: #ffffff;                              /* 卡片/浮层 */
+  --bg-layer-2: #f1f3f7;                              /* 次级面/内嵌 */
+  --bg-layer-3: #e9ecf2;                              /* 输入/更深内嵌 */
+  --bg-hover: rgba(15, 17, 21, .07);
+  --bg-active: rgba(15, 17, 21, .14);
+  --bg-mask: rgba(15, 17, 21, .45);
+  --bg-scrim: rgba(232, 235, 241, .85);
+
+  /* ===== 导航区（顶栏 + 侧边栏）：灰色基底 + 极淡个性化主色晕染，与内容区明确分层 ===== */
+  --bg-nav: color-mix(in srgb, var(--accent) 5%, #f3f4f6);
+  --bg-nav-hover: color-mix(in srgb, var(--accent) 9%, #eceef2);
+
+  /* ===== 边框（浅色；V1.9 加深：分界线更清晰） ===== */
+  --border-l1: rgba(15, 17, 21, .16);
+  --border-l2: rgba(15, 17, 21, .24);
+  --border-l3: rgba(15, 17, 21, .34);
+
+  /* ===== 文本 ===== */
+  --text-primary: #17191d;
+  --text-regular: #3c4148;
+  --text-secondary: #61666e;
+  --text-tertiary: #8b9098;
+  --text-placeholder: #b2b6bd;
+  --text-caption: #8b9098;
+  --text-inverse: #fff;
+
+  /* ===== 阴影 ===== */
+  --shadow-lv1: 0 2px 4px 0 rgba(15, 17, 21, .05);
+  --shadow-lv2: 0 4px 12px 0 rgba(15, 17, 21, .05), 0 2px 8px 0 rgba(15, 17, 21, .07);
+  --shadow-lv3: 0 0 1px 0 rgba(15, 17, 21, .2), 0 0 4px 0 rgba(15, 17, 21, .02), 0 12px 32px 0 rgba(15, 17, 21, .10);
+
+  /* ===== 圆角 ===== */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  /* ===== 对话专用（对齐 DeepSeek Harness）===== */
+  --chat-content-width: 748px;
+  --composer-max-width: calc(var(--chat-content-width) + 32px);
+  --composer-side-clearance: 16px;
+  --composer-text-max-height: 336px;
+
+  /* ===== 滚动条 ===== */
+  --scrollbar-width: 8px;
+  --scrollbar-thumb: #b6bcc7;
+  --scrollbar-thumb-hover: #9aa1ae;
+  --scrollbar-track: transparent;
+
+  /* ===== 兼容别名（历史视图依赖，保持可用）===== */
+  --brand-primary: var(--accent);
+  --brand-primary-light: color-mix(in srgb, var(--accent) 70%, #fff);
+  --brand-primary-dark: color-mix(in srgb, var(--accent) 82%, #000);
+  --brand-cyan: color-mix(in srgb, var(--accent) 75%, #22d3ee);
+  --brand-gradient: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 72%, #7b4dff) 100%);
+  --brand-gradient-soft: linear-gradient(135deg, var(--accent-soft) 0%, color-mix(in srgb, var(--accent) 10%, transparent) 100%);
+  --bg-white: var(--bg-layer-1);
+  --bg-light: var(--bg-layer-2);
+  --bg-page: var(--bg-base);
+  --border-color: var(--border-l2);
+  --border-light: var(--border-l1);
+  --border-strong: var(--border-l3);
+  --card-shadow: var(--shadow-lv2);
+  --card-shadow-hover: var(--shadow-lv3);
+  --primary-bg: var(--accent-soft);
+  --primary: var(--accent);
+  --font-mono: var(--dsw-font-family-code);
+
+  /* ===== Element Plus 覆盖（浅色）===== */
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--accent) 70%, #fff);
+  --el-color-primary-light-5: color-mix(in srgb, var(--accent) 50%, #fff);
+  --el-color-primary-light-7: color-mix(in srgb, var(--accent) 30%, #fff);
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 20%, #fff);
+  --el-color-primary-light-9: color-mix(in srgb, var(--accent) 12%, #fff);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--accent) 80%, #000);
+  --el-bg-color: var(--bg-layer-1);
+  --el-bg-color-page: var(--bg-base);
+  --el-bg-color-overlay: var(--bg-layer-1);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-placeholder);
+  --el-border-color: var(--border-l2);
+  --el-border-color-light: var(--border-l1);
+  --el-border-color-lighter: var(--border-l1);
+  --el-fill-color: var(--bg-layer-3);
+  --el-fill-color-light: var(--bg-layer-2);
+  --el-fill-color-lighter: var(--bg-layer-2);
+  --el-fill-color-blank: var(--bg-layer-1);
+  --el-fill-color-dark: var(--bg-layer-3);
+  --el-disabled-bg-color: var(--bg-layer-2);
+  --el-mask-color: var(--bg-mask);
+}
+
+/* ===== 深色主题（DSH 同款）===== */
+[data-theme="dark"] {
+  /* 主色不变（accent 由 JS 全局维护），可微调 contrast */
+  --accent-contrast: #fff;
+
+  /* 分层背景（深色） */
+  --bg-base: #151517;                                 /* DSH bluish-950 */
+  --bg-layer-1: #1b1b1c;                              /* DSH bluish-900 */
+  --bg-layer-2: #232324;                              /* DSH bluish-875 */
+  --bg-layer-3: #2c2c2e;                              /* DSH bluish-850 */
+  --bg-hover: rgba(255, 255, 255, .08);
+  --bg-active: rgba(255, 255, 255, .14);
+  --bg-mask: rgba(0, 0, 0, .55);
+  --bg-scrim: rgba(21, 21, 23, .82);
+
+  /* 导航区（深色）：比卡片更亮一档的灰，边界清晰 */
+  --bg-nav: color-mix(in srgb, var(--accent) 7%, #262629);
+  --bg-nav-hover: color-mix(in srgb, var(--accent) 11%, #2e2e31);
+
+  /* 边框 */
+  --border-l1: rgba(255, 255, 255, .06);
+  --border-l2: rgba(255, 255, 255, .12);
+  --border-l3: rgba(255, 255, 255, .18);
+
+  /* 文本 */
+  --text-primary: #f9fafb;                            /* DSH bluish-50 */
+  --text-regular: #e3e6ea;
+  --text-secondary: #cfd3d6;
+  --text-tertiary: #adb2b8;
+  --text-placeholder: #6f747b;
+  --text-caption: #81858c;
+  --text-inverse: #17191d;
+
+  /* 阴影（深色下更淡） */
+  --shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, .3);
+  --shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, .28), 0 2px 8px 0 rgba(0, 0, 0, .3);
+  --shadow-lv3: 0 0 1px 0 rgba(255, 255, 255, .05), 0 12px 32px 0 rgba(0, 0, 0, .45);
+
+  /* 滚动条 */
+  --scrollbar-thumb: #4a4c50;
+  --scrollbar-thumb-hover: #5c5f64;
+
+  /* 语义色浅底（深色：改为深色底，避免深色主题下提醒卡片/标签仍是浅色刺眼） */
+  --state-danger-bg: color-mix(in srgb, var(--state-error) 16%, transparent);
+  --state-success-bg: color-mix(in srgb, var(--state-success) 14%, transparent);
+
+  /* Element Plus 覆盖（深色） */
+  --el-bg-color: var(--bg-layer-1);
+  --el-bg-color-page: var(--bg-base);
+  --el-bg-color-overlay: var(--bg-layer-2);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-placeholder);
+  --el-border-color: var(--border-l2);
+  --el-border-color-light: var(--border-l1);
+  --el-border-color-lighter: var(--border-l1);
+  --el-fill-color: var(--bg-layer-3);
+  --el-fill-color-light: var(--bg-layer-2);
+  --el-fill-color-lighter: var(--bg-layer-2);
+  --el-fill-color-blank: var(--bg-layer-1);
+  --el-fill-color-dark: var(--bg-layer-3);
+  --el-disabled-bg-color: var(--bg-layer-2);
+  --el-mask-color: var(--bg-mask);
+
+  /* ===== Element Plus 语义色深色适配（2026-08-19）
+      默认主题下 el-alert/el-tag/el-button(plain)/el-message/el-message-box 等的浅底
+      （-light-8/-light-9）为浅色系，深色主题下仍是浅色卡片/按钮 → 刺眼。
+      此处按 Element Plus 官方 dark/css-vars 的深色值覆盖；主色（primary）保持 accent 派生，
+      与 :root 的 accent 换肤体系一致（深色下 light-N 改向黑混、dark-2 向白混）。 */
+  /* 主色（保持 accent 换肤） */
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--accent) 70%, #000);
+  --el-color-primary-light-5: color-mix(in srgb, var(--accent) 50%, #000);
+  --el-color-primary-light-7: color-mix(in srgb, var(--accent) 30%, #000);
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 20%, #000);
+  --el-color-primary-light-9: color-mix(in srgb, var(--accent) 12%, #000);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--accent) 80%, #fff);
+  /* 成功 */
+  --el-color-success: #67c23a;
+  --el-color-success-light-3: #4e8e2f;
+  --el-color-success-light-5: #3e6b27;
+  --el-color-success-light-7: #2d481f;
+  --el-color-success-light-8: #25371c;
+  --el-color-success-light-9: #1c2518;
+  --el-color-success-dark-2: #85ce61;
+  /* 警告 */
+  --el-color-warning: #e6a23c;
+  --el-color-warning-light-3: #a77730;
+  --el-color-warning-light-5: #7d5b28;
+  --el-color-warning-light-7: #533f20;
+  --el-color-warning-light-8: #3e301c;
+  --el-color-warning-light-9: #292218;
+  --el-color-warning-dark-2: #ebb563;
+  /* 危险 / 错误 */
+  --el-color-danger: #f56c6c;
+  --el-color-danger-light-3: #b25252;
+  --el-color-danger-light-5: #854040;
+  --el-color-danger-light-7: #582e2e;
+  --el-color-danger-light-8: #412626;
+  --el-color-danger-light-9: #2a1d1d;
+  --el-color-danger-dark-2: #f78989;
+  --el-color-error: #f56c6c;
+  --el-color-error-light-3: #b25252;
+  --el-color-error-light-5: #854040;
+  --el-color-error-light-7: #582e2e;
+  --el-color-error-light-8: #412626;
+  --el-color-error-light-9: #2a1d1d;
+  --el-color-error-dark-2: #f78989;
+  /* 信息 */
+  --el-color-info: #909399;
+  --el-color-info-light-3: #6b6d71;
+  --el-color-info-light-5: #525457;
+  --el-color-info-light-7: #393a3c;
+  --el-color-info-light-8: #2d2d2f;
+  --el-color-info-light-9: #202121;
+  --el-color-info-dark-2: #a6a9ad;
+}
+
+/* 跟随系统的深色（在 JS 未显式设置 data-theme 时的兜底） */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { }
+}
+
+/* 颜色过渡平滑（主题切换时） */
+html.theme-transition, html.theme-transition * {
+  transition: background-color .25s var(--dsw-ease), border-color .25s var(--dsw-ease), color .25s var(--dsw-ease) !important;
+}

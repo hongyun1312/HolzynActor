@@ -1,0 +1,101 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+html, body { width: 100%; }
+body {
+  font-family: var(--dsw-font-family);
+  color: var(--text-primary);
+  background: var(--bg-base);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+ul { list-style: none; }
+img { max-width: 100%; display: block; }
+
+/* 居中栅格容器 */
+.container { max-width: 1800px; margin: 0 auto; padding: 0 24px; }
+
+/* 科技卡片（令牌化：分层背景 + 阴影 + 主色悬浮） */
+.tech-card {
+  background: var(--bg-layer-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lv2);
+  border: 1px solid var(--border-l1);
+  transition: all 0.3s var(--dsw-ease);
+}
+.tech-card:hover {
+  box-shadow: var(--shadow-lv3);
+  border-color: var(--accent-border);
+}
+
+/* 主色强调文本 */
+.accent-text { color: var(--accent-text); }
+
+/* 通用滚动条（令牌化，全局） */
+::-webkit-scrollbar { width: var(--scrollbar-width); height: var(--scrollbar-width); }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+::selection { background: var(--accent-soft); color: var(--text-primary); }
+
+/* ============================================================
+   Markdown 排版（对话 AI 气泡 / 角色卡 Prompt 预览等）
+   对齐 DeepSeek Harness：正文 16px/28px、代码块 13px/22px 圆角 12px
+   ============================================================ */
+.markdown-body {
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 28px;
+  word-break: break-word;
+}
+.markdown-body > *:first-child { margin-top: 0; }
+.markdown-body > *:last-child { margin-bottom: 0; }
+.markdown-body p { margin: 0 0 12px; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  font-weight: 700; margin: 20px 0 10px; line-height: 1.4; color: var(--text-primary);
+}
+.markdown-body h1 { font-size: 24px; }
+.markdown-body h2 { font-size: 22px; }
+.markdown-body h3 { font-size: 20px; }
+.markdown-body h4 { font-size: 16px; }
+.markdown-body ul, .markdown-body ol { margin: 0 0 12px; padding-left: 24px; }
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body li { margin: 3px 0; }
+.markdown-body blockquote {
+  margin: 12px 0; padding: 4px 14px; color: var(--text-secondary);
+  border-left: 3px solid var(--accent-border); background: var(--accent-softer);
+  border-radius: 0 8px 8px 0;
+}
+.markdown-body code {
+  font-family: var(--dsw-font-family-code);
+  font-size: 14px; line-height: 22px;
+  background: var(--bg-layer-3); color: var(--accent-text);
+  border-radius: 6px; padding: 1px 6px;
+}
+.markdown-body pre {
+  background: var(--bg-layer-3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-l1);
+}
+.markdown-body pre code {
+  background: transparent; color: var(--text-regular); padding: 0; font-size: 13px; line-height: 22px;
+}
+.markdown-body pre code .hljs-comment, .markdown-body pre code .hljs-quote { color: var(--text-tertiary); font-style: italic; }
+.markdown-body pre code .hljs-keyword, .markdown-body pre code .hljs-selector-tag, .markdown-body pre code .hljs-built_in { color: #b37cff; }
+.markdown-body pre code .hljs-string, .markdown-body pre code .hljs-attr { color: #4fae6a; }
+.markdown-body pre code .hljs-number, .markdown-body pre code .hljs-literal { color: #d88c3a; }
+.markdown-body pre code .hljs-title, .markdown-body pre code .hljs-function { color: var(--accent-text); }
+.markdown-body pre code .hljs-variable, .markdown-body pre code .hljs-params { color: var(--text-regular); }
+.markdown-body pre code .hljs-meta { color: var(--text-tertiary); }
+.markdown-body table { border-collapse: collapse; margin: 12px 0; width: 100%; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--border-l2); padding: 6px 12px; text-align: left; }
+.markdown-body th { background: var(--bg-layer-2); font-weight: 500; }
+.markdown-body hr { border: none; border-top: 1px solid var(--border-l2); margin: 16px 0; }
+.markdown-body a { color: var(--accent-text); text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body img { border-radius: 8px; }
+.markdown-body strong { font-weight: 600; }

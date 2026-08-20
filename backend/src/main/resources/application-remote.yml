@@ -1,0 +1,21 @@
+# ============================================================
+# 远程数据库（预留）Profile：application-remote.yml
+# 用途：作为「本地数据库（主）/ 远程数据库（预留）」的第二数据源形态。
+#   - 本地开发/使用：默认 application.yml（H2 本地库，无需本文件）。
+#   - 需要连远程 MySQL（如远程托管 / 未来遥测接收服务联调）时：
+#     java -jar holzyn-actor.jar --spring.profiles.active=remote
+#   - 连接信息通过环境变量注入，勿硬编码生产凭据。
+# 说明：远程 MySQL 表结构（docs/sql/V1.0__holzyn_actor_mysql_all_tables.sql）与本地 H2 脚本
+#   （docs/sql/H2__holzyn_actor_all_tables.sql）保持同一套业务表；远程用于数据托管与
+#   「用户注册世界时上报设备信息/世界观」等二次开发接收场景（预留，见远程接收通道设计文档）。
+# ============================================================
+spring:
+  datasource:
+    url: ${HOLOZYN_REMOTE_DB_URL:jdbc:mysql://mysql.mbfsr.com:23306/holzyn?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true}
+    username: ${HOLOZYN_REMOTE_DB_USER:root}
+    password: ${HOLOZYN_REMOTE_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
