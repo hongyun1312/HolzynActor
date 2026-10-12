@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.settings.entity;
 
 import jakarta.persistence.Column;
@@ -18,7 +36,6 @@ import java.time.LocalDateTime;
  * 每个用户的 API 列表相互隔离（user_id 归属），供后续对话 / 角色卡等 AI 场景选用。</p>
  * <p>安全说明：api_key 以 AES-GCM 密文存储于 api_key_cipher，明文仅存在于服务端解密调用时，
  * 永不下发前端。</p>
- * <p>所属模块：model/entity（数据实体层-用户 AI API 子域）</p>
  */
 @Data
 @Entity
@@ -62,7 +79,7 @@ public class ModelProvider {
     @Column(length = 20)
     private String purpose = "chat";
 
-    /** 是否启用该供应商的 embedding 能力：0 否 / 1 是（P3 RAG 用，复用 baseUrl/apiKey；随 purpose 自动同步） */
+    /** 是否启用该供应商的 embedding 能力：0 否 / 1 是 */
     @Column(name = "embedding_enabled")
     private Integer embeddingEnabled = 0;
 
@@ -92,7 +109,7 @@ public class ModelProvider {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
-    /** 更新时间 */
+    /** 时间 */
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
@@ -112,7 +129,7 @@ public class ModelProvider {
     }
 
     /**
-     * 更新前刷新更新时间戳。
+     * 前刷新更新时间戳。
      */
     @PreUpdate
     void preUpdate() {

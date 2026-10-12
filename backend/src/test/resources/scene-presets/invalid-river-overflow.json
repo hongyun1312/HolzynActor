@@ -1,0 +1,6 @@
+{
+  "name": "无效预设-河流越界",
+  "scene": { "templateCode": "village", "styleCode": "hills", "size": 500 },
+  "rivers": [ { "width": 8, "path": [ [100, 100], [600, 200] ] } ],
+  "placements": [ { "assetId": "building_inn_01", "posX": 50, "posZ": 50 } ]
+}

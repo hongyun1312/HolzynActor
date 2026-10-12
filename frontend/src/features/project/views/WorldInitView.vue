@@ -1,30 +1,48 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
-  <div class="init-view">
-    <!-- 顶部栏：返回 + 标题 + 模式选择 + 开始/重新运行 -->
-    <header class="init-topbar">
-      <div class="topbar-left">
-        <el-button class="back-btn" text @click="goBack">
-          <el-icon><HIcon name="ArrowLeft" /></el-icon>&nbsp;{{ finished || failed ? '返回' : '取消' }}
-        </el-button>
-        <span class="topbar-divider"></span>
-        <div class="topbar-title">
-          <span class="init-title">世界初始化</span>
-          <span class="init-sub">独立全屏页 · 6 步自动初始化（全部 AI 自动，下方控制台实时输出后端日志）</span>
-        </div>
-      </div>
-      <div class="topbar-right">
-        <el-radio-group v-model="rebuild" size="small" :disabled="running">
-          <el-radio-button :value="false">跳过已生成（幂等）</el-radio-button>
-          <el-radio-button :value="true">全量重建</el-radio-button>
-        </el-radio-group>
-        <el-button type="primary" size="small" :loading="running" @click="start">
-          <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;{{ running ? '初始化中…' : (finished || failed ? '重新运行' : '开始初始化') }}
-        </el-button>
-      </div>
-    </header>
+  <!--
+    世界初始化：不再自绘顶栏（原 56px 独立顶栏与全站外壳重复），改用统一 AppShell（global 模式）。
+    模式选择 + 开始按钮留在顶栏（滚动时始终可见）；返回按钮走外壳 backTo（replace 回项目沙盘/新增项目页）。
+  -->
+  <AppShell
+    mode="global"
+    brand-label="世界初始化"
+    :breadcrumb="finished || failed ? '初始化完成' : '正在初始化'"
+    :show-sidebar="false"
+    :show-back="true"
+    :back-to="backTarget"
+  >
+    <template #topbar-actions>
+      <el-radio-group v-model="rebuild" size="small" :disabled="running">
+        <el-radio-button :value="false">跳过已生成（幂等）</el-radio-button>
+        <el-radio-button :value="true">全量重建</el-radio-button>
+      </el-radio-group>
+      <el-button type="primary" size="small" :loading="running" @click="start">
+        <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;{{ running ? '初始化中…' : (finished || failed ? '重新运行' : '开始初始化') }}
+      </el-button>
+    </template>
 
-    <!-- 上半屏：横向进度条 + 6 步节点 -->
-    <section class="init-progress-half">
+    <div class="content-col init-view">
+      <!-- 页头：标题 + 说明 -->
+      <PageHeader
+        title="世界初始化"
+        desc="6 步自动初始化（全部 AI 自动，下方控制台实时输出后端日志）；进入页面自动开始，默认「跳过已生成（幂等）」模式。"
+      />
+
+      <!-- 上半屏：横向进度条 + 6 步节点 -->
+      <section class="init-progress-half">
       <div class="progress-card tech-card">
         <div class="progress-title">
           <span>初始化进度</span>
@@ -44,16 +62,17 @@
       </div>
     </section>
 
-    <!-- 下半屏：控制台日志 -->
-    <section class="init-console-half">
-      <WorkflowConsole ref="consoleRef" />
-    </section>
-  </div>
+      <!-- 下半屏：控制台日志 -->
+      <section class="init-console-half">
+        <WorkflowConsole ref="consoleRef" />
+      </section>
+    </div>
+  </AppShell>
 </template>
 
 <script setup>
 /**
- * 专属世界初始化页（独立全屏，2026-08-19 新建项目解析重构）。
+ * 专属世界初始化页（独立全屏， 新建项目解析重构）。
  * <p>职责：运行世界初始化 6 步工作流（世界观地点 → 角色卡 → 字段字典与普通 NPC → 关系拓扑 →
  * 世界时间 → 知识向量化），上方 1/2 横向进度条（6 步节点显示当前进度），下方 1/2 控制台日志
  * （SSE 实时输出后端初始化日志 = 工作流进度）。</p>
@@ -65,6 +84,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { initWorkflowStream } from '@/shared/api'
 import WorkflowConsole from '@/features/gallery/components/WorkflowConsole.vue'
+import AppShell from '@/shared/layout/AppShell.vue'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -142,38 +163,22 @@ async function start() {
   }
 }
 
-/** 返回：完成/失败后回项目空间仪表盘；未开始时回新增项目页 */
-function goBack() {
-  if (finished.value || failed.value) {
-    router.replace(`/project/${projectId}/dashboard`)
-  } else {
-    router.replace('/project/new')
-  }
-}
+/**
+ * 顶栏返回目标：完成/失败后回项目空间世界沙盘（S1 项目主页）；未开始时回新增项目页。
+ * <p>由 AppShell 的 `backTo` 消费（内部用 replace，避免浏览器后退又落回本页并再次自动初始化）。</p>
+ */
+const backTarget = computed(() => (finished.value || failed.value ? `/project/${projectId}/sandbox` : '/project/new'))
 
 // 进入页面自动开始（默认「跳过已生成（幂等）」模式）
 onMounted(start)
 </script>
 
 <style scoped>
-.init-view { height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-page, #eef1f6); }
-
-/* ===== 顶部栏 ===== */
-.init-topbar {
-  height: 56px; background: var(--bg-nav); display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px; flex-shrink: 0; box-shadow: var(--shadow-lv1); z-index: 5; border-bottom: 1px solid var(--border-l1);
-}
-.topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.back-btn { color: var(--text-regular); }
-.back-btn:hover { color: var(--accent-text); background: var(--accent-soft); }
-.topbar-divider { width: 1px; height: 20px; background: var(--border-l2); }
-.topbar-title { display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
-.init-title { font-weight: 700; font-size: 1rem; color: var(--text-primary); }
-.init-sub { font-size: 0.78rem; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
-.topbar-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+/* 页面容器：外壳已提供滚动与内边距；这里只做两段式纵向布局（进度区自适应 + 控制台固定 46%） */
+.init-view { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 12px; }
 
 /* ===== 上半屏：进度条 + 节点 ===== */
-.init-progress-half { flex: 1; min-height: 0; padding: 20px 24px 10px; display: flex; flex-direction: column; }
+.init-progress-half { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .progress-card { padding: 18px 24px; flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 26px; }
 .progress-title { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text-primary); font-size: 0.95rem; }
 .init-steps { width: 100%; }
@@ -183,5 +188,5 @@ onMounted(start)
 .result-summary b { color: var(--brand-primary, #1d5cff); }
 
 /* ===== 下半屏：控制台日志 ===== */
-.init-console-half { height: 46%; min-height: 220px; padding: 0 24px 20px; flex-shrink: 0; }
+.init-console-half { height: 46%; min-height: 220px; flex-shrink: 0; }
 </style>

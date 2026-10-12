@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.entity;
 
 import jakarta.persistence.*;
@@ -5,11 +23,10 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 世界演化轮次消息实体，对应表 actor_evolution_turn（V2.1）。
+ * 世界演化轮次消息实体，对应表 actor_evolution_turn。
  * <p>职责：记录演化会话的消息流——角色对话（text/assistant）、角色行动（action）、
  * 系统环境变化（system）、事件卡片（event）；character_id NULL=系统/环境消息。
- * 与 .holzyn V2.0 events.jsonl 的 kind=system/event/action 对齐。</p>
- * <p>所属模块：model/entity（实体层-世界演化子域）</p>
+ * 与 .holzyn events.jsonl 的 kind=system/event/action 对齐。</p>
  */
 @Data
 @Entity

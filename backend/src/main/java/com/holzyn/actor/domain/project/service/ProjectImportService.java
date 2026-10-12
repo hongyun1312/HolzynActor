@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.project.service;
 
 import com.holzyn.actor.common.BizException;
@@ -10,8 +28,9 @@ import com.holzyn.actor.domain.project.vo.ProjectImportPreviewVO;
 import com.holzyn.actor.domain.project.vo.ProjectVO;
 import com.holzyn.actor.ai.AiChatRequest;
 import com.holzyn.actor.ai.AiChatResult;
-import com.holzyn.actor.ai.AiProviderRouter;
+import com.holzyn.actor.ai.spring.AiSpringChatGateway;
 import com.holzyn.actor.domain.character.service.CharacterService;
+import com.holzyn.actor.domain.debug.service.AiCallContext;
 import com.holzyn.actor.domain.project.service.ProjectService;
 import com.holzyn.actor.domain.settings.service.PromptTemplateService;
 import com.holzyn.actor.domain.usage.service.UsageLogService;
@@ -33,7 +52,6 @@ import java.util.Map;
  * <p>职责：读取用户上传的 txt/md 文本（内存解析，不落盘），按 project_import 模板让 AI
  * 结构化提取项目/世界观/角色 → 返回预览；支持「AI 自动生成角色」补齐；确认后一次事务创建
  * 项目 + 世界观 + 角色档案（角色卡由用户在设置页一键生成，成本可控）。</p>
- * <p>所属模块：service/importer（导入子域）</p>
  */
 @Slf4j
 @Service
@@ -65,7 +83,7 @@ public class ProjectImportService {
 
     /**
      * 单文件文本送入 AI 的最大长度（字符，控制 token 成本）。
-     * <p>2026-08-17 重构：原 20000 会把「大文件世界观测试文档」这类 50K+ 字符的详细文件拦腰截断
+     * <p>重构：原 20000 会把「罗小黑世界观_测试2.md」这类 50K+ 字符的详细文件拦腰截断
      * （核心 NPC 章节恰好在 2 万字之后），导致角色/细节严重丢失；提高至 60000 让整份文件进入 AI 视野。
      * 中文约 0.6~1 token/字，60K 字 ≈ 40~60K token，主流模型 128K 上下文可容纳。</p>
      */
@@ -82,7 +100,7 @@ public class ProjectImportService {
 
     private final ProjectService projectService;
     private final CharacterService characterService;
-    private final AiProviderRouter aiProviderRouter;
+    private final AiSpringChatGateway aiChatGateway;
     private final PromptTemplateService templateService;
     private final UsageLogService usageLogService;
     private final WorldLocationService worldLocationService;
@@ -91,9 +109,12 @@ public class ProjectImportService {
     /**
      * 解析上传文件：AI 结构化提取项目/世界观/角色。
      *
-     * @param userId     归属用户 ID
-     * @param fileTexts  各文件文本内容
-     * @param fileNames  各文件名
+     * @param userId 归属用户 ID
+     *
+     * @param fileTexts 各文件文本内容
+     *
+     * @param fileNames 各文件名
+     *
      * @return 预览 VO（含 hasCharacters 标记）
      */
     public ProjectImportPreviewVO parse(Long userId, List<String> fileTexts, List<String> fileNames) {
@@ -103,10 +124,14 @@ public class ProjectImportService {
     /**
      * 解析上传文件（支持进度回调，供 SSE 流式推送分阶段进度）。
      *
-     * @param userId       归属用户 ID
-     * @param fileTexts    文件文本列表
-     * @param fileNames    文件名列表
-     * @param progress     进度回调（可为 null）：done 已完成的阶段序号，total 阶段总数，label 阶段中文名，chars 当前阶段产出字数/数量
+     * @param userId 归属用户 ID
+     *
+     * @param fileTexts 文件文本列表
+     *
+     * @param fileNames 文件名列表
+     *
+     * @param progress 进度回调（可为 null）：done 已完成的阶段序号，total 阶段总数，label 阶段中文名，chars 当前阶段产出字数/数量
+     *
      * @return 预览 VO（含 hasCharacters 标记）
      */
     public ProjectImportPreviewVO parse(Long userId, List<String> fileTexts, List<String> fileNames, ImportProgress progress) {
@@ -134,14 +159,18 @@ public class ProjectImportService {
 
     /**
      * 地点提取（进度 8）：基于「原文地理章节（优先）或深化后的地理文本」，AI 识别地点并生成简介。
-     * <p>2026-08-17 重构：大文件（50K+ 字）的深化地理文本是 AI 对原文的重述，可能改写/遗漏地点名；
+     * <p>重构：大文件（50K+ 字）的深化地理文本是 AI 对原文的重述，可能改写/遗漏地点名；
      * 改为优先取原文「地理设定」章节（含原始地点名如「妖灵会馆总馆（昆仑秘境）」等），
      * 识别更忠实于源文件。失败不阻断主流程：记录 WARN 并返回空列表（世界/角色仍可正常预览创建）。</p>
      *
-     * @param userId       归属用户 ID
-     * @param geography    深化后的地理设定文本
+     * @param userId 归属用户 ID
+     *
+     * @param geography 深化后的地理设定文本
+     *
      * @param filesContent 上传文件原文（用于提取地理章节）
-     * @param progress     进度回调（可为 null）
+     *
+     * @param progress 进度回调（可为 null）
+     *
      * @return 地点列表（可能为空）
      */
     private List<ProjectImportDTO.LocationPart> extractLocations(Long userId, String geography, String filesContent, ImportProgress progress) {
@@ -169,7 +198,9 @@ public class ProjectImportService {
      * 原文无地理章节或章节过短（&lt;200 字）时回退深化后的地理文本。
      *
      * @param filesContent 上传文件原文
-     * @param geography    深化后的地理设定文本（回退源）
+     *
+     * @param geography 深化后的地理设定文本（回退源）
+     *
      * @return 用于 AI 提取的地理文本（可能为空）
      */
     private String resolveLocationSource(String filesContent, String geography) {
@@ -200,7 +231,8 @@ public class ProjectImportService {
                 AiChatRequest req = new AiChatRequest(null, List.of(
                         new AiChatRequest.ChatMessage("system", "你只输出严格的 JSON，不输出任何其他文字。"),
                         new AiChatRequest.ChatMessage("user", prompt)), 0.3, WORLD_MAX_TOKENS, true);
-                AiChatResult result = aiProviderRouter.chatCompletion(userId, null, null, req);
+                AiChatResult result = AiCallContext.run("import", null, () ->
+                        aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "import",
                         result.promptTokens(), result.completionTokens(),
                         result.cacheHitTokens(), result.cacheMissTokens(),
@@ -252,7 +284,8 @@ public class ProjectImportService {
                 AiChatRequest req = new AiChatRequest(null, List.of(
                         new AiChatRequest.ChatMessage("system", "你只输出严格的 JSON，不输出任何其他文字。"),
                         new AiChatRequest.ChatMessage("user", prompt)), 0.3, CHAR_MAX_TOKENS, true);
-                AiChatResult result = aiProviderRouter.chatCompletion(userId, null, null, req);
+                AiChatResult result = AiCallContext.run("import", null, () ->
+                        aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "import",
                         result.promptTokens(), result.completionTokens(),
                         result.cacheHitTokens(), result.cacheMissTokens(),
@@ -280,10 +313,14 @@ public class ProjectImportService {
      * 分阶段逐字段生成世界观详细内容（地理/势力/规则/文化/历史/自由文本）。
      * 每个字段独立一次 AI 调用（单字段 1000+ 字不易截断），失败字段用程序化兜底保证 ≥1000 字。
      *
-     * @param userId       归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param filesContent 上传文件原文
-     * @param project      项目部分
-     * @param world        世界观初稿（含各字段简要内容）
+     *
+     * @param project 项目部分
+     *
+     * @param world 世界观初稿（含各字段简要内容）
+     *
      * @return 深化后的世界观（每个详细字段 ≥1000 字，freeText 汇总 2000 字内）
      */
     private ProjectImportDTO.WorldPart generateWorldFields(Long userId, String filesContent,
@@ -310,14 +347,22 @@ public class ProjectImportService {
     /**
      * 生成单个世界观字段（独立 AI 调用，重试≤2；失败或不足时程序化兜底保证 ≥1000 字）。
      *
-     * @param userId       归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param filesContent 上传文件原文（截断控制 token）
-     * @param fieldLabel   字段中文名（日志/模板用）
-     * @param fieldKey     字段英文键
-     * @param current      已有初稿
-     * @param projectName  项目名
-     * @param worldName    世界观名
-     * @param requirement  模板中的字数要求
+     *
+     * @param fieldLabel 字段中文名（日志/模板用）
+     *
+     * @param fieldKey 字段英文键
+     *
+     * @param current 已有初稿
+     *
+     * @param projectName 项目名
+     *
+     * @param worldName 世界观名
+     *
+     * @param requirement 模板中的字数要求
+     *
      * @return 生成后的字段内容
      */
     private String generateWorldField(Long userId, String filesContent, String fieldLabel, String fieldKey,
@@ -335,7 +380,8 @@ public class ProjectImportService {
                 AiChatRequest req = new AiChatRequest(null, List.of(
                         new AiChatRequest.ChatMessage("system", "你只输出严格的 JSON，不输出任何其他文字。"),
                         new AiChatRequest.ChatMessage("user", prompt)), 0.3, WORLD_MAX_TOKENS, true);
-                AiChatResult result = aiProviderRouter.chatCompletion(userId, null, null, req);
+                AiChatResult result = AiCallContext.run("import", null, () ->
+                        aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "import",
                         result.promptTokens(), result.completionTokens(),
                         result.cacheHitTokens(), result.cacheMissTokens(),
@@ -382,10 +428,14 @@ public class ProjectImportService {
     /**
      * 程序化兜底：基于已有内容 + 主题模板句扩展，保证达到最小长度（AI 不可用时保证功能可用）。
      *
-     * @param base        已有初稿（可为空）
+     * @param base 已有初稿（可为空）
+     *
      * @param projectName 项目名
-     * @param worldName   世界观名
-     * @param fieldLabel  字段中文名
+     *
+     * @param worldName 世界观名
+     *
+     * @param fieldLabel 字段中文名
+     *
      * @return 扩展后的文本（≥1000 字）
      */
     static String padWorldField(String base, String projectName, String worldName, String fieldLabel) {
@@ -421,8 +471,10 @@ public class ProjectImportService {
      * 按段落/句子边界截断（不腰斩句子）：在 max 内找最后一个换行/句号/问号/感叹号/句点收尾。
      * <p>用于 AI 输出超长时兜底，保证截断后内容相对完整（保留完整句子，不从中腰斩）。</p>
      *
-     * @param s   原文本
+     * @param s 原文本
+     *
      * @param max 最大长度（字符）
+     *
      * @return 收尾后的文本（≤max，尽量保留完整句子）
      */
     static String truncateByParagraph(String s, int max) {
@@ -463,7 +515,9 @@ public class ProjectImportService {
      * 导致深化生成的字段与源文件严重脱节；章节感知抽取可让每个字段基于原文对应部分生成。</p>
      *
      * @param filesContent 上传文件原文
-     * @param fieldKey     字段键：geography/factions/magicSystem/culture/history/freeText
+     *
+     * @param fieldKey 字段键：geography/factions/magicSystem/culture/history/freeText
+     *
      * @return 送入 AI 的原文片段（≤SECTION_MAX，freeText ≤FREE_TEXT_SOURCE_MAX）
      */
     private String resolveFieldSource(String filesContent, String fieldKey) {
@@ -476,12 +530,14 @@ public class ProjectImportService {
 
     /**
      * 从世界观 Markdown 原文中按标题切分章节，并按字段关键词选取最相关的章节文本（拼接）。
-     * <p>2026-08-17 新增（大文件适配）：用于分阶段字段深化与地点提取的输入源。
+     * <p>（大文件适配）：用于分阶段字段深化与地点提取的输入源。
      * 选取规则：标题命中关键词权重更高（+2），正文命中较低（+1）；自由文本字段直接返回文件整体。
      * 未命中任何章节或命中内容过短（&lt;300 字）时回退文件头部，保证旧文件行为不变。</p>
      *
-     * @param content  世界观原文（可为空）
+     * @param content 世界观原文（可为空）
+     *
      * @param fieldKey 字段键：geography/factions/magicSystem/culture/history/freeText
+     *
      * @return 相关章节拼接文本（≤SECTION_MAX，可能为空）
      */
     static String extractSection(String content, String fieldKey) {
@@ -516,9 +572,10 @@ public class ProjectImportService {
     }
 
     /**
-     * 按 Markdown 标题（#~######）切分章节：返回每个「标题行 + 正文」的块。
+     * 按 Markdown 标题 切分章节：返回每个「标题行 + 正文」的块。
      *
      * @param content 世界观原文
+     *
      * @return 章节块列表（每个块以标题行开头；无标题行时返回空列表）
      */
     static List<String> splitSections(String content) {
@@ -527,7 +584,7 @@ public class ProjectImportService {
             return out;
         }
         // 统一换行符：Windows 文件为 \r\n，若保留 \r 会导致标题行形如 "## 地理设定\r"，
-        // Java 正则 . 不匹配 \r（行终止符），标题检测全部失败 → 误判无标题/漏分段（2026-08-19 修复）
+        // Java 正则 . 不匹配 \r（行终止符），标题检测全部失败 → 误判无标题/漏分段
         content = content.replace("\r\n", "\n").replace('\r', '\n');
         String[] lines = content.split("\n", -1);
         StringBuilder cur = new StringBuilder();
@@ -599,8 +656,11 @@ public class ProjectImportService {
      * 从模型输出文本解析角色数组（增强容错：剥离说明文字/代码块，readTree 失败时清洗尾部逗号重试）。
      *
      * @param content 模型输出文本
-     * @param mapper  JSON 解析器
+     *
+     * @param mapper JSON 解析器
+     *
      * @return 角色档案列表
+     *
      * @throws Exception JSON 无法解析时抛出（由外层重试）
      */
     static List<ProjectImportDTO.CharacterPart> parseCharacterArrayText(String content, ObjectMapper mapper) throws Exception {
@@ -627,10 +687,14 @@ public class ProjectImportService {
     /**
      * AI 自动生成符合世界观的角色档案（供预览「AI 自动生成」补充）。
      *
-     * @param userId        归属用户 ID
-     * @param projectName   项目名（可空）
+     * @param userId 归属用户 ID
+     *
+     * @param projectName 项目名（可空）
+     *
      * @param worldFreeText 世界观自由文本（可空）
-     * @param count         生成数量（默认 5，1-20，由用户在前端指定）
+     *
+     * @param count 生成数量（默认 5，1-20，由用户在前端指定）
+     *
      * @return 角色档案列表
      */
     public List<ProjectImportDTO.CharacterPart> generateCharacters(Long userId, String projectName,
@@ -657,7 +721,8 @@ public class ProjectImportService {
                         new AiChatRequest.ChatMessage("system", "你只输出严格的 JSON，不输出任何其他文字。"),
                         new AiChatRequest.ChatMessage("user", prompt)), 0.8, GEN_MAX_TOKENS, true);
                 long startMs = System.currentTimeMillis();
-                AiChatResult result = aiProviderRouter.chatCompletion(userId, null, null, req);
+                AiChatResult result = AiCallContext.run("import", null, () ->
+                        aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "import",
                         result.promptTokens(), result.completionTokens(),
                         result.cacheHitTokens(), result.cacheMissTokens(),
@@ -678,7 +743,9 @@ public class ProjectImportService {
      * 确认创建：一次事务创建项目 + 世界观 + 角色档案。
      *
      * @param userId 归属用户 ID
-     * @param dto    确认后的完整结构（项目/世界观/角色）
+     *
+     * @param dto 确认后的完整结构（项目/世界观/角色）
+     *
      * @return 创建后的项目 VO
      */
     @Transactional
@@ -719,7 +786,8 @@ public class ProjectImportService {
                 CharacterDTO charDto = new CharacterDTO(
                         ch.type() == null || ch.type().isBlank() ? "special" : ch.type(),
                         truncate(ch.name(), 50), truncate(ch.title(), 50), truncate(ch.detail(), 20000),
-                        null, Integer.valueOf(1).equals(ch.isProtagonist()) ? 1 : 0, Math.max(1, Math.min(5, importance)));
+                        null, Integer.valueOf(1).equals(ch.isProtagonist()) ? 1 : 0, Math.max(1, Math.min(5, importance)),
+                        null);
                 characterService.create(project.id(), charDto);
                 charCount++;
             }
@@ -750,7 +818,9 @@ public class ProjectImportService {
      * 组装送入 AI 的文件内容（含文件名分隔，控制长度）。
      *
      * @param fileTexts 各文件文本
+     *
      * @param fileNames 各文件名
+     *
      * @return 拼接文本
      */
     private String buildFilesContent(List<String> fileTexts, List<String> fileNames) {
@@ -772,8 +842,10 @@ public class ProjectImportService {
     /**
      * 解析 AI 输出为预览 VO。
      *
-     * @param content   模型输出
+     * @param content 模型输出
+     *
      * @param fileNames 文件名列表
+     *
      * @return 预览 VO
      */
     static ProjectImportPreviewVO parsePreview(String content, List<String> fileNames, ObjectMapper mapper) {
@@ -811,6 +883,7 @@ public class ProjectImportService {
      * 解析角色数组（JSON 数组节点或整体为数组的文本）。
      *
      * @param node JSON 节点（数组）
+     *
      * @return 角色档案列表（跳过无姓名项）
      */
     static List<ProjectImportDTO.CharacterPart> parseCharacterArray(JsonNode node) {
@@ -836,7 +909,9 @@ public class ProjectImportService {
      * 世界观名解析：worldName 为空时回退项目名（保证 WorldSettingDTO.name 非空）。
      *
      * @param projectName 项目名
-     * @param worldName   世界观名（可空）
+     *
+     * @param worldName 世界观名（可空）
+     *
      * @return 有效世界观名
      */
     static String resolveWorldName(String projectName, String worldName) {
@@ -847,6 +922,7 @@ public class ProjectImportService {
      * 去掉文件扩展名。
      *
      * @param name 文件名
+     *
      * @return 去扩展名后的基名
      */
     static String stripExt(String name) {
@@ -857,8 +933,10 @@ public class ProjectImportService {
     /**
      * 字符串截断。
      *
-     * @param s   原字符串
+     * @param s 原字符串
+     *
      * @param max 最大长度
+     *
      * @return 截断结果（null 归一为空串）
      */
     private String truncate(String s, int max) {
@@ -873,6 +951,7 @@ public class ProjectImportService {
      * 生成失败的用户友好提示。
      *
      * @param e 异常
+     *
      * @return 中文提示
      */
     private String friendlyError(Exception e) {
@@ -893,9 +972,12 @@ public class ProjectImportService {
         /**
          * 阶段进度通知。
          *
-         * @param done  已完成的阶段序号（1 开始）
+         * @param done 已完成的阶段序号（1 开始）
+         *
          * @param total 阶段总数
+         *
          * @param label 阶段中文名（如 地理设定/角色提取）
+         *
          * @param chars 当前阶段产出字数（角色阶段为角色数量）
          */
         void onProgress(int done, int total, String label, int chars);

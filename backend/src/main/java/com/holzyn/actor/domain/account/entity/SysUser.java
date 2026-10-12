@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.account.entity;
 
 import jakarta.persistence.*;
@@ -7,8 +25,7 @@ import java.time.LocalDateTime;
 /**
  * 系统用户实体。
  * <p>职责：存储用户信息，与 Casdoor 身份平台同步（casdoorUserId 关联）。
- * P5 扩展：新增昵称/手机号/个人简介/实名状态/管理员标记/更新时间，支撑用户中心「基本资料」与权限控制。</p>
- * <p>模块：门户-账号</p>
+ * 扩展：新增昵称/手机号/个人简介/实名状态/管理员标记/更新时间，支撑用户中心「基本资料」与权限控制。</p>
  */
 @Data
 @Entity
@@ -44,7 +61,7 @@ public class SysUser {
     private Boolean isAdmin = false;
     @Column(name = "create_time")
     private LocalDateTime createTime;
-    /** 更新时间（资料/状态变更自动维护） */
+    /** 时间（资料/状态变更自动维护） */
     @Column(name = "update_time")
     private LocalDateTime updateTime;
 

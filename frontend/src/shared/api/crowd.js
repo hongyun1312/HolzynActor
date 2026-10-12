@@ -1,7 +1,27 @@
-// 普通型 NPC 功能域 API（2026-08-19 分类体系重构后：单表 CRUD / 标准字段字典 / AI 生成 / 调度 / 环境摘要 / 关系）
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// 普通型 NPC 功能域 API（分类体系重构后：单表 CRUD / 标准字段字典 / AI 生成 / 调度 / 环境摘要 / 关系）
 import http from './http'
 // 关系生成/入库复用角色功能域（scope=crowd 单普通 NPC / scope=project 全部；关系写 actor_character_relation）
 import { generateCharacterRelations, batchSaveCharacterRelations } from './character'
+// ：SSE 流统一客户端（fetch + ReadableStream 解析/错误分类统一）
+import { streamFetch, SSE_EVENTS } from '@/shared/sse/sseClient'
 
 // ===== 普通型 NPC CRUD / 筛选 / 排序 / 分页 =====
 /**
@@ -13,13 +33,13 @@ import { generateCharacterRelations, batchSaveCharacterRelations } from './chara
 export const fetchOrdinaryNpcs = (projectId, params) => http.get(`/api/projects/${projectId}/ordinary-npcs`, { params })
 // 手动新增单个
 export const createOrdinaryNpc = (projectId, data) => http.post(`/api/projects/${projectId}/ordinary-npcs`, data)
-// 修改单个
+// 单个
 export const updateOrdinaryNpc = (id, data) => http.put(`/api/ordinary-npcs/${id}`, data)
 // 删除单个
 export const deleteOrdinaryNpc = (id) => http.delete(`/api/ordinary-npcs/${id}`)
 // 批量删除（body: { ids: [...] }）
 export const batchDeleteOrdinaryNpcs = (projectId, ids) => http.post(`/api/projects/${projectId}/ordinary-npcs/batch-delete`, { ids })
-// 统计：{ total, primaryField, secondaryField, byPrimary, bySecondary, byAffiliation }
+//
 export const fetchOrdinaryNpcStats = (projectId) => http.get(`/api/projects/${projectId}/ordinary-npcs/stats`)
 
 // ===== 标准字段数据（字段字典：race 种族[含次级种族] / affiliation 归属 / occupation 职业，含出处） =====
@@ -37,61 +57,34 @@ export const deleteFieldDictEntry = (projectId, field, l1, l2) =>
 
 // ===== AI 生成 / 入库 =====
 /**
- * AI 分批生成普通型 NPC（原生 fetch + ReadableStream 流式消费，对齐地点提取 SSE；无超时）。
+ * AI 分批生成普通型 NPC（：统一 streamFetch + ReadableStream 流式消费；无超时）。
  * 事件：start(count,batchSize) / npc(draft) / done(total,generated,failedBatches) / error(message)。
  * 生成结果仅作预览，确认后走 batchSaveOrdinaryNpcs 入库；字段从字段字典/地点表选取，不含关系。
  *
  * @param projectId 项目 ID
- * @param count     生成数量（1~500）
- * @param handlers  事件回调：{ onStart, onNpc, onDone, onError }
+ *
+ * @param count 生成数量（1~500）
+ *
+ * @param handlers 事件回调：{ onStart, onNpc, onDone, onError }
  */
 export const generateOrdinaryNpcsStream = async (projectId, count, handlers = {}) => {
-  const res = await fetch(`/api/projects/${projectId}/ordinary-npcs/generate/stream`, {
+  const { promise } = streamFetch({
+    url: `/api/projects/${projectId}/ordinary-npcs/generate/stream`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ count })
-  })
-  if (!res.ok || !res.body) {
-    let msg = 'AI 生成失败'
-    try { msg = (await res.json())?.message || msg } catch (_) { /* 忽略 */ }
-    throw new Error(msg)
-  }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let finished = false
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() || ''
-    for (const part of parts) {
-      let event = ''
-      let data = ''
-      for (const line of part.split('\n')) {
-        if (line.startsWith('event:')) event = line.slice(6).trim()
-        else if (line.startsWith('data:')) data += line.slice(5).trim()
-      }
-      if (event === 'start') {
-        try { handlers.onStart?.(JSON.parse(data)) } catch (_) { /* 忽略 */ }
-      } else if (event === 'npc') {
-        try {
-          const d = JSON.parse(data)
-          handlers.onNpc?.(d)
-        } catch (_) { /* 忽略单条解析失败 */ }
-      } else if (event === 'done') {
-        finished = true
-        try { handlers.onDone?.(JSON.parse(data)) } catch (_) { handlers.onDone?.({}) }
-      } else if (event === 'error') {
-        let msg = 'AI 生成失败'
-        try { msg = JSON.parse(data)?.message || msg } catch (_) { /* 忽略 */ }
-        handlers.onError?.(msg)
-        return
-      }
+    body: JSON.stringify({ count }),
+    onEvent: (name, data) => {
+      if (name === SSE_EVENTS.START) handlers.onStart?.(data)
+      else if (name === SSE_EVENTS.NPC) handlers.onNpc?.(data)
+      else if (name === SSE_EVENTS.DONE) handlers.onDone?.(data || {})
+    },
+    onError: (err) => {
+      const msg = (err && err.kind === 'event' && err.data && err.data.message)
+        ? err.data.message : (err && err.message) || 'AI 生成失败'
+      handlers.onError?.(msg)
     }
-    if (finished) break
-  }
+  })
+  await promise
 }
 
 // 预览确认后批量入库（body: [draft...]）

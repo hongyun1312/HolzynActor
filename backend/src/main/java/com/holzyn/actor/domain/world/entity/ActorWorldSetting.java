@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.entity;
 
 import jakarta.persistence.*;
@@ -8,7 +26,6 @@ import java.time.LocalDateTime;
  * 世界观设定实体，对应表 actor_world_setting。
  * <p>职责：存储项目的世界观设定——结构化字段（题材/时代/地理/势力/规则/文化/历史）
  * 与自由长文本（freeText，作为后续知识库注入源），支持按版本迭代。</p>
- * <p>所属模块：model/entity（实体层）</p>
  */
 @Data
 @Entity
@@ -63,14 +80,35 @@ public class ActorWorldSetting {
     @Column(name = "free_text", columnDefinition = "LONGTEXT")
     private String freeText;
 
+    /**
+     * 世界常识摘要（AI 生成的 300-500 字精炼常识，V2.0 段 1A 稳定世界观注入源）。
+     * <p>定位：该世界角色都知道的世界常识（世界格局/主要聚居地/势力与规则/日常文化风俗的
+     * 精炼总览），不罗列全部设定、不截断原文——由 {@code WorldCommonKnowledgeService} 在
+     * worldgen 落库 / 手动保存后 / 定期扫描时依最新世界观生成并更新；空=未生成，
+     * {@code AiContextInjector.worldBrief} 回退结构化字段截断拼装。</p>
+     */
+    @Column(name = "common_knowledge", columnDefinition = "TEXT")
+    private String commonKnowledge;
+
+    /** 世界常识摘要生成时间（定期扫描据此判断世界观更新后是否需重新生成；空=从未生成） */
+    @Column(name = "common_knowledge_at")
+    private LocalDateTime commonKnowledgeAt;
+
     /** 状态：0草稿/1生效 */
     private Integer status = 0;
+
+    /**
+     * 来源 worldgen 任务 ID（：工作流世界观生成「确认落库」时写入，供世界详情展示
+     * 「来源=worldgen + 可回看」标记；手动/解析/导入保存会清空——标记当前版本世界观来源）
+     */
+    @Column(name = "worldgen_task_id")
+    private Long worldgenTaskId;
 
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    /** 更新时间 */
+    /** 时间 */
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
@@ -87,7 +125,7 @@ public class ActorWorldSetting {
     }
 
     /**
-     * 更新前回调：刷新更新时间。
+     * 前回调：刷新更新时间。
      */
     @PreUpdate
     void preUpdate() {

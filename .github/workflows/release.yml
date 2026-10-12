@@ -1,0 +1,100 @@
+# HolzynActor 发布（Release）—— 打 v* 标签触发
+# 在 windows-latest 上：构建前端 → 同步 static → 后端 fat jar → jlink 裁剪 JRE
+# → electron-builder（NSIS 安装版 + 便携版）→ 上传 Release 资产。
+# 版本号取自标签（v1.0.0 → 1.0.0），同步写入 desktop/package.json 与产物名。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  package-windows:
+    name: Package · Windows x64 desktop app
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontends
+        shell: pwsh
+        run: |
+          cd frontend
+          npm install
+          npm run build
+          cd ..
+          cd debug-frontend
+          npm install
+          npm run build
+          cd ..
+
+      - name: Sync dist into backend static
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force backend/src/main/resources/static/assets -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force frontend/dist/* backend/src/main/resources/static/
+          Remove-Item -Recurse -Force backend/src/main/resources/static/debug -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force debug-frontend/dist/* backend/src/main/resources/static/debug/
+          Remove-Item -Recurse -Force backend/target/classes/static -ErrorAction SilentlyContinue
+
+      - name: Package backend fat jar
+        run: mvn -B -ntp -f backend/pom.xml -Dmaven.test.skip=true clean package
+
+      - name: Generate trimmed JRE runtime (jlink)
+        shell: cmd
+        run: call packaging\make-runtime.bat
+
+      - name: Align desktop version from git tag
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME -replace '^v', ''
+          if (-not $ver) { $ver = '1.0.0' }
+          $p = Get-Content desktop/package.json -Raw
+          $p = $p -replace '"version"\s*:\s*"[^"]+"', "`"version`": `"$ver`""
+          Set-Content -Path desktop/package.json -Value $p -Encoding utf8
+          Write-Output "desktop version = $ver"
+
+      - name: Install desktop deps (electron + electron-builder)
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      - name: electron-builder (NSIS installer + portable)
+        working-directory: desktop
+        run: npx electron-builder --win nsis portable
+
+      - name: List artifacts
+        shell: pwsh
+        run: Get-ChildItem desktop/release -Recurse -File | Select-Object Name, Length
+
+      - name: Upload artifacts (workflow)
+        uses: actions/upload-artifact@v4
+        with:
+          name: HolzynActor-windows-x64
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+          generate_release_notes: true

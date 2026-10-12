@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="wf-console">
     <!-- 控制台头部：标题 + 复制/清空 -->
@@ -22,7 +35,7 @@
 
 <script setup>
 /**
- * 工作流控制台日志组件（2026-08-19 新建项目解析 / 世界初始化）。
+ * 工作流控制台日志组件（新建项目解析 / 世界初始化）。
  * <p>职责：以「深色终端」风格实时展示后端工作流日志（SSE log 事件逐行追加，
  * 自动滚动到底部），支持复制 / 清空；供「文件解析」「世界初始化」两个页面复用。</p>
  * <p>事件约定：line={level: 'info'|'warn'|'error'|'success', message, time}。</p>
@@ -34,13 +47,13 @@ const lines = ref([])      // 日志行列表
 const bodyRef = ref(null)  // 日志区容器（自动滚动）
 const running = ref(false) // 是否正在输出（头部小字提示）
 
-/** 追加一行日志并自动滚动到底部 */
+/** 一行日志并自动滚动到底部 */
 function push(line) {
   lines.value.push(line)
   autoScroll()
 }
 
-/** 追加多行（批量）并自动滚动 */
+/** 多行（批量）并自动滚动 */
 function pushAll(items) {
   if (items && items.length) {
     lines.value.push(...items)

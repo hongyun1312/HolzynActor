@@ -1,15 +1,31 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="model-api-view" :class="{ embedded }">
-    <!-- 页面标题与新增入口 -->
-    <div class="page-header">
-      <div>
-        <div class="page-title">模型 API 设置</div>
-        <div v-if="!embedded" class="page-desc">{{ pageDesc }}</div>
-      </div>
-      <el-button type="primary" @click="openCreate">
-        <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增 API
-      </el-button>
-    </div>
+    <!-- 页面标题与新增入口。嵌入设置弹窗时标题区隐藏（由弹窗标题 + Tab 标签承担），
+         但仍保留右侧「新增 API」操作区（不能随标题一起消失）。 -->
+    <PageHeader
+      :class="{ 'is-embedded-ops': embedded }"
+      title="模型 API 设置"
+      :desc="embedded ? '' : pageDesc"
+    >
+      <template #actions>
+        <el-button type="primary" @click="openCreate">
+          <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增 API
+        </el-button>
+      </template>
+    </PageHeader>
 
     <!-- API 列表 -->
     <div class="table-card">
@@ -74,7 +90,7 @@
       </el-table>
     </div>
 
-    <!-- 新增/编辑对话框 -->
+    <!-- /编辑对话框 -->
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑 API' : '新增 API'" width="560px" :close-on-click-modal="false">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="名称" prop="name">
@@ -123,7 +139,7 @@
 
 <script setup>
 /**
- * 模型 API 配置页（P1，V2.0 项目化；2026-08-19 项目空间合并展示用户级 API）。
+ * 模型 API 配置页。
  * <p>职责：用户级/项目级 AI 模型 API 的列表 / 新增 / 编辑 / 删除 / 设为默认 / 连通性测试。
  * 通过 projectId prop 指定归属：传入=项目级配置（随 .holzyn 包导入导出），不传=用户级默认。
  * <b>项目空间双级合并展示</b>：projectId 传入时，同一张表合并展示「项目级（本页新建/设默认）+
@@ -138,6 +154,7 @@ import {
   fetchModelApis, createModelApi, updateModelApi, deleteModelApi,
   setDefaultModelApi, testModelApi, testSavedModelApi
 } from '@/shared/api'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 // 归属项目：传入=项目级配置（项目空间，合并展示用户级）；不传=用户级默认（全局设置）
 // embedded：内嵌到设置弹窗（GlobalSettingsDialog）中使用，隐藏页面级描述、紧凑头部，与其它弹窗 UI 一致
@@ -175,9 +192,11 @@ const rules = {
 /** 行是否为用户级（来源标记用；全局模式下无标记字段视为非用户行） */
 function isUserRow(row) { return row._scope === 'user' }
 
-/** 行所属归属 projectId（行级操作按行自己的作用域路由）。
- *  项目模式行都已打标：项目行=项目 id，用户行=null（保持 null 路由到用户级，不能回退到项目）；
- *  全局模式行未打标（_projectId 为 undefined）→ 用 props.projectId（本就是 null=用户级）。 */
+/**
+ * 行所属归属 projectId（行级操作按行自己的作用域路由）。
+ * 项目模式行都已打标：项目行=项目 id，用户行=null（保持 null 路由到用户级，不能回退到项目）；
+ * 全局模式行未打标（_projectId 为 undefined）→ 用 props.projectId（本就是 null=用户级）。
+ */
 function rowProjectId(row) {
   return row._projectId !== undefined ? row._projectId : props.projectId
 }
@@ -239,7 +258,6 @@ function openEdit(row) {
  * 行数据 → 用途类型（旧数据无 purpose 时按 embeddingEnabled 推导）。
  *
  * @param {Object} row 表格行数据
- * @returns {string} chat / embedding / both
  */
 function purposeOf(row) {
   if (row.purpose === 'embedding' || row.purpose === 'both' || row.purpose === 'chat') return row.purpose
@@ -352,6 +370,7 @@ async function handleTestInForm() {
  * 时间格式化（后端返回 yyyy-MM-dd HH:mm:ss）。
  *
  * @param {string} v 原始时间字符串
+ *
  * @returns {string} 格式化时间
  */
 function formatTime(v) {
@@ -365,12 +384,13 @@ onMounted(loadList)
 .model-api-view { max-width: 1200px; margin: 0 auto; }
 /* 内嵌到设置弹窗：去掉页面级最大宽度限制、压缩头部与表格卡片内边距 */
 .model-api-view.embedded { max-width: none; }
+/* 嵌入设置弹窗时的紧凑页头（页头基础样式由全局类/PageHeader 提供） */
 .model-api-view.embedded .page-header { margin-bottom: 12px; }
 .model-api-view.embedded .page-title { font-size: 1.05rem; }
+/* 内嵌模式：只保留操作区（新增 API），标题/说明由弹窗标题与 Tab 标签承担 */
+.model-api-view.embedded .page-header.is-embedded-ops :deep(.ph-main) { display: none; }
+.model-api-view.embedded .page-header.is-embedded-ops { justify-content: flex-end; }
 .model-api-view.embedded .table-card { padding: 4px; }
-.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-.page-title { font-size: 1.3rem; font-weight: 700; color: var(--text-primary); }
-.page-desc { font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px; max-width: 760px; line-height: 1.6; }
 .table-card { background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 8px; }
 .api-name { font-weight: 600; color: var(--text-primary); }
 .default-tag { margin-left: 6px; }

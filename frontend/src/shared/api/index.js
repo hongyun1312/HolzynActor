@@ -1,9 +1,27 @@
-// ============================================================
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+//
 // 前端 API 聚合入口（共享层）
-// 按功能域拆分到各模块：account / project / world / character /
+// 按功能域拆分到各
 // conversation / crowd / knowledge / memory / settings / misc。
 // 本文件统一 re-export，保持「从 @/shared/api 导入」的既有写法兼容。
-// ============================================================
+//
 export { default as http } from './http'
 
 // 本地账户
@@ -28,3 +46,19 @@ export * from './settings'
 export * from './misc'
 // 新建项目工作流（文件解析 / 世界初始化，SSE）
 export * from './workflow'
+// 工作流世界观生成
+export * from './worldgen'
+// 世界沙盘（S1：沙盘总览/场景/状态 + 上次项目记录）
+export * from './sandbox'
+// 项目记忆
+export * from './worldMemory'
+// 决策与协调
+export * from './decision'
+// 遗传婚育谱系
+export * from './lineage'
+// 观测域只读聚合（AI 运行时状态 / 全局搜索）
+export * from './observability'
+// 世界图谱（六维单域 + 三种聚合视角，只读）
+export * from './worldGraph'
+// 新首页（M4：2D 世界地图双主角并置）数据源统一出口
+export * from './home'

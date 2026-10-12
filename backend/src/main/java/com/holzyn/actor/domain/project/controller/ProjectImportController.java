@@ -1,6 +1,25 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.project.controller;
 
 import com.holzyn.actor.common.BizException;
+import com.holzyn.actor.common.sse.SseLifecycle;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
 import com.holzyn.actor.common.R;
 import com.holzyn.actor.domain.project.dto.ProjectImportDTO;
@@ -33,7 +52,6 @@ import java.util.concurrent.Executors;
  * 文件导入建项目控制器。
  * <p>职责：提供上传解析（multipart 多文件 txt/md）、AI 自动生成角色、确认创建三类接口；
  * 文件仅读取文本内存解析，不落盘存储；归属一律以当前会话用户为准。</p>
- * <p>所属模块：controller/importer（导入子域）</p>
  */
 @RestController
 @RequestMapping("/api/projects/import")
@@ -53,10 +71,14 @@ public class ProjectImportController {
     /** JSON 序列化器（SSE 事件数据） */
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** SSE 生命周期统一工具（：统一超时/心跳/清理/事件名） */
+    private final com.holzyn.actor.common.sse.SseLifecycle sseLifecycle;
+
     /**
      * 上传并解析文件：AI 结构化提取项目/世界观/角色，返回预览。
      *
      * @param files 多文件（txt/md，单文件 ≤5MB）
+     *
      * @return 预览 VO
      */
     @PostMapping("/parse")
@@ -97,12 +119,13 @@ public class ProjectImportController {
      * <p>前端用 fetch + ReadableStream 消费；进度：1 世界观初稿 / 2-6 五大字段 / 7 自由文本 / 8 角色提取。</p>
      *
      * @param files 多文件（txt/md，单文件 ≤5MB）
+     *
      * @return SSE 事件流（text/event-stream）
      */
     @PostMapping(value = "/parse/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter parseStream(@RequestParam("files") MultipartFile[] files) {
-        // 不限时：程序持续输出即可一直等待（贴合「只要还在正常输出就重置超时」）
-        SseEmitter emitter = new SseEmitter(0L);
+        // 不限时：程序持续输出即可一直等待（贴合「只要还在正常输出就重置超时」）； 统一工具创建
+        SseEmitter emitter = sseLifecycle.create(0L, 0L, null);
         // 关键：必须在请求线程获取 userId（SecurityContext 是 ThreadLocal，不会自动传入异步线程）
         Long userId = currentUserProvider.currentUserId();
         parseExecutor.execute(() -> {
@@ -134,7 +157,7 @@ public class ProjectImportController {
                 if (texts.isEmpty()) {
                     throw new BizException(400, "未读取到有效文件内容");
                 }
-                // 进度回调：每完成一个阶段推送 progress 事件
+                // 进度回调：每完成一个阶段推送 progress 事件（统一常量）
                 ProjectImportService.ImportProgress progress = (done, total, label, chars) -> {
                     try {
                         Map<String, Object> data = new LinkedHashMap<>();
@@ -142,26 +165,30 @@ public class ProjectImportController {
                         data.put("total", total);
                         data.put("label", label);
                         data.put("chars", chars);
-                        emitter.send(SseEmitter.event().name("progress")
-                                .data(objectMapper.writeValueAsString(data), MediaType.APPLICATION_JSON));
+                        sseLifecycle.sendJson(emitter, SseLifecycle.EVENT_PROGRESS,
+                                objectMapper.writeValueAsString(data));
                     } catch (Exception e) {
                         log.warn("[文件导入-SSE] 进度推送失败: {}", e.getMessage());
                     }
                 };
                 ProjectImportPreviewVO preview = importService.parse(userId, texts, names, progress);
-                emitter.send(SseEmitter.event().name("result")
-                        .data(objectMapper.writeValueAsString(preview), MediaType.APPLICATION_JSON));
+                sseLifecycle.sendJson(emitter, SseLifecycle.EVENT_RESULT,
+                        objectMapper.writeValueAsString(preview));
                 emitter.complete();
             } catch (Exception e) {
                 try {
                     Map<String, Object> err = new LinkedHashMap<>();
                     err.put("message", e.getMessage() == null ? "解析失败" : e.getMessage());
-                    emitter.send(SseEmitter.event().name("error")
-                            .data(objectMapper.writeValueAsString(err), MediaType.APPLICATION_JSON));
+                    sseLifecycle.sendJson(emitter, SseLifecycle.EVENT_ERROR,
+                            objectMapper.writeValueAsString(err));
                 } catch (Exception ex) {
                     log.warn("[文件导入-SSE] 错误推送失败: {}", ex.getMessage());
                 }
-                emitter.complete();
+                try {
+                    emitter.complete();
+                } catch (Exception ignored) {
+                    // 已完成/断开，忽略
+                }
             }
         });
         return emitter;
@@ -170,7 +197,6 @@ public class ProjectImportController {
     /**
      * AI 自动生成符合世界观的角色档案（预览「AI 自动生成」补充）。
      *
-     * @param body 请求体：{projectName?, worldSettingFreeText?, count?}
      * @return 角色档案列表
      */
     @PostMapping("/characters/generate")
@@ -185,6 +211,7 @@ public class ProjectImportController {
      * 确认创建：一次事务创建项目 + 世界观 + 角色档案。
      *
      * @param dto 确认后的完整结构
+     *
      * @return 创建后的项目 VO
      */
     @PostMapping("/confirm")
@@ -196,6 +223,7 @@ public class ProjectImportController {
      * 判断是否为文本文件（txt/md/markdown）。
      *
      * @param name 文件名
+     *
      * @return true 表示支持
      */
     private boolean isTextFile(String name) {

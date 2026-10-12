@@ -1,25 +1,37 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
-  <div class="gallery-view">
-    <!-- 顶部栏：品牌 + 全局搜索（占位）+ 通知 + 用户菜单（顶栏「设置」事件 → 打开设置弹窗） -->
-    <ConsoleTopbar brand-label="HolzynActor" :show-collapse="false" @open-settings="openSettingsDialog" />
-
-    <!-- 操作区：新增项目 + 导入项目 -->
-    <div class="gallery-ops">
-      <div class="ops-left">
-        <div class="ops-title">项目画廊</div>
-        <div class="ops-desc">以项目为单位组织世界观、角色、对话与世界演化，点击项目进入项目空间。</div>
-      </div>
-      <div class="ops-right">
-        <el-button plain @click="openImportDialog">
-          <el-icon><HIcon name="Upload" /></el-icon>&nbsp;导入项目
-        </el-button>
-        <!-- 首页设置入口：统一 SettingsButton → 打开全局设置弹窗（零路由依赖，保证可用） -->
-        <SettingsButton @click="openSettingsDialog" />
-        <el-button type="primary" @click="$router.push('/project/new')">
-          <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增项目
-        </el-button>
-      </div>
-    </div>
+  <!-- 统一外壳（global 模式）：顶栏 = AppShell 的 ShellTopbar（品牌/命令面板/图标抽屉/主题密度/通知/账户），
+       本页不再自绘顶栏，避免与项目空间形成两套顶栏。 -->
+  <AppShell mode="global" brand-label="HolzynActor" :show-sidebar="false" :show-back="false">
+    <div class="content-col">
+      <!-- 操作区（统一页头）：标题 + 说明 + 新增/导入/设置 -->
+      <PageHeader
+        title="项目画廊"
+        desc="以项目为单位组织世界观、角色、对话与世界演化，点击项目进入项目空间。"
+      >
+        <template #actions>
+          <el-button plain @click="openImportDialog">
+            <el-icon><HIcon name="Upload" /></el-icon>&nbsp;导入项目
+          </el-button>
+          <!-- 首页设置入口：统一 SettingsButton → 打开全局设置弹窗（零路由依赖，保证可用） -->
+          <SettingsButton @click="openSettingsDialog" />
+          <el-button type="primary" @click="$router.push('/project/new')">
+            <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增项目
+          </el-button>
+        </template>
+      </PageHeader>
 
     <!-- 主体区 -->
     <div v-if="loading && projects.length === 0" v-loading="true" class="gallery-loading" />
@@ -97,7 +109,7 @@
       </section>
     </template>
 
-    <!-- 导入项目对话框（.holzyn 包导入，V2.0） -->
+    <!-- 导入项目对话框 -->
     <el-dialog v-model="importDialog.visible" title="导入 .holzyn 项目包" width="520px">
       <el-alert type="info" :closable="false" show-icon
         title="导入后将完整还原项目（世界观/角色/对话/知识/记忆/设置）。"
@@ -119,7 +131,7 @@
       </template>
     </el-dialog>
 
-    <!-- 导出项目对话框（.holzyn 包导出，V2.0） -->
+    <!-- 导出项目对话框 -->
     <el-dialog v-model="exportDialog.visible" :title="`导出 .holzyn · ${exportDialog.project?.name || ''}`" width="520px">
       <el-alert type="info" :closable="false" show-icon
         title="导出为 .holzyn 项目包（全量业务数据 + 可选 API 敏感数据 + 可选密码加密）。"
@@ -138,24 +150,26 @@
       </template>
     </el-dialog>
 
-    <!-- 首页设置弹窗：全局（用户级）设置四子页 Tab 内嵌，零路由依赖（顶栏事件 / 操作区 / 空态三入口共用） -->
+    <!-- 首页设置弹窗：全局（用户级）设置四子页 Tab 内嵌，零路由依赖（操作区 / 空态两入口共用） -->
     <GlobalSettingsDialog ref="settingsRef" />
-  </div>
+    </div>
+  </AppShell>
 </template>
 
 <script setup>
 /**
- * 项目画廊（前端布局重构 V1.0 首页，设计文档 §3.1）。
+ * 项目画廊。
  * <p>职责：登录后默认落地页——顶部栏（品牌/搜索/通知/用户）+ 操作区（新增/导入）+
  * 上半栏「最近项目」（按更新时间倒序取前 6）+ 下半栏「所有项目」（网格 + 搜索过滤）；
- * 点击项目进入项目空间（默认仪表盘）；卡片菜单支持导出（占位）/删除（软删）。</p>
+ * 点击项目进入项目空间（世界沙盘 S1：默认世界沙盘）；卡片菜单支持导出（占位）/删除（软删）。</p>
  * <p>数据来源：/api/projects（分页，全部加载后在本地排序/过滤）。</p>
  * <p>说明：后端暂无「最近访问时间」字段，「最近项目」以最近更新时间倒序近似。</p>
  */
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import ConsoleTopbar from '@/shared/components/console/ConsoleTopbar.vue'
+import AppShell from '@/shared/layout/AppShell.vue'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 import SettingsButton from '@/shared/components/SettingsButton.vue'
 import GlobalSettingsDialog from '@/features/settings/views/GlobalSettingsDialog.vue'
 import { fetchProjects, deleteProject, importProjectPackage, exportProjectPackage } from '@/shared/api'
@@ -208,9 +222,9 @@ function fmtTime(t) {
   return String(t).slice(0, 10)
 }
 
-/** 点击项目：进入项目空间默认仪表盘 */
+/** 点击项目：进入项目空间默认世界沙盘（S1 项目主页；lastProjectId 由 ProjectLayout 进入时记录） */
 function openProject(p) {
-  router.push(`/project/${p.id}/dashboard`)
+  router.push(`/project/${p.id}/sandbox`)
 }
 
 /** 打开导入项目占位对话框 */
@@ -234,7 +248,7 @@ async function doImportPackage() {
     ElMessage.success(`项目「${res.name}」导入成功（角色 ${res.characterCount} 位）`)
     importDialog.visible = false
     await loadProjects()
-    router.push(`/project/${res.projectId}/dashboard`)
+    router.push(`/project/${res.projectId}/sandbox`)
   } catch (e) {
     ElMessage.error(e.message || '导入失败')
   } finally { importDialog.loading = false }
@@ -290,14 +304,10 @@ onMounted(loadProjects)
 </script>
 
 <style scoped>
-.gallery-view { min-height: 100vh; background: var(--bg-page, var(--bg-base)); }
-.gallery-ops { max-width: 1280px; margin: 0 auto; padding: 28px 24px 8px; display: flex; align-items: flex-end; justify-content: space-between; }
-.ops-title { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); }
-.ops-desc { font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px; }
-.ops-right { display: flex; gap: 10px; }
-.gallery-loading { max-width: 1280px; margin: 0 auto; height: 300px; }
+/* 页面内容由 .content-col（全局类）限宽居中；这里只保留画廊特有的段落间距与卡片样式 */
+.gallery-loading { height: 300px; }
 
-.gallery-section { max-width: 1280px; margin: 16px auto 0; padding: 0 24px 12px; }
+.gallery-section { margin-top: 16px; padding-bottom: 12px; }
 .section-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }
 .section-title { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
 .section-sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px; }

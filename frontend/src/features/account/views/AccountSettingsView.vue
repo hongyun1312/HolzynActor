@@ -1,11 +1,25 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
-  <div class="account-page">
-    <div class="ac-card">
-      <div class="ac-header">
-        <h2>本地账户设置</h2>
-        <p>这些信息将作为「NPC 认识你的档案」注入对话，影响角色对你的了解与回应。所有字段选填。</p>
-      </div>
-
+  <!-- 全局页统一外壳（batch②）：不再自绘满屏容器与背景，改为 AppShell global + 居中内容列 -->
+  <AppShell mode="global" brand-label="本地账户" :show-sidebar="false" :show-back="false">
+    <div class="content-col account-page">
+      <PageHeader
+        title="本地账户设置"
+        desc="这些信息将作为「NPC 认识你的档案」注入对话，影响角色对你的了解与回应。所有字段选填。"
+      />
+      <div class="ac-card">
       <el-form :model="form" label-position="top" class="ac-form">
         <div class="ac-section">
           <div class="ac-section-title">基本信息</div>
@@ -59,8 +73,9 @@
         <el-button @click="router.back()">返回</el-button>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </div>
+      </div>
     </div>
-  </div>
+  </AppShell>
 </template>
 
 <script setup>
@@ -73,6 +88,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAccountStore } from '@/shared/store'
+import AppShell from '@/shared/layout/AppShell.vue'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const router = useRouter()
 const account = useAccountStore()
@@ -114,10 +131,9 @@ onMounted(init)
 </script>
 
 <style scoped>
-.account-page { min-height: 100vh; padding: 32px 16px; background: var(--bg-page, #eef1f6); display: flex; justify-content: center; }
+/* 页面容器与背景由外壳提供；卡片居中由 .content-col + 卡片自身 max-width 决定 */
+.account-page { display: flex; flex-direction: column; align-items: center; }
 .ac-card { width: 100%; max-width: 720px; background: var(--bg-layer-1); border-radius: 18px; box-shadow: 0 10px 32px rgba(24, 50, 100, 0.10); padding: 32px 40px; height: fit-content; }
-.ac-header h2 { margin: 0 0 6px; color: var(--text-primary); }
-.ac-header p { margin: 0 0 8px; color: var(--text-secondary); font-size: 0.85rem; line-height: 1.7; }
 .ac-section-title { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin: 18px 0 10px; padding-left: 10px; border-left: 3px solid var(--brand-primary, #1d5cff); }
 .ac-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
 .avatar-line { display: flex; align-items: center; gap: 12px; width: 100%; }

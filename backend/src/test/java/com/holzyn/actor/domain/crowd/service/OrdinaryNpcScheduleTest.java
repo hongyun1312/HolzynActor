@@ -1,7 +1,7 @@
 package com.holzyn.actor.domain.crowd.service;
 
 import com.holzyn.actor.common.BizException;
-import com.holzyn.actor.domain.crowd.entity.ActorOrdinaryNpc;
+import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -60,14 +60,14 @@ class OrdinaryNpcScheduleTest {
      */
     @Test
     void describeActionCoversAllStates() {
-        ActorOrdinaryNpc n = new ActorOrdinaryNpc();
+        ActorCharacter n = new ActorCharacter();
         n.setOccupation("商贩");
         n.setLocation("集市");
         assertTrue(OrdinaryNpcService.describeAction(n, "walk", 7).contains("集市"));
         assertTrue(OrdinaryNpcService.describeAction(n, "stop", 9).contains("商贩"));
         assertTrue(OrdinaryNpcService.describeAction(n, "talk", 21).contains("攀谈"));
         assertTrue(OrdinaryNpcService.describeAction(n, "rest", 23).contains("就寝"));
-        ActorOrdinaryNpc blank = new ActorOrdinaryNpc();
+        ActorCharacter blank = new ActorCharacter();
         assertNotNull(OrdinaryNpcService.describeAction(blank, "stop", 10));
     }
 
@@ -111,9 +111,9 @@ class OrdinaryNpcScheduleTest {
      */
     @Test
     void buildSnapshotSummarizesStates() {
-        ActorOrdinaryNpc n1 = new ActorOrdinaryNpc();
+        ActorCharacter n1 = new ActorCharacter();
         n1.setName("阿福");
-        ActorOrdinaryNpc n2 = new ActorOrdinaryNpc();
+        ActorCharacter n2 = new ActorCharacter();
         n2.setName("翠娘");
         Map<String, Long> states = Map.of("walk", 1L, "rest", 1L);
         String s = OrdinaryNpcService.buildSnapshot(List.of(n1, n2), states, 9);
@@ -128,7 +128,7 @@ class OrdinaryNpcScheduleTest {
     @Test
     void defaultSummaryProducesReadableText() {
         assertTrue(OrdinaryNpcService.defaultSummary(List.of()).contains("暂无"));
-        ActorOrdinaryNpc n = new ActorOrdinaryNpc();
+        ActorCharacter n = new ActorCharacter();
         n.setAffiliation("临江渔村");
         n.setOccupation("渔夫");
         assertTrue(OrdinaryNpcService.defaultSummary(List.of(n)).contains("1 名普通居民"));
@@ -137,18 +137,22 @@ class OrdinaryNpcScheduleTest {
 
     /**
      * 归属概况：按归属分组统计人数/职业/状态（项目级调度 AI 输入）。
+     * <p>O6 G1a：运行态不再从主表实体取（{@code state} 列已随 {@code actor_profile_ordinary} 废弃），
+     * 改由调用方传入 {@code npcRef → 活动状态} 的批量 Map（{@code NpcActivityStateService.activityStateByRef} 产物）。</p>
      */
     @Test
     void affiliationOverviewGroupsByAffiliation() {
-        ActorOrdinaryNpc n1 = new ActorOrdinaryNpc();
+        ActorCharacter n1 = new ActorCharacter();
+        n1.setId(1L);
         n1.setAffiliation("临江渔村");
         n1.setOccupation("渔夫");
-        n1.setState("stop");
-        ActorOrdinaryNpc n2 = new ActorOrdinaryNpc();
+        ActorCharacter n2 = new ActorCharacter();
+        n2.setId(2L);
         n2.setAffiliation("临江渔村");
         n2.setOccupation("渔夫");
-        n2.setState("walk");
-        String ov = OrdinaryNpcService.affiliationOverview(List.of(n1, n2));
+        // G1a：状态从 actor_state 批量 Map 取（npc:{id} 索引）
+        Map<String, String> stateByRef = Map.of("npc:1", "stop", "npc:2", "walk");
+        String ov = OrdinaryNpcService.affiliationOverview(List.of(n1, n2), stateByRef);
         assertTrue(ov.contains("临江渔村"));
         assertTrue(ov.contains("共 2 人"));
     }

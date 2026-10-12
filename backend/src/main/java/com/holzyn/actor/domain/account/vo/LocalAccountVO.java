@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.account.vo;
 
 import lombok.Data;
@@ -7,7 +25,6 @@ import java.time.LocalDateTime;
  * 本地个人账户视图对象。
  * <p>职责：作为本地账户接口（GET/PUT /api/local-account）的返回载体，
  * 供前端展示用户信息，并在设置页编辑；onboarded 供首次向导判断。</p>
- * <p>所属模块：domain/account/vo（本地账户功能域-视图层）</p>
  */
 @Data
 public class LocalAccountVO {
@@ -45,9 +62,12 @@ public class LocalAccountVO {
     /** 是否已完成首次设置向导：0 未完成/1 已完成 */
     private Integer onboarded;
 
+    /** 上次所在项目 ID（世界沙盘 S1：应用启动直达上次项目；可空） */
+    private Long lastProjectId;
+
     /** 创建时间 */
     private LocalDateTime createdAt;
 
-    /** 更新时间 */
+    /** 时间 */
     private LocalDateTime updatedAt;
 }

@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.project.controller;
 
 import com.holzyn.actor.common.R;
@@ -16,10 +34,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 项目与世界观管理控制器（A-C1）。
+ * 项目与世界观管理控制器（A-）。
  * <p>职责：提供项目（作品）CRUD、世界观设定读取/保存（覆盖更新）、一键生成角色卡等接口。
  * 所有接口统一返回 R&lt;T&gt;，归属以当前登录用户为准（服务层校验）。</p>
- * <p>所属模块：controller/project（项目/世界观子域）</p>
  */
 @RestController
 @RequestMapping("/api/projects")
@@ -33,7 +50,9 @@ public class ProjectController {
      * 项目列表（分页，按更新时间倒序）。
      *
      * @param page 页码（默认 1）
+     *
      * @param size 每页条数（默认 12）
+     *
      * @return 分页结果（含每个项目角色数）
      */
     @GetMapping
@@ -46,6 +65,7 @@ public class ProjectController {
      * 创建项目。
      *
      * @param dto 项目入参（name 必填）
+     *
      * @return 创建后的项目
      */
     @PostMapping
@@ -57,6 +77,7 @@ public class ProjectController {
      * 项目详情。
      *
      * @param id 项目主键
+     *
      * @return 项目详情
      */
     @GetMapping("/{id}")
@@ -67,8 +88,10 @@ public class ProjectController {
     /**
      * 编辑项目。
      *
-     * @param id  项目主键
+     * @param id 项目主键
+     *
      * @param dto 项目入参
+     *
      * @return 更新后的项目
      */
     @PutMapping("/{id}")
@@ -80,6 +103,7 @@ public class ProjectController {
      * 删除项目（软删除）。
      *
      * @param id 项目主键
+     *
      * @return 删除确认
      */
     @DeleteMapping("/{id}")
@@ -92,6 +116,7 @@ public class ProjectController {
      * 读取项目最新版本世界观设定。
      *
      * @param id 项目主键
+     *
      * @return 世界观（无则 data=null）
      */
     @GetMapping("/{id}/world-setting")
@@ -102,8 +127,10 @@ public class ProjectController {
     /**
      * 保存世界观设定（覆盖更新保存，直接修改最新记录不产生新版本）。
      *
-     * @param id  项目主键
+     * @param id 项目主键
+     *
      * @param dto 世界观入参
+     *
      * @return 保存后的世界观（当前版本）
      */
     @PostMapping("/{id}/world-setting")
@@ -115,6 +142,7 @@ public class ProjectController {
      * 一键为项目全部角色生成角色卡（AI，逐角色串行）。
      *
      * @param id 项目主键
+     *
      * @return 每个角色的生成结果列表
      */
     @PostMapping("/{id}/generate-cards")

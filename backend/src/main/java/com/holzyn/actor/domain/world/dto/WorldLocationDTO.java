@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.dto;
 
 import jakarta.validation.constraints.NotBlank;
@@ -8,7 +26,6 @@ import lombok.Data;
  * 世界观地点新增/编辑请求 DTO。
  * <p>用途：承载「地点详情」页增删改查与编辑模式全量保存（batch）的请求体；
  * 新建项目解析流程的「地点提取」结果（LocationPart）复用同构字段。</p>
- * <p>所属模块：domain/world（世界域-地点子域）</p>
  */
 @Data
 public class WorldLocationDTO {

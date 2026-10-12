@@ -1,0 +1,16 @@
+HolzynActor
+Copyright (c) 2026 HONGYUN
+
+This product includes software developed by HONGYUN
+(https://github.com/).
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+Third-party notices:
+- Spring Boot (https://spring.io/projects/spring-boot) - Apache License 2.0
+- Spring AI (https://spring.io/projects/spring-ai) - Apache License 2.0
+- Vue.js (https://vuejs.org) - MIT License
+- Element Plus (https://element-plus.org) - MIT License
+- LangChain4j (https://github.com/langchain4j/langchain4j) - Apache License 2.0
+- H2 Database (https://www.h2database.com) - Mozilla Public License 2.0 / EPL 1.0

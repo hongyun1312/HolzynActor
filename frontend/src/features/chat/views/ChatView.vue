@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="chat-view">
     <!-- 左栏：会话 + 角色 -->
@@ -11,9 +24,12 @@
         <div v-for="c in conversations" :key="c.id" class="conv-item" :class="{ active: c.id === currentConv?.id }" @click="switchConv(c)">
           <div class="conv-text">
             <div class="conv-title">{{ c.title || '未命名会话' }}
-              <el-tag v-if="isGroup(c)" size="small" type="warning" effect="plain" class="conv-mode-tag">群聊</el-tag>
+              <!-- NPC 内群标签（地点 NPC 自发对话群，玩家可围观/插话）+ 归档状态 -->
+              <el-tag v-if="isNpcGroup(c)" size="small" type="primary" effect="plain" class="conv-mode-tag">NPC 内群</el-tag>
+              <el-tag v-else-if="isGroup(c)" size="small" type="warning" effect="plain" class="conv-mode-tag">群聊</el-tag>
+              <el-tag v-if="isArchived(c)" size="small" type="info" effect="plain" class="conv-mode-tag">已归档</el-tag>
             </div>
-            <div class="conv-sub">📍 {{ c.location || '远程通讯' }} · {{ isGroup(c) ? '群聊' : '单聊' }} · {{ convTime(c.updatedAt) }}</div>
+            <div class="conv-sub">📍 {{ npcGroupLocation(c) || c.location || '远程通讯' }} · {{ isNpcGroup(c) ? 'NPC 内群' : (isGroup(c) ? '群聊' : '单聊') }} · {{ convTime(c.updatedAt) }}</div>
           </div>
           <el-button class="conv-del" size="small" text type="danger" @click.stop="removeConv(c)" title="删除会话">
             <el-icon><HIcon name="Delete" /></el-icon>
@@ -40,8 +56,15 @@
           <div class="header-ops">
             <!-- 群聊专属：指定发言人（空 = AI 调度）+ 每轮回复上限 -->
             <div v-if="isGroup(currentConv)" class="replies-ctl">
-              <el-select v-model="forceSpeaker" size="small" clearable placeholder="AI 调度" style="width: 130px" :title="'指定本轮发言人（空 = AI 按发言欲望调度）'">
-                <el-option v-for="r in roleList" :key="r.id" :label="r.name" :value="r.id" />
+              <el-select v-model="forceSpeaker" size="small" clearable placeholder="AI 调度" style="width: 130px" :title="'指定本轮发言人（空 = AI 按发言欲望调度；普通居民由 AI 调度）'">
+                <!--
+                  修( )：v-if 与 v-for 同元素时 v-if 优先求值、r 未定义 → 渲染崩溃（点击群聊会话无响应）；
+                  template 包裹后 v-for 作用域正常，crowd 普通居民不参与指定发言人
+                -->
+                <template v-for="r in roleList" :key="r.id">
+                  <!-- memberType 兼容 crowd/common 两种契约值（历史 crowd / 新 common 都排除在指定发言人外） -->
+                  <el-option v-if="r.memberType !== 'crowd' && r.memberType !== 'common'" :label="r.name" :value="r.id" />
+                </template>
               </el-select>
               <span class="replies-label">每轮上限</span>
               <el-input-number v-model="groupReplies" :min="1" :max="20" size="small" :controls="false" style="width: 58px" :title="'群聊每轮回复上限（AI 最多回复角色数）'" @change="saveGroupReplies" />
@@ -52,10 +75,19 @@
             </el-button>
           </div>
         </div>
-        <!-- 下方：对话详细信息（对话场景快照：所在地 + 世界时间，可编辑） -->
+        <!-- 下方：对话详细信息（所在地 + 世界时间，可编辑；：世界时间实时随时钟刷新，快照仅作历史） -->
         <div v-if="currentConv" class="header-scene">
           <span class="scene-item" title="对话所在地（留空=通过手机等远程通讯软件对话）">📍 {{ currentConv.location || '远程通讯' }}</span>
-          <span v-if="currentConv.gameTimeText" class="scene-item" title="对话发生时的世界时间（快照）">🕐 {{ currentConv.gameTimeText }}</span>
+          <!-- NPC 内群围观状态（实时订阅，断线自动重连；发消息即插话参与） -->
+          <span v-if="isNpcGroup(currentConv)" class="scene-item npc-group-status">
+            <el-tag size="small" type="primary" effect="plain">NPC 内群</el-tag>
+            <span v-if="liveWatching" class="live-dot" :class="{ on: liveConnected }"></span>
+            <span v-if="liveWatching" class="live-text">{{ liveConnected ? '围观中' : '围观重连中…' }}</span>
+            <el-tag v-if="isArchived(currentConv)" size="small" type="info" effect="plain">已归档（收尾关闭）</el-tag>
+            <el-tag v-else-if="isPlayerParticipated(currentConv)" size="small" type="success" effect="plain">你已参与</el-tag>
+            <span class="npc-group-tip">NPC 自发对话中 · 发送消息即可插话</span>
+          </span>
+          <span v-if="liveGameTimeText" class="scene-item" title="当前世界时间（实时，随时钟刷新；C-15）">🕐 {{ liveGameTimeText }}</span>
           <el-button size="small" text type="primary" @click="openSceneDialog">编辑场景</el-button>
         </div>
       </header>
@@ -79,7 +111,7 @@
           <p class="hero-sub">开始和 {{ currentRole?.name || '角色' }} 对话吧</p>
           <div v-if="currentConv" class="hero-scene">
             <span>📍 {{ currentConv.location || '远程通讯' }}</span>
-            <span v-if="currentConv.gameTimeText">🕐 {{ currentConv.gameTimeText }}</span>
+            <span v-if="liveGameTimeText">🕐 {{ liveGameTimeText }}</span>
             <el-button size="small" text type="primary" @click="openSceneDialog">编辑场景</el-button>
           </div>
         </div>
@@ -92,6 +124,10 @@
                 <div class="event-label">📣 世界事件</div>
                 <div class="event-content">{{ m.content }}</div>
               </div>
+            </div>
+            <!-- 系统消息（NPC 内群退场/收尾叙述）：居中弱化 -->
+            <div v-else-if="m.role === 'system'" class="system-row">
+              <div class="system-note">{{ m.content }}</div>
             </div>
             <!-- 普通消息：用户右气泡 / AI 左气泡（Markdown） -->
             <div v-else :class="['msg-row', m.role]">
@@ -159,7 +195,7 @@
         <span>角色信息</span>
         <el-tag v-if="currentRole" size="small" effect="plain">{{ currentRole.name }}</el-tag>
       </div>
-      <div v-if="!currentRole" class="side-empty">选择会话后展示角色卡与 Prompt</div>
+      <div v-if="!currentRole" class="side-empty">选择会话后展示角色档案（11 维）与记忆</div>
       <template v-else>
         <!-- 群聊多角色切换 -->
         <div v-if="roleList.length > 1" class="role-tabs">
@@ -168,78 +204,23 @@
           </div>
         </div>
         <el-tabs v-model="infoTab" class="info-tabs" @tab-change="onInfoTabChange">
-          <el-tab-pane v-if="roleCard" label="结构化角色卡" name="card">
-            <!-- 角色卡 JSON 前端解析分节渲染（对齐 NPC 角色页形式，非原始 JSON 文本） -->
-            <div v-if="!persona || Object.keys(persona).length === 0" class="side-empty">角色卡 JSON 无法解析</div>
-            <template v-else>
-              <div v-if="persona.identity" class="p-section">
-                <div class="p-title">身份</div>
-                <div class="p-grid">
-                  <div class="p-cell"><span class="k">姓名</span><span class="v">{{ persona.identity?.name || '—' }}</span></div>
-                  <div class="p-cell"><span class="k">头衔</span><span class="v">{{ persona.identity?.title || '—' }}</span></div>
-                  <div class="p-cell"><span class="k">种族</span><span class="v">{{ persona.identity?.species || '—' }}</span></div>
-                  <div class="p-cell"><span class="k">职业</span><span class="v">{{ persona.identity?.occupation || '—' }}</span></div>
-                  <div class="p-cell"><span class="k">所属势力</span><span class="v">{{ persona.identity?.affiliation || '—' }}</span></div>
-                  <div class="p-cell"><span class="k">年龄</span><span class="v">{{ persona.identity?.age ?? '—' }}</span></div>
-                </div>
-              </div>
-              <div v-if="persona.personality" class="p-section">
-                <div class="p-title">性格特质</div>
-                <div class="p-text">特质：<el-tag v-for="(t, i) in list(persona.personality.traits)" :key="i" size="small" effect="plain" class="p-tag">{{ t }}</el-tag></div>
-                <div class="p-label">价值观</div>
-                <div class="p-tags"><el-tag v-for="(v, i) in list(persona.personality.values)" :key="i" size="small" type="success" effect="plain">{{ v }}</el-tag></div>
-                <div class="p-label">怪癖/习惯</div>
-                <div class="p-tags"><el-tag v-for="(q, i) in list(persona.personality.quirks)" :key="i" size="small" type="warning" effect="plain">{{ q }}</el-tag></div>
-              </div>
-              <div v-if="persona.background" class="p-section">
-                <div class="p-title">背景与目标</div>
-                <div class="p-text">{{ persona.background?.history || '—' }}</div>
-                <div class="p-label">关键事件</div>
-                <div class="p-tags"><el-tag v-for="(e, i) in list(persona.background.keyEvents)" :key="i" size="small" effect="plain">{{ e }}</el-tag></div>
-                <div class="p-label">心结/创伤</div>
-                <div class="p-tags"><el-tag v-for="(w, i) in list(persona.background.wounds)" :key="i" size="small" type="danger" effect="plain">{{ w }}</el-tag></div>
-                <div class="p-label">目标</div>
-                <div class="p-tags"><el-tag v-for="(g, i) in list(persona.background.goals)" :key="i" size="small" type="primary" effect="plain">{{ g }}</el-tag></div>
-              </div>
-              <div v-if="persona.speechStyle" class="p-section">
-                <div class="p-title">说话风格</div>
-                <div class="p-text">{{ persona.speechStyle?.tone || '—' }}</div>
-                <div class="p-label">口头禅</div>
-                <div class="p-tags"><el-tag v-for="(c, i) in list(persona.speechStyle.catchphrases)" :key="i" size="small" type="warning" effect="plain">{{ c }}</el-tag></div>
-                <div class="p-label">禁忌</div>
-                <div class="p-tags"><el-tag v-for="(t, i) in list(persona.speechStyle.taboos)" :key="i" size="small" type="danger" effect="plain">{{ t }}</el-tag></div>
-              </div>
-              <div v-if="persona.knowledge" class="p-section">
-                <div class="p-title">知识边界</div>
-                <div class="p-label">知晓</div>
-                <div class="p-tags"><el-tag v-for="(k, i) in list(persona.knowledge.knows)" :key="i" size="small" type="success" effect="plain">{{ k }}</el-tag></div>
-                <div class="p-label">不知道/不假装知道</div>
-                <div class="p-tags"><el-tag v-for="(n, i) in list(persona.knowledge.notKnows)" :key="i" size="small" type="info" effect="plain">{{ n }}</el-tag></div>
-              </div>
-              <div v-if="list(persona.behaviorPatterns).length" class="p-section">
-                <div class="p-title">行为模式（行动驱动）</div>
-                <div class="p-blist">
-                  <div v-for="(b, i) in list(persona.behaviorPatterns)" :key="i" class="p-bitem">· {{ b }}</div>
-                </div>
-              </div>
-            </template>
+          <el-tab-pane v-if="roleCard" label="角色档案（11 维）" name="card">
+            <!-- 只读 11 维档案（与 NPC 角色页同源组件；服务端 personaRenderText 按维切分，含原始 JSON 折叠面板） -->
+            <PersonaArchivePanel :card="roleCard" :character-name="currentRole?.name" />
           </el-tab-pane>
-          <el-tab-pane v-if="roleCard" label="Prompt" name="prompt">
-            <pre class="info-pre">{{ roleCard.systemPrompt }}</pre>
-          </el-tab-pane>
-          <!-- P4-1 长期记忆 Tab：角色记忆列表（fact/summary 分色、重要度标签、可删除）+ 手动抽取 -->
+          <!-- 长期记忆 Tab：角色记忆列表（fact/summary 分色、重要度标签、可删除）+ 手动抽取 -->
           <el-tab-pane label="记忆" name="memory">
-            <div v-if="!roleCard" class="side-empty">该角色尚未生成角色卡（不影响长期记忆功能）</div>
+            <div v-if="!roleCard" class="side-empty">该角色尚未生成角色档案（不影响长期记忆功能）</div>
             <div class="memory-ops">
               <span class="memory-hint">对话后 AI 自动抽取关键事实/摘要</span>
               <el-button size="small" text type="primary" :loading="extracting" @click="doExtractMemories">手动抽取</el-button>
             </div>
             <div v-loading="memoryLoading" class="memory-list">
               <div v-if="memories.length === 0" class="side-empty">暂无记忆，对话几轮后自动生成</div>
-              <div v-for="m in memories" :key="m.id" class="memory-item" :class="m.kind">
+              <div v-for="m in memories" :key="m.id" class="memory-item" :class="memoryClass(m)">
                 <div class="memory-head">
-                  <el-tag size="small" :type="m.kind === 'summary' ? 'primary' : 'info'" effect="plain">
-                    {{ m.kind === 'summary' ? '摘要' : '事实' }}
+                  <el-tag size="small" :type="typeTag(m)" effect="plain">
+                    {{ typeLabel(m) }}
                   </el-tag>
                   <el-tag size="small" :type="impTag(m.importance)" effect="light">重要度 {{ m.importance }}</el-tag>
                   <el-button class="memory-del" size="small" text type="danger" @click="doDeleteMemory(m)" title="删除该记忆">
@@ -249,12 +230,27 @@
                 <div class="memory-content">{{ m.content }}</div>
               </div>
             </div>
+            <!-- L1 工作记忆（热缓冲：草稿/任务/上下文/感知，会话结束后巩固进长期记忆） -->
+            <div class="working-memory-sec">
+              <div class="working-memory-title">工作记忆（L1 热缓冲）</div>
+              <div v-loading="workingMemoryLoading" class="working-memory-list">
+                <div v-if="workingMemories.length === 0" class="side-empty">暂无进行中的工作项（对话抽取草稿、行动关注点、感知快照将在会话结束后巩固为长期记忆）</div>
+                <div v-for="w in workingMemories" :key="w.id" class="working-memory-item">
+                  <div class="working-memory-head">
+                    <el-tag size="small" :type="workingTypeTag(w)" effect="plain">{{ workingTypeLabel(w) }}</el-tag>
+                    <el-tag v-if="w.importanceHint" size="small" effect="light">建议重要度 {{ w.importanceHint }}</el-tag>
+                    <span class="working-memory-time">{{ fmtTime(w.createdAt) }}</span>
+                  </div>
+                  <div class="working-memory-content">{{ w.content }}</div>
+                </div>
+              </div>
+            </div>
           </el-tab-pane>
         </el-tabs>
       </template>
     </div>
 
-    <!-- 新建会话对话框：单聊 / 群聊（2026-08-18 恢复群聊 UI） -->
+    <!-- 新建会话对话框：单聊 / 群聊（恢复群聊 UI） -->
     <el-dialog v-model="createDialog.visible" :title="createDialog.mode === 'group' ? '新建群聊会话' : '新建单聊会话'" width="560px">
       <el-form label-width="82px">
         <el-form-item label="会话类型">
@@ -263,14 +259,24 @@
             <el-radio value="group">群聊（多角色）</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item :label="createDialog.mode === 'group' ? '参与角色' : '角色'" required>
-          <!-- 单聊：单选角色 -->
-          <el-select v-if="createDialog.mode === 'single'" v-model="createDialog.characterId" placeholder="选择要对话的角色" style="width: 100%" @change="applyRuleTitle">
-            <el-option v-for="ch in characters" :key="ch.id" :label="ch.name + (ch.title ? ' · ' + ch.title : '')" :value="ch.id" />
+        <el-form-item :label="createDialog.mode === 'group' ? '参与成员' : '成员'" required>
+          <!-- B5（普通 NPC 参与通道）：单聊/群聊均支持特殊 NPC 与普通居民并列选择（memberRef 双轨） -->
+          <el-select v-if="createDialog.mode === 'single'" v-model="createDialog.memberRef" filterable placeholder="选择要对话的角色 / 普通居民" style="width: 100%" @change="applyRuleTitle">
+            <el-option-group v-for="g in memberOptions" :key="g.label" :label="g.label">
+              <el-option v-for="opt in g.options" :key="opt.ref" :label="opt.name + (opt.sub ? ' · ' + opt.sub : '')" :value="opt.ref">
+                <span>{{ opt.name }}</span>
+                <el-tag v-if="opt.type === 'crowd' || opt.type === 'common'" size="small" type="warning" effect="plain" style="margin-left: 6px">居民</el-tag>
+              </el-option>
+            </el-option-group>
           </el-select>
-          <!-- 群聊：多选角色（≥2） -->
-          <el-select v-else v-model="createDialog.characterIds" multiple collapse-tags collapse-tags-tooltip placeholder="选择参与群聊的角色（至少 2 个）" style="width: 100%" @change="applyRuleTitle">
-            <el-option v-for="ch in characters" :key="ch.id" :label="ch.name + (ch.title ? ' · ' + ch.title : '')" :value="ch.id" />
+          <!-- 群聊：多选成员（≥2，可混搭特殊+普通） -->
+          <el-select v-else v-model="createDialog.memberRefs" multiple filterable collapse-tags collapse-tags-tooltip placeholder="选择参与群聊的成员（至少 2 个）" style="width: 100%" @change="applyRuleTitle">
+            <el-option-group v-for="g in memberOptions" :key="g.label" :label="g.label">
+              <el-option v-for="opt in g.options" :key="opt.ref" :label="opt.name + (opt.sub ? ' · ' + opt.sub : '')" :value="opt.ref">
+                <span>{{ opt.name }}</span>
+                <el-tag v-if="opt.type === 'crowd' || opt.type === 'common'" size="small" type="warning" effect="plain" style="margin-left: 6px">居民</el-tag>
+              </el-option>
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="对话所在地">
@@ -362,25 +368,31 @@
 
 <script setup>
 /**
- * 对话页（P1 单聊 SSE + P2 群聊/世界事件，按桌面布局）。
+ * 对话页。
  * <p>职责：实现设计文档 §7.3 ③ 对话——左会话/角色、中对话流（气泡 + SSE 打字机）、右角色信息。
  * 支持：单聊/群聊创建；群聊 AI 按发言欲望逐角色流式回复（message-start/token/done 事件）；
- * 世界事件注入（手填或 AI 生成）并触发在场角色回应；群聊「无玩家轮次」自主推进（P4 预留）。</p>
+ * 世界事件注入（手填或 AI 生成）并触发在场角色回应；群聊「无玩家轮次」自主推进。</p>
  */
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchConversations, createConversation, fetchMessages, sendMessage, deleteConversation,
-  fetchCharacters, fetchCharacterCard, conversationStreamUrl,
+  fetchCharacters, fetchCharacterCard, conversationStreamUrl, conversationLiveStreamUrl,
   injectWorldEvent, advanceConversation,
   fetchGroupChatConfig, saveGroupChatConfig,
-  fetchMemories, deleteMemory, extractCharacterMemories,
+  fetchMemories, deleteMemory, extractCharacterMemories, fetchWorkingMemories,
   fetchWorldClock,
   fetchWorldSetting, updateConversationScene, generateConversationTitle,
-  fetchWorldLocations
+  fetchWorldLocations,
+  fetchOrdinaryNpcs
 } from '@/shared/api'
+import { createGeneration, createSubscription, SSE_EVENTS } from '@/shared/sse/sseClient'
 import { renderMarkdown } from '@/shared/markdown'
+// 角色档案（11 维）只读面板（与 NPC 角色页同源组件）
+import PersonaArchivePanel from '@/features/character/components/PersonaArchivePanel.vue'
+// 统一身份引用
+import { npcRef, npcIdOf, isCommonMemberType } from '@/shared/npcRef'
 
 const route = useRoute()
 const projectId = Number(route.params.id)
@@ -389,11 +401,17 @@ const conversations = ref([])
 const currentConv = ref(null)
 const messages = ref([])
 const characters = ref([])
+// B5（普通 NPC 参与通道）：普通 NPC 列表（可与特殊角色并列创建单聊/群聊）
+const npcs = ref([])
 const input = ref('')
 const streaming = ref(false)
 const bodyRef = ref(null)
-const es = ref(null)
 const taRef = ref(null)
+// ：生成流统一客户端（对话 SSE，生成型：断线不重连）+ NPC 内群围观订阅（订阅型：自动重连）
+let genClient = null
+let liveSub = null
+const liveWatching = ref(false)
+const liveConnected = ref(false)
 // 生成中计时（DSH TurnStatus：15s 后显示耗时）
 const streamStartAt = ref(null)
 const elapsedSec = ref(0)
@@ -405,7 +423,8 @@ const groupReplies = ref(5)
 // 单聊本地流式占位
 let aiMsg = null
 
-const createDialog = reactive({ visible: false, mode: 'single', characterId: null, characterIds: [], title: '', titleTouched: false, location: '', gameTimeText: '', aiTitleLoading: false })
+// B5：创建弹窗成员选择——memberRef 单选（统一身份引用 npc:3）/ memberRefs 多选
+const createDialog = reactive({ visible: false, mode: 'single', memberRef: null, memberRefs: [], title: '', titleTouched: false, location: '', gameTimeText: '', aiTitleLoading: false })
 const creating = ref(false)
 // 对话所在地候选（从世界观地理文本启发式提取）+ 世界时间刷新 loading
 const locationOptions = ref([])
@@ -420,29 +439,152 @@ const roleCard = ref(null)
 const roleList = ref([])
 const infoTab = ref('card')
 
-// 解析后的角色卡 persona 对象（供「结构化角色卡」分节渲染，对齐 NPC 角色页形式）
-// 防御：旧后端/旧数据可能返回「双重编码」JSON，JSON.parse 得到字符串而非对象时再解析一次
-const persona = computed(() => {
-  try {
-    let p = roleCard.value?.personaJson ? JSON.parse(roleCard.value.personaJson) : {}
-    if (typeof p === 'string') {
-      try { p = JSON.parse(p) } catch (_) { p = {} }
-    }
-    return p && typeof p === 'object' ? p : {}
-  } catch (_) { return {} }
-})
-// P4-1 长期记忆：当前角色的记忆列表
+// 长期记忆：当前角色的记忆列表
 const memories = ref([])
 const memoryLoading = ref(false)
+// L1 工作记忆（active 工作项：草稿/任务/上下文/感知）
+const workingMemories = ref([])
+const workingMemoryLoading = ref(false)
 const extracting = ref(false)
-// P4-2 世界时钟：当前项目游戏时刻与推进控制
+// 世界时钟：当前项目游戏时刻与推进控制
 const worldClock = ref(null)
+// （B2）：对话头部世界时间实时随时钟刷新——优先显示世界时钟实时时间，回退会话快照
+const liveGameTimeText = computed(() => worldClock.value?.gameTimeText || currentConv.value?.gameTimeText || '')
+// ：世界时钟轮询定时器（实时刷新头部时间，默认每 30 秒）
+let clockTimer = null
 
 /** 是否群聊会话 */
 function isGroup(c) { return c && c.mode === 'group' }
 
-/** 群聊成员角色对象列表 */
+// ====================：NPC 内群（地点 NPC 自发对话群） ====================
+
+/** 是否 NPC 内群会话（conversation_type=npc_group， 自主对话承载会话） */
+function isNpcGroup(c) { return c && c.conversationType === 'npc_group' }
+
+/** NPC 内群地点名（优先会话 location，回退标题去「 · NPC 内群」后缀） */
+function npcGroupLocation(c) {
+  if (!c) return ''
+  if (c.location) return c.location
+  const t = c.title || ''
+  return t.replace(/\s*·\s*NPC 内群\s*$/, '').trim() || ''
+}
+
+/** NPC 内群是否已归档（收尾关闭，下次触发重新建会话） */
+function isArchived(c) { return c && c.status === 'archived' }
+
+/** NPC 内群玩家是否已参与（发过消息即参与，player_participated_at 非空） */
+function isPlayerParticipated(c) { return c && !!c.playerParticipatedAt }
+
+/**
+ * 打开 NPC 内群实时围观订阅：订阅型长连接（15s 心跳），断线自动重连（指数退避）。
+ * 后端将无玩家群聊轮逐条消息实时广播（event:message 载荷自描述类型——见 handleLiveEvent；
+ * 另有 connected/ping 心跳事件），玩家打开页面即可实时围观 NPC 自发对话；
+ * 玩家直接发消息即插话（sendMessage 自动标记参与，NPC 正常群聊回应）。
+ */
+function openLiveStream() {
+  closeLiveStream()
+  const conv = currentConv.value
+  if (!conv || !isNpcGroup(conv)) return
+  liveWatching.value = true
+  liveSub = createSubscription({
+    url: conversationLiveStreamUrl(conv.id),
+    events: [SSE_EVENTS.ERROR, SSE_EVENTS.CONNECTED],
+    heartbeatTimeoutMs: 45000, // 15s 心跳 ×3：超时视为死连自动重连
+    onConnected: () => { liveConnected.value = true },
+    onPing: () => { liveConnected.value = true },
+    onReconnect: () => { liveConnected.value = false },
+    onGiveUp: () => { liveConnected.value = false },
+    onEvent: (name, d) => handleLiveEvent(name, d)
+  })
+}
+
+/** 关闭围观订阅 */
+function closeLiveStream() {
+  if (liveSub) { liveSub.close(); liveSub = null }
+  liveWatching.value = false
+  liveConnected.value = false
+}
+
+/**
+ * 围观事件分发（与后端 ConversationLiveSseHub 载荷对齐）。
+ * <p><b>契约说明</b>：无玩家轮经 {@code HubSink} 广播时<b>事件名统一为 message</b>（事件名被丢弃），
+ * 事件类型由载荷结构自描述：{@code {assistantMessageId, characterName, 无 content}} = 新消息开始；
+ * {@code {delta, characterId}} = token 增量；{@code {assistantMessageId, content}} = 消息完成；
+ * {@code {messageId, role:'system', content}} = 系统消息（退场/收尾叙述）。</p>
+ */
+function handleLiveEvent(name, d) {
+  if (!d || typeof d !== 'object') return
+  // 系统消息（退场/收尾叙述，role=system）：居中展示，按 messageId 防重复
+  if (d.role === 'system') {
+    if (d.content) {
+      if (!messages.value.some(m => m._liveMsgId === d.messageId)) {
+        messages.value.push({
+          id: `live-sys-${d.messageId}`, _liveMsgId: d.messageId,
+          role: 'system', type: d.type || 'text', content: d.content,
+          streaming: false, _key: `live-sys-${d.messageId}`
+        })
+        scrollBottom()
+      }
+    }
+    return
+  }
+  // token 增量
+  if (typeof d.delta === 'string') {
+    const row = [...messages.value].reverse().find(m => m.streaming && m.characterId === d.characterId)
+    if (row) { row.content += d.delta; scrollBottom() }
+    return
+  }
+  // 新消息开始（有 assistantMessageId 但尚无 content）
+  if (d.assistantMessageId != null && d.content == null) {
+    messages.value.push({
+      id: d.assistantMessageId, characterId: d.characterId,
+      characterName: d.characterName || memberNameOfMsg(d.characterId),
+      role: 'assistant', type: 'text', content: '', streaming: true,
+      _key: `live-s${d.assistantMessageId}`
+    })
+    scrollBottom()
+    return
+  }
+  // 消息完成（assistantMessageId + content）
+  if (d.assistantMessageId != null) {
+    const row = messages.value.find(m => m.id === d.assistantMessageId)
+    if (row) { row.streaming = false; row.content = d.content || row.content; scrollBottom() }
+    return
+  }
+  // 未知载荷：忽略
+}
+
+// B5 成员选项：特殊角色组 + 普通居民组
+const memberOptions = computed(() => {
+  const specials = (characters.value || []).map(ch => ({ ref: npcRef(ch.id), name: ch.name, type: 'special', sub: ch.title || 'NPC 角色' }))
+  const crowds = (npcs.value || []).map(n => ({ ref: npcRef(n.id), name: n.name, type: 'common', sub: n.occupation || n.affiliation || '普通居民' }))
+  return [
+    { label: 'NPC 角色', options: specials },
+    { label: '普通居民', options: crowds }
+  ]
+})
+
+/** 按统一身份引用解析成员显示名（npc:{id} 在单主表下同一 id 空间：先查 NPC 角色，再查普通居民列表兜底） */
+function memberNameOf(ref) {
+  const id = npcIdOf(ref)
+  if (id == null) return null
+  const ch = characters.value.find(x => x.id === id)
+  if (ch) return ch.name
+  const n = npcs.value.find(x => x.id === id)
+  return n ? n.name : null
+}
+
+/** 群聊成员角色对象列表（B5：优先会话 members 详情——memberType/memberName 支持普通 NPC） */
 function groupMembers(c) {
+  const ms = (c && c.members) || []
+  if (ms.length) {
+    return ms.map(m => ({
+      id: m.characterId,
+      memberType: m.memberType,
+      memberName: m.memberName,
+      name: m.memberName || charName(m.characterId) || '角色' + m.characterId
+    })).filter(Boolean)
+  }
   const ids = (c && c.characterIds) || []
   return ids.map(id => characters.value.find(x => x.id === id)).filter(Boolean)
 }
@@ -451,6 +593,19 @@ function groupMembers(c) {
 function charName(cid) {
   const ch = characters.value.find(x => x.id === cid)
   return ch ? ch.name : null
+}
+
+/**
+ * 消息归属角色名（按当前会话成员解析：memberName 优先[含普通居民快照]，回退特殊角色表）。
+ * <p>修：历史消息/围观消息加载时若 characterId 存在需要显示角色名——此前引用未定义的
+ * memberNameOfMsg 会导致整批消息加载失败（catch 吞掉显示「加载消息失败」）。</p>
+ */
+function memberNameOfMsg(cid) {
+  if (cid == null) return null
+  const ms = (currentConv.value && currentConv.value.members) || []
+  const m = ms.find(x => x.characterId === cid)
+  if (m && m.memberName) return m.memberName
+  return charName(cid)
 }
 
 /** 滚动到底部 */
@@ -510,22 +665,29 @@ async function removeConv(c) {
   } catch (_) { /* 用户取消或失败 */ }
 }
 
-/** 加载会话列表与角色（2026-08-18 恢复群聊：不再过滤 group 会话） */
+/** 加载会话列表与角色（恢复群聊：不再过滤 group 会话；B5：一并加载普通 NPC 供创建会话选择） */
 async function loadAll() {
   try {
     conversations.value = await fetchConversations(projectId)
     characters.value = await fetchCharacters(projectId)
+    try {
+      const npcPage = await fetchOrdinaryNpcs(projectId, { page: 1, size: 200 })
+      npcs.value = npcPage.list || []
+    } catch (_) { npcs.value = [] }
   } catch (e) { ElMessage.error(e.message || '加载失败') }
 }
 
-/** 加载当前会话角色信息（右栏：角色卡 + Prompt），群聊支持多角色切换 */
+/** 加载当前会话角色信息（右栏：角色卡 + Prompt），群聊支持多角色切换（B5：含普通 NPC 成员） */
 async function loadRoleInfo(c) {
   currentRole.value = null
   roleCard.value = null
   roleList.value = []
+  const ms = (c && c.members) || []
   const ids = c && c.characterIds
-  if (!ids || ids.length === 0) return
-  roleList.value = ids.map(id => characters.value.find(x => x.id === id) || { id, name: '角色' + id })
+  if (!ms.length && (!ids || ids.length === 0)) return
+  roleList.value = ms.length
+    ? ms.map(m => (m ? { id: m.characterId, memberType: m.memberType, name: m.memberName || charName(m.characterId) || '角色' + m.characterId } : null)).filter(Boolean)
+    : ids.map(id => characters.value.find(x => x.id === id) || { id, name: '角色' + id })
   await selectRole(roleList.value[0])
 }
 
@@ -533,24 +695,92 @@ async function loadRoleInfo(c) {
 async function selectRole(ch) {
   currentRole.value = ch
   roleCard.value = null
-  try { roleCard.value = await fetchCharacterCard(ch.id) } catch (_) { /* 无角色卡时保持空 */ }
+  // ：普通型 NPC 同样有 11 维档案（建档两条 Prompt 均产出 v2 视图），故不再按成员类型跳过请求；
+  // 确实无档案时接口返回 data=null（角色不存在才 404），失败静默保持"尚未生成档案"空态。
+  try {
+    roleCard.value = ch ? await fetchCharacterCard(ch.id) : null
+  } catch (_) { /* 无档案/无权限时保持空 */ }
   await loadMemories()
 }
 
-// ==================== P4-1 长期记忆 ====================
+// ==================== 长期记忆 ====================
 
 /** 重要度颜色映射（记忆标签） */
 function impTag(i) { return i >= 4 ? 'danger' : (i >= 3 ? 'warning' : 'info') }
 
-/** 加载当前角色的记忆列表（fact/summary） */
+/** 记忆类型显示名 */
+function typeLabel(m) {
+  if (m.type === 'semantic') return m.subtype === 'summary' ? '摘要' : '事实'
+  if (m.type === 'episodic') return '经历'
+  if (m.type === 'reflection') return '反思'
+  if (m.type === 'plan') return '计划'
+  return '记忆'
+}
+
+/** 记忆类型标签色（摘要=primary / 事实=info / 经历=warning / 反思=danger / 计划=success） */
+function typeTag(m) {
+  if (m.type === 'semantic') return m.subtype === 'summary' ? 'primary' : 'info'
+  if (m.type === 'episodic') return 'warning'
+  if (m.type === 'reflection') return 'danger'
+  if (m.type === 'plan') return 'success'
+  return 'info'
+}
+
+/** 记忆条目样式类 */
+function memoryClass(m) {
+  if (m.type === 'semantic') return m.subtype === 'summary' ? 'summary' : 'fact'
+  if (m.type === 'episodic') return 'observation'
+  return m.type || 'fact'
+}
+
+/** 时间格式化（工作记忆展示用，YYYY-MM-DD HH:mm） */
+function fmtTime(t) {
+  if (!t) return ''
+  const d = new Date(t)
+  if (Number.isNaN(d.getTime())) return String(t)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/** 加载当前角色的记忆列表 */
 async function loadMemories() {
   if (!currentRole.value) { memories.value = []; return }
   memoryLoading.value = true
   try {
-    const page = await fetchMemories(projectId, { characterId: currentRole.value.id, page: 1, size: 50 })
+    const params = isCommonMemberType(currentRole.value.memberType)
+      ? { characterRef: npcRef(currentRole.value.id), page: 1, size: 50 }
+      : { characterId: currentRole.value.id, page: 1, size: 50 }
+    const page = await fetchMemories(projectId, params)
     memories.value = page.list || []
   } catch (e) { ElMessage.error(e.message || '加载记忆失败') }
   finally { memoryLoading.value = false }
+  await loadWorkingMemories()
+}
+
+/** 加载当前角色 L1 工作记忆 */
+async function loadWorkingMemories() {
+  if (!currentRole.value) { workingMemories.value = []; return }
+  workingMemoryLoading.value = true
+  try {
+    const params = isCommonMemberType(currentRole.value.memberType)
+      ? { characterRef: npcRef(currentRole.value.id), status: 'active', page: 1, size: 50 }
+      : { characterId: currentRole.value.id, status: 'active', page: 1, size: 50 }
+    const page = await fetchWorkingMemories(projectId, params)
+    workingMemories.value = page.list || []
+  } catch (_) { workingMemories.value = [] }
+  finally { workingMemoryLoading.value = false }
+}
+
+/** L1 工作项类型显示名 */
+function workingTypeLabel(w) {
+  const t = w.itemType || 'draft'
+  return { draft: '草稿', task: '任务', context: '上下文', perception: '感知' }[t] || t
+}
+
+/** L1 工作项类型标签色 */
+function workingTypeTag(w) {
+  const t = w.itemType || 'draft'
+  return { draft: 'info', task: 'primary', context: 'success', perception: 'warning' }[t] || 'info'
 }
 
 /**
@@ -568,7 +798,7 @@ function onInfoTabChange(name) {
 /** 删除单条记忆（软删） */
 async function doDeleteMemory(m) {
   try {
-    await ElMessageBox.confirm(`确认删除该条${m.kind === 'summary' ? '摘要' : '记忆'}？删除后不再注入后续对话。`, '删除确认', { type: 'warning' })
+    await ElMessageBox.confirm(`确认删除该条${m.subtype === 'summary' ? '摘要' : '记忆'}？删除后不再注入后续对话。`, '删除确认', { type: 'warning' })
     await deleteMemory(m.id)
     ElMessage.success('已删除')
     await loadMemories()
@@ -587,21 +817,34 @@ async function doExtractMemories() {
   finally { extracting.value = false }
 }
 
-// ==================== P4-2 世界时钟 ====================
+// ==================== 世界时钟 ====================
 
 /** 加载项目世界时钟状态（创建/编辑对话场景时读取世界时间快照） */
 async function loadWorldClock() {
   try { worldClock.value = await fetchWorldClock(projectId) } catch (_) { /* 无权限/失败时静默 */ }
 }
 
-/** 切换会话并加载历史 */
+/** 启动世界时钟轮询（头部世界时间实时刷新，每 30 秒；仅对话页打开时） */
+function startClockPolling() {
+  stopClockPolling()
+  clockTimer = setInterval(loadWorldClock, 30000)
+}
+
+/** 停止世界时钟轮询 */
+function stopClockPolling() {
+  if (clockTimer) { clearInterval(clockTimer); clockTimer = null }
+}
+
+/** 切换会话并加载历史（：NPC 内群打开实时围观订阅，其余会话关闭订阅） */
 async function switchConv(c) {
   closeStream()
+  closeLiveStream()
   forceSpeaker.value = null
   currentConv.value = c
   await loadMessages()
   loadRoleInfo(c)
   scrollBottom()
+  if (isNpcGroup(c)) openLiveStream()
 }
 
 /** 加载当前会话历史消息 */
@@ -610,17 +853,17 @@ async function loadMessages() {
   try {
     const list = await fetchMessages(currentConv.value.id)
     messages.value = list.map(m => ({
-      ...m, characterName: m.characterId ? charName(m.characterId) : null, _key: `h${m.id}`
+      ...m, characterName: m.characterId ? memberNameOfMsg(m.characterId) : null, _key: `h${m.id}`
     }))
   } catch (e) { ElMessage.error(e.message || '加载消息失败') }
 }
 
-/** 打开新建会话对话框（初始化场景字段：所在地/世界时间/规则标题；默认单聊） */
+/** 打开新建会话对话框（初始化场景字段：所在地/世界时间/规则标题；默认单聊；B5 支持普通居民） */
 function openCreateConv() {
-  if (characters.value.length === 0) return ElMessage.warning('请先在项目设置中添加角色')
+  if (characters.value.length === 0 && npcs.value.length === 0) return ElMessage.warning('请先在项目设置中添加角色或普通居民')
   createDialog.mode = 'single'
-  createDialog.characterId = null
-  createDialog.characterIds = []
+  createDialog.memberRef = null
+  createDialog.memberRefs = []
   createDialog.title = ''
   createDialog.titleTouched = false
   createDialog.location = ''
@@ -634,27 +877,27 @@ function openCreateConv() {
 /** 会话类型切换（单聊/群聊）：重置另一字段并联动规则标题 */
 function onModeChange() {
   if (createDialog.mode === 'single') {
-    createDialog.characterIds = []
+    createDialog.memberRefs = []
   } else {
-    createDialog.characterId = null
+    createDialog.memberRef = null
   }
   applyRuleTitle()
 }
 
-/** 创建会话（单聊/群聊；携带对话场景：所在地 + 世界时间快照） */
+/** 创建会话（单聊/群聊；携带对话场景：所在地 + 世界时间快照；B5 提交 memberRefs） */
 async function doCreateConv() {
   const isGrp = createDialog.mode === 'group'
-  const ids = isGrp
-    ? (createDialog.characterIds || [])
-    : (createDialog.characterId ? [createDialog.characterId] : [])
-  if (!ids.length) return ElMessage.warning(isGrp ? '请选择参与群聊的角色' : '请选择角色')
-  if (isGrp && ids.length < 2) return ElMessage.warning('群聊至少选择 2 个角色')
+  const refs = isGrp
+    ? (createDialog.memberRefs || [])
+    : (createDialog.memberRef ? [createDialog.memberRef] : [])
+  if (!refs.length) return ElMessage.warning(isGrp ? '请选择参与群聊的成员' : '请选择成员')
+  if (isGrp && refs.length < 2) return ElMessage.warning('群聊至少选择 2 个成员')
   creating.value = true
   try {
     const conv = await createConversation(projectId, {
       mode: createDialog.mode,
       title: createDialog.title || null,
-      characterIds: ids,
+      memberRefs: refs,
       location: createDialog.location?.trim() || null,
       gameTimeText: createDialog.gameTimeText?.trim() || null
     })
@@ -671,7 +914,7 @@ function quickChat(ch) {
   currentConv.value = null
   openCreateConv()
   createDialog.mode = 'single'
-  createDialog.characterId = ch.id
+  createDialog.memberRef = npcRef(ch.id)
   applyRuleTitle()
 }
 
@@ -681,6 +924,7 @@ function quickChat(ch) {
  * 从世界观地理文本启发式提取地点候选（按换行/常见分隔符切分，去重，限长）。
  *
  * @param geography 世界观「地理/地图设定」文本
+ *
  * @return 候选地点数组（≤30 条）
  */
 function parseLocationOptions(geography) {
@@ -716,14 +960,13 @@ function shortGameTime(t) {
   return m ? `${m[1]}月${m[2]}日 ${m[3]}时${m[4]}分` : String(t)
 }
 
-/** 规则模板生成专属标题：角色（群聊=多角色名）· 所在地（或远程通讯） · 世界时间 */
+/** 规则模板生成专属标题：成员（群聊=多成员名）· 所在地（或远程通讯） · 世界时间（B5 支持普通居民） */
 function buildRuleTitle() {
   let name
   if (createDialog.mode === 'group') {
-    name = (createDialog.characterIds || []).map(id => charName(id)).filter(Boolean).join('、')
+    name = (createDialog.memberRefs || []).map(r => memberNameOf(r)).filter(Boolean).join('、')
   } else {
-    const ch = characters.value.find(x => x.id === createDialog.characterId)
-    name = ch?.name
+    name = createDialog.memberRef ? memberNameOf(createDialog.memberRef) : null
   }
   const loc = createDialog.location?.trim() || '远程通讯'
   const time = shortGameTime(createDialog.gameTimeText)
@@ -747,14 +990,20 @@ async function refreshSceneTime() {
   applyRuleTitle()
 }
 
-/** AI 重写标题：调用后端 AI 生成，失败回退规则标题（群聊不支持，按钮已禁用） */
+/** AI 重写标题：调用后端 AI 生成，失败回退规则标题（群聊/普通居民不支持，按钮已禁用） */
 async function doAiRewriteTitle() {
   if (createDialog.mode === 'group') return ElMessage.info('群聊暂不支持单角色 AI 标题，可直接手动修改')
-  if (!createDialog.characterId) return ElMessage.warning('请先选择角色')
+  // ：npc:{id} 不再编码类型，故"是否特殊型"改为查成员选项里的 type（意图 B：行为分支只对特殊型生效）
+  const opt = memberOptions.value.flatMap(g => g.options).find(o => o.ref === createDialog.memberRef)
+  if (!opt || opt.type !== 'special') {
+    return ElMessage.warning('请先选择特殊 NPC 角色（普通居民暂不支持 AI 标题，可手改）')
+  }
   createDialog.aiTitleLoading = true
   try {
+    // B5：AI 标题基于特殊角色档案生成；普通居民不支持（可手改标题）
+    const characterId = npcIdOf(createDialog.memberRef)
     const res = await generateConversationTitle(projectId, {
-      characterId: createDialog.characterId,
+      characterId,
       location: createDialog.location?.trim() || undefined,
       gameTimeText: createDialog.gameTimeText?.trim() || undefined
     })
@@ -833,7 +1082,7 @@ async function send() {
   }
 }
 
-/** 打开 SSE 流式通道（单聊/群聊共用） */
+/** 打开 SSE 流式通道（单聊/群聊共用， 统一生成型客户端：断线标记失败不重连） */
 async function openStream(forceCharacterId) {
   closeStream()
   const convId = currentConv.value && currentConv.value.id
@@ -845,73 +1094,90 @@ async function openStream(forceCharacterId) {
   }
   streaming.value = true
   startStreamTimer()
-  const source = new EventSource(conversationStreamUrl(convId, forceCharacterId))
-  es.value = source
+  genClient = createGeneration({
+    url: conversationStreamUrl(convId, forceCharacterId),
+    events: [SSE_EVENTS.MESSAGE_START, SSE_EVENTS.TOKEN, SSE_EVENTS.DONE, SSE_EVENTS.ERROR],
+    // 终止判定：单聊 done / 群聊「整轮结束」done（group=true）才是终止；单角色回复完成不算
+    isTerminal: (name, d) => name === SSE_EVENTS.DONE
+      && (!isGroup(currentConv.value) || (d && d.group === true)),
+    onEvent: (name, d) => handleGenEvent(name, d),
+    onDone: (finalData) => handleGenDone(finalData),
+    onError: (err) => handleGenError(err)
+  })
+}
 
-  source.addEventListener('message-start', (ev) => {
+/** 生成流事件分发（message-start/token/done） */
+function handleGenEvent(name, d) {
+  if (!d || typeof d !== 'object') return
+  if (name === SSE_EVENTS.MESSAGE_START) {
     // 群聊：新角色消息动态创建
-    const d = JSON.parse(ev.data)
     messages.value.push({
       id: d.assistantMessageId, characterId: d.characterId,
       characterName: d.characterName || charName(d.characterId),
       role: 'assistant', type: 'text', content: '', streaming: true, _key: `s${d.assistantMessageId}`
     })
     scrollBottom()
-  })
-
-  source.addEventListener('token', (ev) => {
-    const d = JSON.parse(ev.data)
+  } else if (name === SSE_EVENTS.TOKEN) {
     const row = isGroup(currentConv.value)
       ? [...messages.value].reverse().find(m => m.streaming && m.characterId === d.characterId)
       : aiMsg
     if (row) { row.content += d.delta; scrollBottom() }
-  })
-
-  source.addEventListener('done', async (ev) => {
-    const d = JSON.parse(ev.data)
+  } else if (name === SSE_EVENTS.DONE) {
     if (isGroup(currentConv.value)) {
-      if (d.group) {
-        // 整轮结束
-        closeStream()
-        await loadMessages()
-      } else if (d.characterId) {
-        // 单角色回复完成：回填最终内容
+      // 单角色回复完成（整轮结束由 isTerminal 判定走 onDone）：回填最终内容
+      if (!d.group && d.characterId) {
         const row = messages.value.find(m => m.id === d.assistantMessageId)
         if (row) { row.streaming = false; row.content = d.content || row.content }
         scrollBottom()
       }
-    } else {
-      closeStream()
+    } else if (aiMsg) {
       aiMsg.streaming = false
-      try {
-        const fresh = await fetchMessages(convId)
-        const last = fresh[fresh.length - 1]
-        if (last) { aiMsg.content = last.content || aiMsg.content; aiMsg.id = last.id }
-      } catch (_) { /* 忽略刷新失败 */ }
-      scrollBottom()
+      aiMsg.content = d.content || aiMsg.content
     }
-    // P4-1：对话轮次完成后，后端会异步抽取长期记忆（AI 抽取约数秒后才落库），
-    // 延迟刷新右栏「记忆」Tab，避免一直显示陈旧空数据（如最初的「暂无记忆」）。
-    setTimeout(() => { if (currentRole.value) loadMemories() }, 3000)
-  })
-
-  source.addEventListener('error', async (ev) => {
-    closeStream()
-    let msg = '对话生成失败，请重试'
-    try { msg = JSON.parse(ev.data).message || msg } catch (_) { /* 忽略 */ }
-    if (!isGroup(currentConv.value) && aiMsg) { aiMsg.streaming = false; aiMsg.content = aiMsg.content || msg }
-    ElMessage.error(msg)
-    scrollBottom()
-  })
-
-  source.onerror = () => {
-    // EventSource 自身错误（如连接关闭）：已 done 则忽略
   }
 }
 
-/** 关闭当前 SSE 流 */
+/** 生成流正常结束（单聊 done / 群聊整轮 done）：收尾 + 刷新消息 + 延迟刷新记忆 */
+async function handleGenDone(finalData) {
+  const convId = currentConv.value && currentConv.value.id
+  if (!isGroup(currentConv.value) && aiMsg) {
+    aiMsg.streaming = false
+    if (finalData && finalData.content) aiMsg.content = finalData.content
+    try {
+      const fresh = await fetchMessages(convId)
+      const last = fresh[fresh.length - 1]
+      if (last) { aiMsg.content = last.content || aiMsg.content; aiMsg.id = last.id }
+    } catch (_) { /* 忽略刷新失败 */ }
+    scrollBottom()
+  } else {
+    await loadMessages()
+  }
+  // ：对话轮次完成后，后端会异步抽取长期记忆（AI 抽取约数秒后才落库），
+  // 延迟刷新右栏「记忆」Tab，避免一直显示陈旧空数据（如最初的「暂无记忆」）。
+  setTimeout(() => { if (currentRole.value) loadMemories() }, 3000)
+}
+
+/** 生成流失败（后端 error 事件 / 断线 / 超时：统一分类提示，不自动重连防重复生成） */
+function handleGenError(err) {
+  let msg = '对话生成失败，请重试'
+  if (err && err.kind === 'event' && err.data && err.data.message) {
+    msg = err.data.message
+  } else if (err && err.kind === 'connection') {
+    msg = '生成连接已中断，请重试'
+  } else if (err && err.kind === 'timeout') {
+    msg = '生成超时，请重试'
+  } else if (err && err.message) {
+    msg = err.message
+  }
+  if (!isGroup(currentConv.value) && aiMsg) { aiMsg.streaming = false; aiMsg.content = aiMsg.content || msg }
+  closeStream()
+  ElMessage.error(msg)
+  scrollBottom()
+}
+
+/** 关闭当前生成流 */
 function closeStream() {
-  if (es.value) { es.value.close(); es.value = null }
+  if (genClient) { genClient.close(); genClient = null }
   streaming.value = false
   stopStreamTimer()
 }
@@ -945,7 +1211,7 @@ async function submitWorldEvent() {
   finally { eventDialog.loading = false }
 }
 
-/** 「无玩家轮次」自主推进一轮（群聊，P4 预留） */
+/** 「无玩家轮次」自主推进一轮 */
 async function doAdvance() {
   if (!currentConv.value || streaming.value) return
   try {
@@ -977,34 +1243,29 @@ function prettyJson(text) {
   try { return JSON.stringify(JSON.parse(text), null, 2) } catch (_) { return text }
 }
 
-/** 数组安全取值（角色卡 persona 字段可能为数组/字符串/缺失，统一转数组供分节渲染） */
-function list(v) {
-  if (Array.isArray(v)) return v
-  if (typeof v === 'string' && v.trim()) return v.split(/[、,，;；]/).filter(Boolean)
-  return []
-}
-
 /** 会话时间显示 */
 function convTime(t) {
   if (!t) return ''
   return String(t).slice(0, 16).replace('T', ' ')
 }
 
-onMounted(() => { loadAll(); loadGroupConfig(); loadWorldClock() })
-onBeforeUnmount(closeStream)
+onMounted(() => { loadAll(); loadGroupConfig(); loadWorldClock(); startClockPolling() })
+onBeforeUnmount(() => { closeStream(); closeLiveStream(); stopClockPolling() })
 </script>
 
 <style scoped>
-/* ===== 三栏布局（令牌化，随深浅主题） =====
-   高度取父级 .proj-content 内容区 100%（自动适应顶栏/内边距），替代旧的 magic calc(100vh-140px)：
-   保证消息流始终占满剩余高度，不会因头部被撑高而压成细条。 */
+/*
+ * ===== 三栏布局（令牌化，随深浅主题） =====
+ * 高度取父级 .proj-content 内容区 100%（自动适应顶栏/内边距），替代旧的 magic calc(100vh-140px)：
+ * 保证消息流始终占满剩余高度，不会因头部被撑高而压成细条。
+ */
 .chat-view { display: flex; gap: 16px; height: 100%; min-height: 0; }
 .replies-ctl { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
 .replies-label { font-size: 0.78rem; color: var(--text-secondary); }
 
-/* ===== 左栏：会话 + 角色 ===== */
+/* ===== 左栏：会话 + 角色（宽度统一取页内双栏令牌）===== */
 .chat-side {
-  width: 260px; background: var(--bg-layer-1); border-radius: var(--radius-lg);
+  width: var(--page-aside-w, 260px); background: var(--bg-layer-1); border-radius: var(--radius-lg);
   border: 1px solid var(--border-l1); padding: 12px; display: flex; flex-direction: column;
   overflow-y: auto; box-shadow: var(--shadow-lv1); flex-shrink: 0;
 }
@@ -1094,6 +1355,24 @@ onBeforeUnmount(closeStream)
 .event-label { font-size: 12px; color: var(--accent-text); font-weight: 600; margin-bottom: 4px; }
 .event-content { font-size: 14px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
 
+/* ---：NPC 内群围观状态（头部） + 系统消息（退场/收尾叙述，居中弱化） --- */
+.npc-group-status { display: inline-flex; align-items: center; gap: 6px; }
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-placeholder); display: inline-block;
+  transition: background .3s;
+}
+.live-dot.on { background: #67c23a; box-shadow: 0 0 0 3px rgba(103, 194, 58, .18); }
+.live-text { font-size: 0.74rem; color: var(--text-secondary); }
+.npc-group-tip { font-size: 0.72rem; color: var(--text-tertiary); }
+.system-row { display: flex; justify-content: center; }
+.system-note {
+  font-size: 0.78rem; color: var(--text-tertiary); line-height: 1.6;
+  background: var(--bg-layer-2); border-left: 3px solid var(--border-l2);
+  border-radius: 8px; padding: 6px 14px; max-width: min(520px, 88%);
+  white-space: pre-wrap; word-break: break-word; text-align: center;
+}
+
 /* --- 生成中状态（DSH TurnStatus：流光文字 + 计时） --- */
 .turn-status {
   height: 26px; font-size: 14px; font-weight: 500; line-height: 24px;
@@ -1181,9 +1460,9 @@ onBeforeUnmount(closeStream)
 .send-btn:hover:not(:disabled) { background: var(--accent-strong); transform: translateY(-1px); }
 .send-btn:disabled { background: var(--bg-layer-3); color: var(--text-placeholder); cursor: not-allowed; }
 
-/* ===== 右栏：角色信息 ===== */
+/* ===== 右栏：角色信息（宽度统一取页内双栏令牌）===== */
 .chat-info {
-  width: 340px; background: var(--bg-layer-1); border-radius: var(--radius-lg);
+  width: var(--page-info-w, 340px); background: var(--bg-layer-1); border-radius: var(--radius-lg);
   border: 1px solid var(--border-l1); padding: 12px; display: flex; flex-direction: column;
   overflow-y: auto; box-shadow: var(--shadow-lv1); flex-shrink: 0;
 }
@@ -1212,26 +1491,38 @@ onBeforeUnmount(closeStream)
 .scene-tip { font-size: 0.72rem; color: var(--text-tertiary); line-height: 1.5; margin-top: 4px; width: 100%; }
 .time-row { width: 100%; }
 
-/* P4-1 长期记忆 Tab */
+/* 长期记忆 Tab */
 .memory-ops { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .memory-hint { font-size: 0.72rem; color: var(--text-secondary); }
 .memory-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 340px); overflow-y: auto; }
 .memory-item { border: 1px solid var(--border-l1); border-radius: 8px; padding: 8px 10px; }
 .memory-item.summary { background: color-mix(in srgb, var(--state-success) 8%, transparent); }
 .memory-item.fact { background: var(--bg-layer-2); }
+.memory-item.observation { background: color-mix(in srgb, var(--state-warning) 8%, transparent); }
+.memory-item.reflection { background: color-mix(in srgb, var(--state-danger) 8%, transparent); }
+.memory-item.plan { background: color-mix(in srgb, var(--state-primary) 8%, transparent); }
 .memory-head { display: flex; align-items: center; gap: 6px; }
 .memory-del { margin-left: auto; opacity: 0; transition: opacity .15s; }
 .memory-item:hover .memory-del { opacity: 1; }
 .memory-content { font-size: 0.8rem; color: var(--text-primary); margin-top: 6px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
+/* L1 工作记忆（热缓冲） */
+.working-memory-sec { margin-top: 14px; border-top: 1px dashed var(--border-light); padding-top: 10px; }
+.working-memory-title { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.working-memory-list { display: flex; flex-direction: column; gap: 8px; max-height: 30vh; overflow-y: auto; }
+.working-memory-item { border: 1px dashed var(--border-light); border-radius: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--state-primary) 4%, transparent); }
+.working-memory-head { display: flex; align-items: center; gap: 6px; }
+.working-memory-time { font-size: 0.7rem; color: var(--text-placeholder); margin-left: auto; }
+.working-memory-content { font-size: 0.78rem; color: var(--text-primary); margin-top: 5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+
 /* ===== 窄屏自适应：收缩左右固定列，避免把中栏对话流压成细竖条 ===== */
 @media (max-width: 1320px) {
-  .chat-side { width: 220px; }
-  .chat-info { width: 300px; }
+  .chat-side { width: calc(var(--page-aside-w, 260px) - 40px); }
+  .chat-info { width: calc(var(--page-info-w, 340px) - 40px); }
 }
 @media (max-width: 1160px) {
   /* 窗口过窄时隐藏右栏角色信息，保证对话流可用（角色卡在「NPC 角色」页仍可查看） */
   .chat-info { display: none; }
-  .chat-side { width: 200px; }
+  .chat-side { width: calc(var(--page-aside-w, 260px) - 60px); }
 }
 </style>

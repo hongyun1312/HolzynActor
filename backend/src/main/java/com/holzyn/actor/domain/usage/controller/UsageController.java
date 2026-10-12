@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.usage.controller;
 
 import com.holzyn.actor.domain.account.CurrentUserProvider;
@@ -12,11 +30,10 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * AI 用量统计控制器（P2 管理后台「AI 用量」）。
+ * AI 用量统计控制器。
  * <p>职责：提供用户级用量聚合接口 GET /api/usage/stats，支持按项目/模型/场景/日期范围筛选，
  * 返回总量卡片 + 各维度分组 + 明细（供首页「AI 用量」Tab 展示）。</p>
  * <p>归属隔离：一律以当前会话用户为准（CurrentUserProvider）。</p>
- * <p>所属模块：controller/usage（用量子域）</p>
  */
 @RestController
 @RequestMapping("/api")
@@ -33,11 +50,14 @@ public class UsageController {
      * 用量统计（用户级聚合）。
      *
      * @param projectId 项目筛选（可空）
-     * @param scene     场景筛选（可空）
-     * @param model     模型筛选（可空）
+     *
+     * @param scene 场景筛选（可空）
+     *
+     * @param model 模型筛选（可空）
+     *
      * @param startDate 起始日期（可空）
-     * @param endDate   结束日期（可空）
-     * @return {summary, byProject, byScene, byModel, byDate, detail}
+     *
+     * @param endDate 结束日期（可空）
      */
     @GetMapping("/usage/stats")
     public R<Map<String, Object>> stats(@RequestParam(name = "projectId", required = false) Long projectId,

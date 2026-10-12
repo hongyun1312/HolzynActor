@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.common;
 
 import lombok.extern.slf4j.Slf4j;
@@ -13,13 +31,12 @@ import java.security.SecureRandom;
 import java.util.Base64;
 
 /**
- * .holzyn 项目包「密码加密」工具（V2.0 设计文档 §6.3/§11）。
+ * .holzyn 项目包「密码加密」工具。
  * <p>职责：对敏感配置块（如 settings/apis.json）做口令加密——
  * PBKDF2（HMAC-SHA256，迭代 ≥210_000）从用户密码派生密钥 → AES-256-GCM 加密；
  * 密文格式 {@code v1:<saltBase64>:<ivBase64>:<dataBase64>}；salt/iv 每次随机生成。</p>
  * <p>与 API Key 加密（AesCipherService）不同：这里是用户口令派生密钥（可导出/导入携带），
  * 解密密钥只存在于内存，不落盘。</p>
- * <p>所属模块：service/common（通用服务层-安全子域）</p>
  */
 @Slf4j
 @Component
@@ -46,7 +63,7 @@ public class HolzynCrypto {
     /** PBKDF2 盐长度（16 字节） */
     private static final int SALT_BYTES = 16;
 
-    /** PBKDF2 迭代次数（≥210_000，V2.0 设计要求） */
+    /** PBKDF2 迭代次数 */
     private static final int ITERATIONS = 210_000;
 
     /** 派生密钥长度（256 位） */
@@ -58,8 +75,10 @@ public class HolzynCrypto {
     /**
      * 用密码加密明文（每次生成随机 salt/iv）。
      *
-     * @param plain    明文（如 apis.json 的 JSON 文本）
+     * @param plain 明文（如 apis.json 的 JSON 文本）
+     *
      * @param password 用户密码（不可空）
+     *
      * @return 密文（v1:salt:iv:data，均为 base64）；明文为空返回 null
      */
     public String encrypt(String plain, String password) {
@@ -88,7 +107,9 @@ public class HolzynCrypto {
      * 用密码解密密文。
      *
      * @param cipherText 密文（v1:salt:iv:data）
-     * @param password   用户密码
+     *
+     * @param password 用户密码
+     *
      * @return 明文；密码错误 / 格式非法 / 解密失败返回 null
      */
     public String decrypt(String cipherText, String password) {
@@ -118,8 +139,11 @@ public class HolzynCrypto {
      * PBKDF2 派生 256 位 AES 密钥。
      *
      * @param password 用户密码
-     * @param salt     随机盐
+     *
+     * @param salt 随机盐
+     *
      * @return AES 密钥
+     *
      * @throws Exception 派生失败（理论上不会）
      */
     private SecretKeySpec deriveKey(String password, byte[] salt) throws Exception {

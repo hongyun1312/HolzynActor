@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.character.dto;
 
 import jakarta.validation.constraints.NotBlank;
@@ -8,15 +26,22 @@ import jakarta.validation.constraints.Size;
 /**
  * 角色新增/更新请求 DTO。
  * <p>职责：承载角色基础档案入参（name 必填；type/importance 有取值约束）。</p>
- * <p>所属模块：model/dto（数据传输层）</p>
  *
- * @param type          类型：special 特殊型 / common 普通型
- * @param name          角色姓名（必填）
- * @param title         头衔
- * @param detail        角色详细信息（用户自行输入，角色卡生成的核心输入源）
- * @param avatarUrl     头像 URL
+ * @param type 类型：special 特殊型 / common 普通型
+ *
+ * @param name 角色姓名（必填）
+ *
+ * @param title 头衔
+ *
+ * @param detail 角色详细信息（用户自行输入，角色卡生成的核心输入源）
+ *
+ * @param avatarUrl 头像 URL
+ *
  * @param isProtagonist 是否主角（0/1）
- * @param importance    重要度（1-5）
+ *
+ * @param importance 重要度（1-5）
+ *
+ * @param location 当前位置（：自由文本，写入时按地点表归一落 location_id + 名称快照）
  */
 public record CharacterDTO(
         @Size(max = 10, message = "类型最长 10 字符") String type,
@@ -25,6 +50,7 @@ public record CharacterDTO(
         @Size(max = 20000, message = "角色详细信息最长 20000 字符") String detail,
         String avatarUrl,
         @Min(value = 0, message = "isProtagonist 最小为 0") @Max(value = 1, message = "isProtagonist 最大为 1") Integer isProtagonist,
-        @Min(value = 1, message = "重要度最小为 1") @Max(value = 5, message = "重要度最大为 5") Integer importance
+        @Min(value = 1, message = "重要度最小为 1") @Max(value = 5, message = "重要度最大为 5") Integer importance,
+        @Size(max = 255, message = "位置最长 255 字符") String location
 ) {
 }

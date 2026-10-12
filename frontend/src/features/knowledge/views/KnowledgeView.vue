@@ -1,18 +1,29 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="knowledge-view">
     <!-- 页头：说明 + 未配置 embedding 降级提示 -->
-    <div class="page-header">
-      <div>
-        <div class="page-title">知识库</div>
-        <div class="page-desc">项目知识（项目级）+ 角色知识（角色级）文档，保存时自动分块向量化；对话前自动 RAG 检索 top-k 注入。未配置 embedding 时自动降级文本关键词检索。</div>
-      </div>
-    </div>
+    <PageHeader
+      title="知识库"
+      desc="项目知识（项目级）+ 角色知识（角色级）文档，保存时自动分块向量化；对话前自动 RAG 检索 top-k 注入。未配置 embedding 时自动降级文本关键词检索。"
+    />
     <el-alert v-if="!vectorAvailable" class="vec-alert" type="warning" :closable="false" show-icon>
       <template #title>未配置 embedding 供应商——当前为<b>文本关键词检索</b>降级模式。请在「设置 · API 配置」中为某供应商开启 embedding 并填写模型名（如 doubao-embedding / bge-m3），保存后点文档「重新向量化」。</template>
     </el-alert>
 
     <!-- 三 Tab：知识文档 / 检索预览 / 项目大事记 -->
-    <el-tabs v-model="activeTab" class="kb-tabs" @tab-change="onTabChange">
+    <PageTabs v-model="activeTab" @tab-change="onTabChange">
       <!-- ============ Tab 1 · 知识文档 ============ -->
       <el-tab-pane label="知识文档" name="docs">
         <div class="tab-ops">
@@ -22,10 +33,31 @@
           <el-button type="primary" plain @click="openUpload">
             <el-icon><HIcon name="Upload" /></el-icon>&nbsp;上传 txt/md
           </el-button>
+          <!-- 文档数可达上百条（角色级 + 项目级 + 经历沉淀），筛 + 高亮是"我知道我要找哪份"的最短路径 -->
+          <el-input
+            v-model="docKeyword"
+            clearable
+            class="doc-filter"
+            placeholder="筛选文档（标题或内容，支持多词）"
+          >
+            <template #prefix><el-icon><HIcon name="Search" /></el-icon></template>
+          </el-input>
+          <span v-if="docKeyword" class="doc-filter-count">{{ filteredDocs.length }} / {{ docs.length }}</span>
         </div>
         <div v-loading="loading" class="table-card">
-          <el-table :data="docs" empty-text="还没有知识文档，新建或上传 txt/md 开始建立知识库">
-            <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+          <el-table :data="filteredDocs" empty-text="还没有知识文档，新建或上传 txt/md 开始建立知识库">
+            <el-table-column label="标题" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                <SpotlightPill :text="row.title" :keyword="docKeyword" />
+              </template>
+            </el-table-column>
+            <!-- 摘要列：默认显示正文开头；输入筛选词后**以命中为中心**截取窗口，
+                 这样"为什么这份文档被筛出来"在列表里直接可见（不用点开详情翻全文） -->
+            <el-table-column label="摘要" min-width="280">
+              <template #default="{ row }">
+                <SpotlightPill class="doc-abstract" :text="row.content" :keyword="docKeyword" :max-length="96" />
+              </template>
+            </el-table-column>
             <el-table-column label="归属" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="row.characterId ? 'primary' : 'info'" effect="plain">
@@ -36,12 +68,22 @@
             <el-table-column label="字数" width="90" align="right">
               <template #default="{ row }">{{ (row.content || '').length }}</template>
             </el-table-column>
-            <el-table-column label="向量化" width="170">
+            <el-table-column label="向量化" width="180">
               <template #default="{ row }">
-                <el-tag v-if="row.vectorized" size="small" type="success" effect="light">
+                <!-- 四态 storeState（VECTORIZED/NOT_CONFIGURED/FAILED/EMPTY，后端向量库判定） -->
+                <el-tag v-if="row.storeState === 'VECTORIZED'" size="small" type="success" effect="light">
                   {{ row.chunkCount }} 块 · {{ row.embeddingModel || '向量' }}
                 </el-tag>
-                <el-tag v-else size="small" type="warning" effect="plain">未向量化</el-tag>
+                <el-tag v-else-if="row.storeState === 'NOT_CONFIGURED'" size="small" type="info" effect="plain" title="未配置 embedding 供应商（顶部有降级提示）">
+                  未配置
+                </el-tag>
+                <el-tag v-else-if="row.storeState === 'FAILED'" size="small" type="warning" effect="plain" title="供应商已配置但向量库无该文档（向量化失败/未入库），可点「重新向量化」">
+                  向量化失败
+                </el-tag>
+                <el-tag v-else-if="row.storeState === 'EMPTY'" size="small" type="info" effect="plain" title="文档内容为空，无内容可分块向量化">
+                  空文档
+                </el-tag>
+                <el-tag v-else size="small" type="info" effect="plain">未向量化</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="updatedAt" label="更新时间" width="160">
@@ -81,7 +123,8 @@
               <span class="hit-title">【{{ h.title }}】</span>
               <el-tag size="small" type="info" effect="plain">相关度 {{ (h.score * 100).toFixed(1) }}</el-tag>
             </div>
-            <div class="hit-text">{{ h.text }}</div>
+            <!-- 命中片段高亮：不亮的话用户得通读整段才知道"为什么这条相关" -->
+            <SpotlightPill class="hit-text" :text="h.text" :keyword="searchQuery" :max-length="260" />
           </div>
         </div>
       </el-tab-pane>
@@ -93,8 +136,8 @@
           <div v-if="projectMemories.length === 0" class="mem-empty">暂无项目级记忆</div>
           <div v-for="m in projectMemories" :key="m.id" class="mem-item">
             <div class="mem-head">
-              <el-tag size="small" :type="m.kind === 'summary' ? 'primary' : 'info'" effect="plain">
-                {{ m.kind === 'summary' ? '摘要' : '事实' }}
+              <el-tag size="small" :type="m.subtype === 'summary' ? 'primary' : 'info'" effect="plain">
+                {{ m.subtype === 'summary' ? '摘要' : '事实' }}
               </el-tag>
               <el-tag size="small" :type="m.importance >= 4 ? 'danger' : (m.importance >= 3 ? 'warning' : 'info')" effect="light">
                 重要度 {{ m.importance }}
@@ -108,7 +151,7 @@
           </div>
         </div>
       </el-tab-pane>
-    </el-tabs>
+    </PageTabs>
 
     <!-- 新建/编辑文档对话框 -->
     <el-dialog v-model="docDialog" :title="form.id ? '编辑文档' : '新建知识文档'" width="640px" :close-on-click-modal="false">
@@ -137,10 +180,14 @@
         <el-tag size="small" :type="viewDoc?.characterId ? 'primary' : 'info'" effect="plain">
           {{ viewDoc?.characterId ? (viewDoc.characterName || '角色级') : '项目级' }}
         </el-tag>
-        <el-tag v-if="viewDoc?.vectorized" size="small" type="success" effect="light">{{ viewDoc.chunkCount }} 块</el-tag>
-        <el-tag v-else size="small" type="warning" effect="plain">未向量化</el-tag>
+        <!-- 四态 storeState 查看对话框展示 -->
+        <el-tag v-if="viewDoc?.storeState === 'VECTORIZED'" size="small" type="success" effect="light">{{ viewDoc.chunkCount }} 块</el-tag>
+        <el-tag v-else-if="viewDoc?.storeState === 'NOT_CONFIGURED'" size="small" type="info" effect="plain">未配置</el-tag>
+        <el-tag v-else-if="viewDoc?.storeState === 'FAILED'" size="small" type="warning" effect="plain">向量化失败</el-tag>
+        <el-tag v-else-if="viewDoc?.storeState === 'EMPTY'" size="small" type="info" effect="plain">空文档</el-tag>
+        <el-tag v-else size="small" type="info" effect="plain">未向量化</el-tag>
       </div>
-      <pre class="doc-content">{{ viewDoc?.content }}</pre>
+      <pre class="doc-content"><SpotlightPill :text="viewDoc?.content || ''" :keyword="docKeyword" /></pre>
     </el-dialog>
 
     <!-- 上传文件对话框 -->
@@ -169,14 +216,14 @@
 
 <script setup>
 /**
- * 知识库页（前端布局重构 V1.0，设计文档 §3.9）。
+ * 知识库页。
  * <p>职责：以三个 Tab 组织知识库全部能力——
  * ① 知识文档：文档列表（归属/字数/向量化状态/更新时间/操作）+ 新建/上传；
  * ② 检索预览：检索输入 + 角色级过滤 + RAG 命中片段（向量/文本降级标记）；
  * ③ 项目大事记：项目级长期记忆集中展示（与世界详情页项目级记忆同源）。</p>
  * <p>数据来源：/api/projects/{id}/knowledge-docs、memories 系列接口。</p>
  */
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -184,6 +231,10 @@ import {
   reindexKnowledgeDoc, uploadKnowledgeDoc, searchKnowledgeDoc, fetchCharacters,
   fetchModelApis, fetchMemories, deleteMemory
 } from '@/shared/api'
+import PageHeader from '@/shared/layout/PageHeader.vue'
+import PageTabs from '@/shared/layout/PageTabs.vue'
+import SpotlightPill from '@/shared/components/SpotlightPill.vue'
+import { matchesKeywords } from '@/shared/components/spotlight'
 
 const route = useRoute()
 const projectId = Number(route.params.id)
@@ -194,6 +245,14 @@ const activeTab = ref('docs')
 // ===== 列表 =====
 const docs = ref([])
 const loading = ref(false)
+/** 文档列表筛选关键词（标题或内容命中；与高亮同一口径，避免"筛出来了但一个都不亮"） */
+const docKeyword = ref('')
+/** 筛选后的文档列表 */
+const filteredDocs = computed(() => {
+  const kw = docKeyword.value.trim()
+  if (!kw) return docs.value
+  return docs.value.filter((d) => matchesKeywords(`${d.title || ''}\n${d.content || ''}`, kw))
+})
 const characters = ref([])
 const vectorAvailable = ref(false)
 
@@ -225,7 +284,7 @@ const searched = ref(false)
 const searchHits = ref([])
 const searchMode = ref('')
 
-// ===== 项目大事记（P4-1 项目级长期记忆） =====
+// ===== 项目大事记 =====
 const memLoading = ref(false)
 const projectMemories = ref([])
 
@@ -420,12 +479,10 @@ function formatTime(t) {
 </script>
 
 <style scoped>
-.knowledge-view { max-width: 1200px; margin: 0 auto; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-.page-title { font-size: 1.3rem; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
-.page-desc { font-size: 0.85rem; color: var(--text-secondary); }
+.knowledge-view { width: 100%; max-width: var(--content-max-w, 1440px); margin: 0 auto; }
+/* 页头样式由全局类提供；页内标签卡片化外观保留（PageTabs 根元素带 .page-tabs） */
 .vec-alert { margin-bottom: 12px; }
-.kb-tabs { background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 8px 20px 16px; }
+.page-tabs { background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 8px 20px 16px; }
 .tab-ops { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 12px; }
 .table-card { padding: 8px; }
 .search-panel { padding: 12px 4px; }
@@ -438,6 +495,9 @@ function formatTime(t) {
 .hit-text { font-size: 0.86rem; color: var(--text-secondary); line-height: 1.6; }
 .doc-meta { display: flex; gap: 8px; margin-bottom: 12px; }
 .doc-content { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 0.9rem; line-height: 1.7; max-height: 60vh; overflow-y: auto; background: var(--bg-layer-2); padding: 14px; border-radius: 8px; }
+.doc-filter { width: 260px; margin-left: auto; }
+.doc-filter-count { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.doc-abstract { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
 /* 项目大事记 */
 .mem-hint { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px; }
 .mem-list { max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }

@@ -1,9 +1,27 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.common;
 
 import java.nio.file.Path;
 
 /**
- * 本地数据目录归一化（2026-08-19，克隆即用数据一致性加固）。
+ * 本地数据目录归一化（，克隆即用数据一致性加固）。
  * <p>背景：应用的数据目录默认取 {@code HOLOZYN_ACTOR_DATA_DIR}（缺省 {@code ./data}，相对工作目录）。
  * 克隆即用约定数据固定在仓库根 {@code <repo>/data}（H2 库随 Git 提交）；但 IntelliJ 直接运行
  * Spring Boot 主类时，默认工作目录是模块目录 {@code <repo>/backend}，导致连到 {@code <repo>/backend/data}
@@ -14,7 +32,6 @@ import java.nio.file.Path;
  * 用户显式设置（run.bat/run-mvn.bat 已设置、exe 化后设 %APPDATA% 等）一律尊重，不做干预。</p>
  * <p>原理：在 {@code main()} 里以 System.setProperty 写入，Spring 解析 {@code ${HOLOZYN_ACTOR_DATA_DIR:./data}}
  * 占位符时系统属性优先于环境变量，因此数据源 URL 会解析到重定向后的路径。</p>
- * <p>所属模块：common（启动期工具）</p>
  */
 public final class DataDirResolver {
 
@@ -22,6 +39,14 @@ public final class DataDirResolver {
     public static final String ENV_DATA_DIR = "HOLOZYN_ACTOR_DATA_DIR";
     /** 上传目录环境变量/系统属性名 */
     public static final String ENV_UPLOAD_DIR = "HOLOZYN_ACTOR_UPLOAD_DIR";
+    /** 日志文件环境变量/系统属性名（logback-spring.xml 经 holzyn.actor.log.file 消费） */
+    public static final String ENV_LOG_FILE = "HOLOZYN_ACTOR_LOG_FILE";
+    /** 打包桌面模式系统属性（jpackage --java-options -Dholzyn.actor.packaged=true 注入；未设置=开发/服务器模式） */
+    public static final String PROP_PACKAGED = "holzyn.actor.packaged";
+    /** 打包模式数据/上传根目录（Windows %LOCALAPPDATA%\HolzynActor） */
+    static final String PACKAGED_APP_DIR = "HolzynActor";
+    /** 打包模式数据/上传根目录（非 Windows 平台 user.home/.holzynactor） */
+    static final String PACKAGED_DOT_DIR = ".holzynactor";
 
     /** 工作目录末段为 backend（IntelliJ 模块目录）时，其父目录即仓库根 */
     private static final String BACKEND_DIR_NAME = "backend";
@@ -31,13 +56,30 @@ public final class DataDirResolver {
 
     /**
      * 归一化默认数据/上传目录（幂等，可在 main 里调用一次）。
-     * <p>规则：用户显式设置过数据或上传目录 → 跳过；工作目录末段非 backend → 跳过；
-     * 否则将 {@code HOLOZYN_ACTOR_DATA_DIR}=&lt;仓库根&gt;/data、{@code HOLOZYN_ACTOR_UPLOAD_DIR}=&lt;仓库根&gt;/uploads
-     * 写入系统属性（Spring 占位符解析时生效）。</p>
+     * <p>规则（优先级从高到低）：</p>
+     * <ol>
+     *   <li>用户显式设置过数据/上传目录（环境变量或系统属性）→ 跳过，一律尊重；</li>
+     *   <li>打包桌面模式（{@code -Dholzyn.actor.packaged=true}）→ 默认
+     *       {@code %LOCALAPPDATA%\HolzynActor\data|uploads|logs}（见 {@link #packagedRoot()}），
+     *       保证装在 Program Files 等只读位置也可写；</li>
+     *   <li>工作目录末段为 backend（IntelliJ）→ 重定向到仓库根 data/、uploads/；</li>
+     *   <li>其余情况不干预（走 application.yml 的 {@code ./data} 相对工作目录默认）。</li>
+     * </ol>
      */
     public static void normalizeDefaults() {
         // 用户显式指定（环境变量或 -D 系统属性任一存在）→ 尊重，不干预（exe 化/远程/CI 等场景）
         if (System.getenv(ENV_DATA_DIR) != null || System.getProperty(ENV_DATA_DIR) != null) {
+            return;
+        }
+        // 打包桌面模式：数据固定到用户数据目录（LOCALAPPDATA / user.home），安装到只读目录也可写
+        if (isPackaged()) {
+            Path packagedRoot = packagedRoot();
+            if (packagedRoot == null) {
+                return;
+            }
+            System.setProperty(ENV_DATA_DIR, packagedRoot.resolve("data").toAbsolutePath().toString());
+            System.setProperty(ENV_UPLOAD_DIR, packagedRoot.resolve("uploads").toAbsolutePath().toString());
+            System.setProperty(ENV_LOG_FILE, packagedRoot.resolve("logs").resolve("holzyn-actor.log").toAbsolutePath().toString());
             return;
         }
         Path root = redirectRoot(System.getProperty("user.dir"));
@@ -49,10 +91,49 @@ public final class DataDirResolver {
     }
 
     /**
+     * 是否打包桌面模式（jpackage 启动器以 {@code -Dholzyn.actor.packaged=true} 注入）。
+     * 系统属性（非环境变量）判定，与 Spring 占位符/条件装配（{@code @ConditionalOnProperty}）同源。
+     *
+     * @return true=打包桌面模式
+     */
+    static boolean isPackaged() {
+        return Boolean.parseBoolean(System.getProperty(PROP_PACKAGED));
+    }
+
+    /**
+     * 打包桌面模式数据根目录：Windows 取 {@code %LOCALAPPDATA%\HolzynActor}，
+     * 其它平台回退 {@code user.home/.holzynactor}（均不可得返回 null，调用方零干预）。
+     *
+     * @return 打包模式数据根目录或 null
+     */
+    static Path packagedRoot() {
+        return packagedRoot(System.getenv("LOCALAPPDATA"), System.getProperty("user.home"));
+    }
+
+    /**
+     * 打包桌面模式数据根目录（纯函数，可独立单测）。
+     *
+     * @param localAppData {@code LOCALAPPDATA} 环境变量值（Windows 用户应用数据目录，可为 null/空白）
+     * @param userHome     {@code user.home} 系统属性值（可为 null/空白）
+     *
+     * @return 打包模式数据根目录或 null
+     */
+    static Path packagedRoot(String localAppData, String userHome) {
+        if (localAppData != null && !localAppData.isBlank()) {
+            return Path.of(localAppData).resolve(PACKAGED_APP_DIR);
+        }
+        if (userHome != null && !userHome.isBlank()) {
+            return Path.of(userHome).resolve(PACKAGED_DOT_DIR);
+        }
+        return null;
+    }
+
+    /**
      * 计算重定向目标仓库根目录（纯函数，可独立单测）。
      * <p>仅当工作目录非空且末段为 {@code backend} 时返回其父目录（仓库根），否则返回 null。</p>
      *
      * @param cwd 工作目录（{@code user.dir}，可为 null）
+     *
      * @return 仓库根目录（可重定向时）或 null（不重定向）
      */
     static Path redirectRoot(String cwd) {

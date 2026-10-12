@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.project.entity;
 
 import jakarta.persistence.*;
@@ -8,7 +26,6 @@ import java.time.LocalDateTime;
  * 项目（作品）实体，对应表 actor_project。
  * <p>职责：承载用户创建的 NPC 角色世界项目（如某部小说/游戏世界观），
  * 包含项目名称、概要、封面与状态，按 userId 归属用户（数据隔离）。</p>
- * <p>所属模块：model/entity（实体层）</p>
  */
 @Data
 @Entity
@@ -54,7 +71,7 @@ public class ActorProject {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    /** 更新时间 */
+    /** 时间 */
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
@@ -74,7 +91,7 @@ public class ActorProject {
     }
 
     /**
-     * 更新前回调：刷新更新时间。
+     * 前回调：刷新更新时间。
      */
     @PreUpdate
     void preUpdate() {

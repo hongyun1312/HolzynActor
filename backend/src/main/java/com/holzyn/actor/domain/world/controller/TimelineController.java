@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.controller;
 
 import com.holzyn.actor.domain.account.CurrentUserProvider;
@@ -11,10 +29,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 时间线控制器（V2.1 时间线聚合接口）。
+ * 时间线控制器。
  * <p>职责：提供项目「编年史」统一时间线查询（事件/行动/记忆聚合）、手动新增事件、
  * AI 从世界观识别生成事件。</p>
- * <p>所属模块：controller/world（时间线/事件子域）</p>
  */
 @RestController
 @RequestMapping("/api")
@@ -30,11 +47,16 @@ public class TimelineController {
     /**
      * 项目统一时间线（事件/行动/记忆聚合，时间倒序）。
      *
-     * @param projectId   项目 ID
-     * @param types       类型过滤（event/action/memory，逗号分隔，空=全部）
+     * @param projectId 项目 ID
+     *
+     * @param types 类型过滤（event/action/memory，逗号分隔，空=全部）
+     *
      * @param characterId 角色过滤（可空）
-     * @param startDate   起始日期（可空，yyyy-MM-dd）
-     * @param endDate     结束日期（可空）
+     *
+     * @param startDate 起始日期（可空，yyyy-MM-dd）
+     *
+     * @param endDate 结束日期（可空）
+     *
      * @return 统一时间线节点列表
      */
     @GetMapping("/projects/{projectId}/timeline")
@@ -53,7 +75,9 @@ public class TimelineController {
      * 手动新增事件（持久化到 actor_event，source=manual）。
      *
      * @param projectId 项目 ID
-     * @param body      入参：{title?, content 必填, kind?, characterId?}
+     *
+     * @param body 入参：{title?, content 必填, kind?, characterId?}
+     *
      * @return 新增的事件视图
      */
     @PostMapping("/projects/{projectId}/events")
@@ -66,6 +90,7 @@ public class TimelineController {
      * AI 从世界观/项目概况识别生成事件（source=ai）。
      *
      * @param projectId 项目 ID
+     *
      * @return 生成的事件视图
      */
     @PostMapping("/projects/{projectId}/events/ai-generate")

@@ -1,12 +1,30 @@
-// ============================================================
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+//
 // HolzynActor · 主题系统（双主题分层 + 可换肤主色 + 世界题材联动）
 // 职责：
-//   - 深浅模式：system / light / dark（跟随系统或手动）
-//   - 主色：个性化预设/自由取色，默认 DeepSeek 蓝
-//   - 世界题材联动：进入项目按世界观题材自动换主色（恋爱→粉、科幻→蓝青…），可覆盖
-//   - 持久化：localStorage
+// - 深浅模式：system / light / dark（跟随系统或手动）
+// - 主色：个性化预设/自由取色，默认 DeepSeek 蓝
+// - 世界题材联动：进入项目按世界观题材自动换主色（恋爱→粉、科幻→蓝青…），可覆盖
+// - 持久化：localStorage
 // 应用方式：documentElement.data-theme（深浅）+ documentElement.style.--accent（主色）
-// ============================================================
+//
 import { ref, watch, computed } from 'vue'
 
 const THEME_KEY = 'holzyn-actor.theme.v1'
@@ -106,8 +124,6 @@ watch(theme, () => { apply(); persist() }, { deep: true })
 
 /**
  * 主题 composable。
- * @returns { { theme, effectiveAccent, setMode, toggleMode, setAccent, setGenreFollow,
- *              setProjectOverride, removeProjectOverride, setProjectContext, clearProjectContext } }
  */
 export function useTheme() {
   /** 设置深浅模式 */

@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="firstrun-page">
     <div class="fr-card">
@@ -64,11 +77,18 @@
       <!-- 底部操作 -->
       <div class="fr-actions">
         <el-button class="fr-skip" text @click="skip">以后再说</el-button>
+        <el-button class="fr-tutorial" text @click="openTutorial">
+          <el-icon><HIcon name="ic_public_albums" /></el-icon>
+          <span>先看新手上手教程</span>
+        </el-button>
         <el-button type="primary" class="fr-save" :loading="saving" @click="save">
           保存并开始
         </el-button>
       </div>
-      <p class="fr-tip">提示：本地数据只保存在你的电脑上；跳过也可在「设置 → 通用设置」中随时补充。</p>
+      <p class="fr-tip">
+        提示：本地数据只保存在你的电脑上；跳过也可在「设置 → 通用设置」中随时补充。
+        第一次用可以先看「新手上手教程」——它按六章说明这个世界怎么跑起来，每章都带直达入口。
+      </p>
     </div>
   </div>
 </template>
@@ -134,6 +154,23 @@ async function save() {
     ElMessage.error(e?.message || '保存失败，请稍后重试')
   } finally {
     saving.value = false
+  }
+}
+
+/**
+ * 先看新手上手教程：**先落盘账户设置**再跳教程。
+ * <p>为什么不直接跳：向导的 completion 标记决定下次启动是否还拦截到本页，
+ * 若跳过保存直接离开，用户会被反复拉回向导页——那比不做教程更糟。</p>
+ */
+async function openTutorial() {
+  saving.value = true
+  try {
+    await account.save({ ...form, onboarded: 1 })
+  } catch (e) {
+    ElMessage.warning('账户信息未保存成功，教程结束后可在「设置 → 通用设置」补充')
+  } finally {
+    saving.value = false
+    router.push('/tutorial')
   }
 }
 

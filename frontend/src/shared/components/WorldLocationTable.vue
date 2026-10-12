@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="world-location-table">
     <!-- 工具行：统计 + AI 提取 + 修改/保存 -->
@@ -9,7 +22,7 @@
         <el-button v-if="extractable && !editing" size="small" :loading="extracting" @click="doExtract">
           <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;AI 提取
         </el-button>
-        <!-- 修改 → 进入增删改查编辑模式 -->
+        <!-- → 进入增删改查编辑模式 -->
         <el-button v-if="editable && !editing" size="small" type="primary" plain @click="startEdit">修改</el-button>
         <template v-if="editing">
           <el-button size="small" type="primary" :loading="saving" @click="saveEdit">保存</el-button>
@@ -74,10 +87,10 @@
  * 世界观地点表组件（可复用：世界详情「地点详情」/ 修改世界观页 / 新建项目解析预览）。
  * <p>双模式：</p>
  * <ul>
- *   <li><b>持久化模式</b>（传 projectId）：挂载时从 /world-locations 加载；「修改」进入编辑，
- *       保存走 batch（全量替换）、删除行即从列表移除；「AI 提取」基于已存地理文本识别并合并追加。</li>
- *   <li><b>草稿模式</b>（不传 projectId，新建项目预览用）：以 v-model 双向绑定外部列表，
- *       编辑直接改本地数组并同步父级，不调后端。</li>
+ * <li><b>持久化模式</b>（传 projectId）：挂载时从 /world-locations 加载；「修改」进入编辑，
+ * 保存走 batch（全量替换）、删除行即从列表移除；「AI 提取」基于已存地理文本识别并合并追加。</li>
+ * <li><b>草稿模式</b>（不传 projectId，新建项目预览用）：以 v-model 双向绑定外部列表，
+ * 编辑直接改本地数组并同步父级，不调后端。</li>
  * </ul>
  * <p>数据来源：/api/projects/{id}/world-locations（项目级，随 .holzyn 导入导出）。</p>
  */
@@ -86,6 +99,8 @@ import { ElMessage } from 'element-plus'
 import {
   fetchWorldLocations, batchSaveWorldLocations
 } from '@/shared/api'
+// ：SSE 流统一客户端（fetch + ReadableStream 解析/错误分类统一）
+import { streamFetch, SSE_EVENTS } from '@/shared/sse/sseClient'
 
 const props = defineProps({
   /** 项目 ID：传入=持久化模式；不传=草稿模式（v-model 双向） */
@@ -133,7 +148,7 @@ function cancelEdit() {
   else list.value = (props.modelValue || []).map(r => ({ ...r }))
 }
 
-/** 新增一行 */
+/** 一行 */
 function addRow() {
   list.value.push({ name: '', type: '', intro: '', importance: 3 })
   syncParent()
@@ -166,56 +181,42 @@ async function saveEdit() {
  * AI 提取（持久化模式，SSE 流式）：基于已存地理文本流式识别地点，
  * 每提取完一个立即追加到列表（前端逐条显示），完成后与现有合并（重复跳过）。
  * 事件：start / location(每条) / done(added,total) / error。
+ * 统一 streamFetch 客户端（解析/错误分类统一）。
  */
 async function doExtract() {
   if (!props.projectId) return
   extracting.value = true
   extractCount.value = 0
   try {
-    const res = await fetch(`/api/projects/${props.projectId}/world-locations/extract/stream`, { method: 'POST' })
-    if (!res.ok || !res.body) {
-      let msg = 'AI 提取失败'
-      try { msg = (await res.json())?.message || msg } catch (_) { /* 忽略 */ }
-      throw new Error(msg)
-    }
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
     let finished = false
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() || ''
-      for (const part of parts) {
-        let event = ''
-        let data = ''
-        for (const line of part.split('\n')) {
-          if (line.startsWith('event:')) event = line.slice(6).trim()
-          else if (line.startsWith('data:')) data += line.slice(5).trim()
-        }
-        if (event === 'location') {
-          try {
-            const loc = JSON.parse(data)
-            // 逐条追加：已有地点在前，新提取的按生成顺序排列（后端已按名称去重）
-            list.value = [...list.value, { name: loc.name, type: loc.type, intro: loc.intro, importance: loc.importance }]
-            extractCount.value++
-          } catch (_) { /* 忽略单条解析失败 */ }
-        } else if (event === 'done') {
+    let firstDone = null
+    const { promise } = streamFetch({
+      url: `/api/projects/${props.projectId}/world-locations/extract/stream`,
+      method: 'POST',
+      onEvent: (name, data) => {
+        if (name === SSE_EVENTS.LOCATION && data && typeof data === 'object') {
+          // 逐条追加：已有地点在前，新提取的按生成顺序排列（后端已按名称去重）
+          list.value = [...list.value, { name: data.name, type: data.type, intro: data.intro, importance: data.importance }]
+          extractCount.value++
+        } else if (name === SSE_EVENTS.DONE) {
           finished = true
-          try {
-            const d = JSON.parse(data)
-            ElMessage.success(`AI 提取完成：提取 ${d.total} 个，新增 ${d.added} 个地点`)
-          } catch (_) { ElMessage.success('AI 提取完成') }
-        } else if (event === 'error') {
-          let msg = 'AI 提取失败'
-          try { msg = JSON.parse(data)?.message || msg } catch (_) { /* 忽略 */ }
-          throw new Error(msg)
+          firstDone = data || null
+          if (firstDone) {
+            ElMessage.success(`AI 提取完成：提取 ${firstDone.total} 个，新增 ${firstDone.added} 个地点`)
+          } else {
+            ElMessage.success('AI 提取完成')
+          }
         }
+      },
+      onError: (err) => {
+        const msg = (err && err.kind === 'event' && err.data && err.data.message)
+          ? err.data.message : (err && err.message) || 'AI 提取失败'
+        ElMessage.error(msg)
+        // 失败时回读一次数据库，避免界面残留半截数据
+        if (props.projectId) load()
       }
-      if (finished) break
-    }
+    })
+    await promise
     if (!finished && extractCount.value === 0) ElMessage.info('提取结束（未识别到新地点）')
   } catch (e) {
     ElMessage.error(e.message || 'AI 提取失败')

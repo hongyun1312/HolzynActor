@@ -1,11 +1,31 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.character.controller;
 
 import com.holzyn.actor.common.R;
 import com.holzyn.actor.domain.character.dto.CharacterDTO;
 import com.holzyn.actor.domain.character.dto.RelationBatchDTO;
 import com.holzyn.actor.domain.character.dto.RelationGenerateDTO;
+import com.holzyn.actor.domain.character.dto.RelationWriteDTO;
 import com.holzyn.actor.domain.character.vo.CharacterCardVO;
 import com.holzyn.actor.domain.character.vo.CharacterRelationGraphVO;
+import com.holzyn.actor.domain.character.vo.CharacterRelationVO;
 import com.holzyn.actor.domain.character.vo.CharacterVO;
 import com.holzyn.actor.domain.character.vo.RelationDraftVO;
 import com.holzyn.actor.domain.character.service.CharacterCardService;
@@ -19,10 +39,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 角色库与角色卡控制器（A-C2 / A-C3）。
+ * 角色库与角色卡控制器（A- / A-）。
  * <p>职责：提供角色 CRUD、角色卡生成/最新版本/版本历史/手动编辑、角色关系拓扑图/
  * 关系 AI 生成预览/批量入库等接口。统一返回 R&lt;T&gt;，角色归属经 角色→项目→用户 两级校验。</p>
- * <p>所属模块：controller/character（角色子域）</p>
  */
 @RestController
 @RequestMapping("/api")
@@ -37,6 +56,7 @@ public class CharacterController {
      * 项目角色列表。
      *
      * @param projectId 项目 ID
+     *
      * @return 角色列表（含是否已生成角色卡标记）
      */
     @GetMapping("/projects/{projectId}/characters")
@@ -50,6 +70,7 @@ public class CharacterController {
      * relations=项目下全部关系（端点已解析为节点 key，自环过滤）。</p>
      *
      * @param projectId 项目 ID
+     *
      * @return 拓扑图 VO（nodes + relations）
      */
     @GetMapping("/projects/{projectId}/character-relations")
@@ -58,14 +79,14 @@ public class CharacterController {
     }
 
     /**
-     * AI 生成角色关系预览（不落库；2026-08-19 支持普通型 NPC 范围）。
+     * AI 生成角色关系预览（不落库； 支持普通型 NPC 范围）。
      * <p>scope=character 生成「当前选中特殊 NPC」的关系；scope=crowd 生成「当前选中普通型 NPC」的关系；
      * scope=project 生成全项目角色关系网络。
      * AI 读取项目世界观 + 现有角色/普通人群名单（+单角色详细信息），返回识别并清洗后的关系草稿，
      * 供前端预览确认后再调用批量入库接口写入。</p>
      *
      * @param projectId 项目 ID
-     * @param dto       生成入参：{scope: character|crowd|project, characterId?, crowdId?, mode: rebuild|supplement}
+     *
      * @return 关系草稿列表（RelationDraftVO）
      */
     @PostMapping("/projects/{projectId}/character-relations/generate")
@@ -81,7 +102,7 @@ public class CharacterController {
      * 写入时端点命中已存在 NPC 存 id+名，否则名称兜底（id=0 + from_name/to_name）。</p>
      *
      * @param projectId 项目 ID
-     * @param dto       入库入参：{mode: rebuild|supplement, characterId?, crowdId?, items: [{from,to,relationType,description}]}
+     *
      * @return {added 实际写入条数, total 提交条数}
      */
     @PostMapping("/projects/{projectId}/character-relations/batch")
@@ -92,10 +113,72 @@ public class CharacterController {
     }
 
     /**
-     * 新增角色。
+     * 手动新增角色关系（，用户：角色关系手动 CRUD）。
+     * <p>端点支持 characterRef（special:{id}/crowd:{id}，修 幽灵歧义）与名称兜底；
+     * 可带好感/信任/状态初始值（缺省 0/0/按状态机计算）。</p>
      *
      * @param projectId 项目 ID
-     * @param dto       角色入参
+     *
+     * @return 新增后的关系行 VO
+     */
+    @PostMapping("/projects/{projectId}/character-relations")
+    public R<CharacterRelationVO> createRelation(@PathVariable("projectId") Long projectId,
+                                                 @RequestBody(required = false) RelationWriteDTO dto) {
+        return R.ok(characterRelationService.create(projectId, dto));
+    }
+
+    /**
+     * 手动编辑角色关系（，用户）：端点/类型/描述/好感/信任/状态可改（空字段保留原值）。
+     *
+     * @param id 关系主键
+     *
+     * @param dto 写入入参（可空字段=保留原值）
+     *
+     * @return 更新后的关系行 VO
+     */
+    @PutMapping("/character-relations/{id}")
+    public R<CharacterRelationVO> updateRelation(@PathVariable("id") Long id,
+                                                 @RequestBody(required = false) RelationWriteDTO dto) {
+        return R.ok(characterRelationService.update(id, dto));
+    }
+
+    /**
+     * 手动删除角色关系（，用户）。
+     *
+     * @param id 关系主键
+     *
+     * @return 删除确认
+     */
+    @DeleteMapping("/character-relations/{id}")
+    public R<Map<String, Object>> deleteRelation(@PathVariable("id") Long id) {
+        characterRelationService.delete(id);
+        return R.ok(Map.of("id", id, "deleted", true));
+    }
+
+    /**
+     * 角色关系 AI 精修。
+     * <p>把「当前状态+数值+双方档案+世界观」交 AI 综合判断好感/信任/状态，解析钳制后落库；
+     * scene=relation_refine 用量，模板 code=relation_refine 可在「设置→Prompt」编辑。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param id 关系主键
+     *
+     * @return 精修后的关系行 VO
+     */
+    @PostMapping("/projects/{projectId}/character-relations/{id}/ai-refine")
+    public R<CharacterRelationVO> aiRefineRelation(@PathVariable("projectId") Long projectId,
+                                                   @PathVariable("id") Long id) {
+        return R.ok(characterRelationService.aiRefine(projectId, id));
+    }
+
+    /**
+     * 角色。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param dto 角色入参
+     *
      * @return 创建后的角色
      */
     @PostMapping("/projects/{projectId}/characters")
@@ -107,6 +190,7 @@ public class CharacterController {
      * 角色详情。
      *
      * @param id 角色主键
+     *
      * @return 角色详情
      */
     @GetMapping("/characters/{id}")
@@ -117,8 +201,10 @@ public class CharacterController {
     /**
      * 编辑角色。
      *
-     * @param id  角色主键
+     * @param id 角色主键
+     *
      * @param dto 角色入参
+     *
      * @return 更新后的角色
      */
     @PutMapping("/characters/{id}")
@@ -130,6 +216,7 @@ public class CharacterController {
      * 删除角色（软删除）。
      *
      * @param id 角色主键
+     *
      * @return 删除确认
      */
     @DeleteMapping("/characters/{id}")
@@ -142,6 +229,7 @@ public class CharacterController {
      * 为单个角色生成（或重新生成）角色卡（AI 结构化输出）。
      *
      * @param id 角色主键
+     *
      * @return 新版本角色卡
      */
     @PostMapping("/characters/{id}/generate-card")
@@ -153,36 +241,68 @@ public class CharacterController {
      * 角色卡最新版本。
      *
      * @param id 角色主键
+     *
      * @return 最新版本角色卡（无则 data=null）
      */
     @GetMapping("/characters/{id}/card")
     public R<CharacterCardVO> card(@PathVariable("id") Long id) {
         // 归属校验在生成/编辑接口完成；此处直接按角色取最新版本
         characterService.detail(id);
-        return R.ok(characterCardService.latestCard(id).map(CharacterCardVO::of).orElse(null));
+        return R.ok(characterCardService.latestCard(id).orElse(null));
     }
 
     /**
      * 角色卡版本历史。
      *
      * @param id 角色主键
+     *
      * @return 版本列表（升序）
      */
     @GetMapping("/characters/{id}/card/versions")
     public R<List<CharacterCardVO>> cardVersions(@PathVariable("id") Long id) {
         characterService.detail(id);
-        return R.ok(characterCardService.versionHistory(id).stream().map(CharacterCardVO::of).toList());
+        return R.ok(characterCardService.versionHistory(id));
     }
 
     /**
      * 手动编辑角色卡（保存为新版本，source=edited）。
      *
-     * @param id   角色主键
+     * @param id 角色主键
+     *
      * @param body 编辑入参：{personaJson, systemPrompt}
+     *
      * @return 编辑后的角色卡
      */
     @PutMapping("/characters/{id}/card")
     public R<CharacterCardVO> editCard(@PathVariable("id") Long id, @RequestBody Map<String, String> body) {
         return R.ok(characterCardService.editCard(id, body));
+    }
+
+    /**
+     * AI 补全缺失维。
+     *
+     * @param id 角色主键
+     *
+     * @return 补全后的角色档案 VO（无缺失维时直接返回当前档案、零 AI 调用）
+     */
+    @PostMapping("/characters/{id}/card/complete")
+    public R<CharacterCardVO> completeCard(@PathVariable("id") Long id) {
+        return R.ok(characterCardService.completeMissingDims(id));
+    }
+
+    /**
+     * 回滚到指定版本（保存为新版本，source=restored）。
+     *
+     * @param id 角色主键
+     *
+     * @param body 入参：{version: 目标版本号}
+     *
+     * @return 回滚后的角色档案 VO
+     */
+    @PostMapping("/characters/{id}/card/restore")
+    public R<CharacterCardVO> restoreCard(@PathVariable("id") Long id, @RequestBody(required = false) Map<String, Object> body) {
+        Integer version = body == null ? null : (body.get("version") instanceof Number n ? n.intValue()
+                : (body.get("version") == null ? null : Integer.valueOf(String.valueOf(body.get("version")))));
+        return R.ok(characterCardService.restoreVersion(id, version));
     }
 }

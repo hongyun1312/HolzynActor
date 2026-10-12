@@ -139,7 +139,96 @@
   --el-fill-color-dark: var(--bg-layer-3);
   --el-disabled-bg-color: var(--bg-layer-2);
   --el-mask-color: var(--bg-mask);
+
+  /* ============================================================
+     外壳与布局令牌（界面布局重构 V1.0 新增；见 docs/设计文档/HolzynActor_前端布局重构设计规格_V1.0.md §4）
+     说明：--shell-side-w / --sb-inset-left 由 useShellLayout() 运行时写入实测值，
+     此处默认值仅用于「JS 尚未执行」的首帧兜底，保证不闪错位。
+     ============================================================ */
+  --shell-topbar-h: 52px;              /* 顶部图标抽屉栏高度（与旧顶栏一致） */
+  --shell-side-w: 264px;               /* 域侧栏宽度（JS 写入实测值） */
+  --shell-side-margin: 12px;           /* 悬浮岛侧栏留白（左右各一份） */
+  --shell-side-w-min: 208px;           /* 拖拽下限 */
+  --shell-side-w-max: 360px;           /* 拖拽上限 */
+  --shell-side-w-collapsed: 56px;      /* 收起后的图标窄栏宽度 */
+  --shell-drawer-w: 360px;             /* 顶部图标抽屉宽度 */
+  --shell-context-w: 360px;            /* 右侧上下文抽屉宽度 */
+  --shell-bp-sm: 1024px;               /* 断点：< 此值 → 覆盖式 */
+  --shell-bp-md: 1440px;               /* 断点：< 此值 → 自动收窄 */
+  --sb-inset-left: 276px;              /* 沙盘 3D 向左延伸量（JS 写入实测值 = 左留白 12 + 侧栏宽 264） */
+
+  /* ===== 内容区（替换各页 11 处互不相同的 max-width）===== */
+  --content-pad-x: 24px;
+  --content-pad-y: 20px;
+  --content-max-w: 1440px;             /* 居中列宽度上限（data-content-mode=wide 时不生效） */
+  --content-gap: 16px;
+  --page-header-gap: 16px;             /* 页头标题与右侧操作区的最小间距 */
+
+  /* ===== 页内双栏（4 个自带左栏的页面统一取这两个令牌）=====
+     背景：角色页 300px / 对话页 260px / 演化页 260px / 行动时间线 230px 各自硬编码，观感不齐。
+     左栏 = 列表与筛选导航；右栏 = 信息/详情面板。页面如需特例，请在页面内覆盖并注明原因。 */
+  --page-aside-w: 260px;
+  --page-info-w: 340px;
+
+  /* ===== 间距（此前项目缺失间距令牌，间距全硬编码）===== */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ===== 信息密度（html[data-density] 切换三档）===== */
+  --density-row-h: 34px;               /* 表格行高 / 列表项高 */
+  --density-gap: 10px;                 /* 元素间距 */
+  --density-font: 0.9rem;              /* 正文基准字号 */
+  --density-font-sm: 0.82rem;          /* 次要文字字号 */
+  --density-pad-y: 8px;                /* 控件纵向内边距 */
+  --density-card-pad: 16px;            /* 卡片内边距 */
+
+  /* ===== 层级（唯一权威，禁止各页自定 z-index）=====
+     顺序语义：内容 < 域侧栏 < 非固定抽屉 < 顶栏 < 点空白遮罩 < 导览 < 命令面板/右键菜单 < 浮层提示。
+     导览刻意低于命令面板与右键菜单：首次导览进行中按 Ctrl+K 时，命令面板必须完全可见，
+     而不是被导览的全屏遮罩压暗（真实渲染验证中发现的问题）。 */
+  --z-content: 1;
+  --z-sidebar: 30;
+  --z-drawer: 40;
+  --z-topbar: 50;
+  --z-mask: 60;
+  --z-tour: 65;
+  --z-command: 70;
+  --z-context-menu: 75;
+  --z-toast: 80;
+
+  /* ===== 统一页头（替换各页 scoped 重复定义的 .page-header/.page-title/.page-desc）===== */
+  --page-header-gap: 16px;
 }
+
+/* ===== 信息密度三档（默认 cozy = :root 值，无需覆盖）===== */
+html[data-density="compact"] {
+  --density-row-h: 30px;
+  --density-gap: 8px;
+  --density-font: 0.86rem;
+  --density-font-sm: 0.78rem;
+  --density-pad-y: 6px;
+  --density-card-pad: 12px;
+  --content-pad-x: 18px;
+  --content-pad-y: 14px;
+}
+html[data-density="comfortable"] {
+  --density-row-h: 40px;
+  --density-gap: 14px;
+  --density-font: 0.95rem;
+  --density-font-sm: 0.86rem;
+  --density-pad-y: 10px;
+  --density-card-pad: 20px;
+  --content-pad-x: 28px;
+  --content-pad-y: 24px;
+}
+
+/* ===== 内容宽度模式 ===== */
+html[data-content-mode="wide"] { --content-max-w: none; }
 
 /* ===== 深色主题（DSH 同款）===== */
 [data-theme="dark"] {

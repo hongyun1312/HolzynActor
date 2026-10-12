@@ -1,20 +1,38 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.action.controller;
 
 import com.holzyn.actor.common.BizException;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
 import com.holzyn.actor.common.R;
-import com.holzyn.actor.domain.action.entity.ActorActionLog;
-import com.holzyn.actor.domain.action.entity.ActorActionPlan;
-import com.holzyn.actor.domain.character.entity.ActorCharacter;
-import com.holzyn.actor.domain.conversation.entity.ActorConversation;
-import com.holzyn.actor.domain.conversation.entity.ActorMessage;
-import com.holzyn.actor.domain.action.repository.ActorActionLogRepository;
-import com.holzyn.actor.domain.action.repository.ActorActionPlanRepository;
-import com.holzyn.actor.domain.character.repository.ActorCharacterRepository;
-import com.holzyn.actor.domain.conversation.repository.ActorConversationRepository;
-import com.holzyn.actor.domain.conversation.repository.ActorMessageRepository;
+import com.holzyn.actor.domain.npc.action.entity.ActorActionLog;
+import com.holzyn.actor.domain.npc.goal.entity.ActorActionPlan;
+import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
+import com.holzyn.actor.domain.npc.dialogue.entity.ActorConversation;
+import com.holzyn.actor.domain.npc.dialogue.entity.ActorMessage;
+import com.holzyn.actor.domain.npc.action.repository.ActorActionLogRepository;
+import com.holzyn.actor.domain.npc.goal.repository.ActorActionPlanRepository;
+import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
+import com.holzyn.actor.domain.npc.dialogue.repository.ActorConversationRepository;
+import com.holzyn.actor.domain.npc.dialogue.repository.ActorMessageRepository;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
-import com.holzyn.actor.domain.action.service.ActionEngine;
+import com.holzyn.actor.domain.agent.runtime.AgentRuntime;
 import com.holzyn.actor.domain.action.service.ActionSseHub;
 import com.holzyn.actor.domain.character.service.CharacterService;
 import lombok.RequiredArgsConstructor;
@@ -38,18 +56,18 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 行动引擎控制器（A-C5，P2 阶段二真实实现）。
+ * 行动引擎控制器。
  * <p>职责：提供行动决策列表、手动触发（支持计划时间定时）、行动时间线
  * （决策 + 世界事件 + 执行日志三类节点聚合）与行动日志；并提供项目级时间线聚合
  * 与 SSE 实时行动事件流（GET /api/actions/stream）。</p>
- * <p>所属模块：controller/action（行动子域）</p>
  */
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 public class ActionController {
 
-    private final ActionEngine actionEngine;
+    /** 智能体运行时（接线：手动行动触发统一入口，六组件门面） */
+    private final AgentRuntime agentRuntime;
     private final ActionSseHub actionSseHub;
     private final ActorActionPlanRepository planRepository;
     private final ActorActionLogRepository logRepository;
@@ -65,6 +83,7 @@ public class ActionController {
      * 行动决策列表（单角色，新→旧）。
      *
      * @param characterId 角色 ID
+     *
      * @return 行动决策列表
      */
     @GetMapping("/characters/{characterId}/actions")
@@ -77,7 +96,9 @@ public class ActionController {
      * 手动触发一次行动决策（manual 触发源；plannedTime 为未来时间则定时到期执行）。
      *
      * @param characterId 角色 ID
-     * @param body        触发请求体：{reason?, plannedTime?, situation?}
+     *
+     * @param body 触发请求体：{reason?, plannedTime?, situation?}
+     *
      * @return 创建的行动计划（status=planned 表示待定时执行 / done 表示已执行）
      */
     @PostMapping("/characters/{characterId}/actions/trigger")
@@ -87,7 +108,9 @@ public class ActionController {
         String reason = body == null ? null : str(body.get("reason"));
         String situation = body == null ? null : str(body.get("situation"));
         LocalDateTime plannedTime = parseTime(body == null ? null : body.get("plannedTime"));
-        ActorActionPlan plan = actionEngine.trigger(characterId, userId, "manual", null, reason, plannedTime, situation);
+        // ：统一经 AgentRuntime 复合行动触发（归属校验/情境/思考决策/计划持久化/定时或立即执行）
+        ActorActionPlan plan = agentRuntime.triggerAction(characterId, userId, "manual", null,
+                reason, plannedTime, situation);
         return R.ok(planVO(plan));
     }
 
@@ -95,6 +118,7 @@ public class ActionController {
      * 行动时间线（单角色：决策 + 日志聚合，时间倒序）。
      *
      * @param characterId 角色 ID
+     *
      * @return 时间线节点列表
      */
     @GetMapping("/characters/{characterId}/actions/timeline")
@@ -109,6 +133,7 @@ public class ActionController {
      * 行动日志（单角色，时间倒序）。
      *
      * @param characterId 角色 ID
+     *
      * @return 行动日志列表
      */
     @GetMapping("/characters/{characterId}/action-logs")
@@ -120,13 +145,17 @@ public class ActionController {
     /**
      * 项目级行动时间线（聚合项目全部角色的决策/事件/日志，支持角色/状态/触发源/时间范围筛选）。
      *
-     * @param projectId   项目 ID
+     * @param projectId 项目 ID
+     *
      * @param characterId 角色筛选（可选）
-     * @param status      状态筛选（可选：planned/done/cancelled）
+     *
+     * @param status 状态筛选（可选：planned/done/cancelled）
+     *
      * @param triggerType 触发源筛选（可选：manual/after_dialog/scheduled/event）
-     * @param startDate   起始日期（可选，yyyy-MM-dd）
-     * @param endDate     结束日期（可选，yyyy-MM-dd）
-     * @return {plans, logs, events, timeline, characters}
+     *
+     * @param startDate 起始日期（可选，yyyy-MM-dd）
+     *
+     * @param endDate 结束日期（可选，yyyy-MM-dd）
      */
     @GetMapping("/projects/{projectId}/actions/timeline")
     public R<Map<String, Object>> projectTimeline(
@@ -195,7 +224,9 @@ public class ActionController {
      * 标记行动计划状态（详情面板「标记状态」用；仅允许 done/cancelled/planned）。
      *
      * @param planId 行动计划 ID
-     * @param body   请求体：{status}
+     *
+     * @param body 请求体：{status}
+     *
      * @return 更新后的计划视图
      */
     @PutMapping("/actions/{planId}/status")
@@ -228,6 +259,7 @@ public class ActionController {
      * 行动决策 → 视图 Map（扁平化 action_json 关键字段）。
      *
      * @param p 决策实体
+     *
      * @return 视图 Map
      */
     private Map<String, Object> planVO(ActorActionPlan p) {
@@ -259,6 +291,7 @@ public class ActionController {
      * 行动日志 → 视图 Map。
      *
      * @param l 日志实体
+     *
      * @return 视图 Map
      */
     private Map<String, Object> logVO(ActorActionLog l) {
@@ -277,6 +310,7 @@ public class ActionController {
      * 世界事件消息 → 视图 Map。
      *
      * @param e 事件消息实体
+     *
      * @return 视图 Map
      */
     private Map<String, Object> eventVO(ActorMessage e) {
@@ -291,9 +325,12 @@ public class ActionController {
     /**
      * 聚合时间线节点：决策(kind=plan) / 世界事件(kind=event) / 执行日志(kind=log)，时间倒序。
      *
-     * @param plans  行动决策
-     * @param logs   执行日志
+     * @param plans 行动决策
+     *
+     * @param logs 执行日志
+     *
      * @param events 世界事件消息
+     *
      * @return 时间线节点列表
      */
     private List<Map<String, Object>> mergeTimeline(List<ActorActionPlan> plans,
@@ -334,8 +371,11 @@ public class ActionController {
      * 按时间范围过滤行动决策（依据 created_at）。
      *
      * @param plans 决策列表
+     *
      * @param start 起始时间（可空）
-     * @param end   结束时间（可空）
+     *
+     * @param end 结束时间（可空）
+     *
      * @return 过滤后列表
      */
     private List<ActorActionPlan> filterPlansByTime(List<ActorActionPlan> plans, LocalDateTime start, LocalDateTime end) {
@@ -369,6 +409,7 @@ public class ActionController {
      * 取值辅助：Object 转字符串。
      *
      * @param v 原始对象
+     *
      * @return 字符串
      */
     private String str(Object v) {
@@ -379,6 +420,7 @@ public class ActionController {
      * 解析计划时间（支持 ISO 或 yyyy-MM-dd HH:mm）。
      *
      * @param v 原始对象
+     *
      * @return 时间（解析失败返回 null）
      */
     private LocalDateTime parseTime(Object v) {
@@ -403,8 +445,10 @@ public class ActionController {
     /**
      * 解析日期范围（isStart=true 取当天 00:00；false 取当天 23:59:59）。
      *
-     * @param v      原始日期（yyyy-MM-dd，可空）
+     * @param v 原始日期（yyyy-MM-dd，可空）
+     *
      * @param isStart 是否为起始
+     *
      * @return 时间（可空）
      */
     private LocalDateTime parseDate(Object v, boolean isStart) {

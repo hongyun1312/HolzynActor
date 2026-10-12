@@ -10,15 +10,25 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 echo "[build] npm run build ..."
 ( cd "$ROOT/frontend" && npm run build )
 
+# debug-frontend build (2026-08-20 调试可视化前端)
+echo "[build] debug-frontend npm run build ..."
+( cd "$ROOT/debug-frontend" && npm run build )
+
 # sync dist -> backend static
 echo "[build] sync dist -> backend/src/main/resources/static ..."
 rm -rf "$ROOT/backend/src/main/resources/static/assets"
 mkdir -p "$ROOT/backend/src/main/resources/static"
 cp -R "$ROOT/frontend/dist/." "$ROOT/backend/src/main/resources/static/"
+
+# sync debug dist -> backend static/debug (clear old)
+echo "[build] sync debug dist -> backend/src/main/resources/static/debug ..."
+rm -rf "$ROOT/backend/src/main/resources/static/debug"
+mkdir -p "$ROOT/backend/src/main/resources/static/debug"
+cp -R "$ROOT/debug-frontend/dist/." "$ROOT/backend/src/main/resources/static/debug/"
 rm -rf "$ROOT/backend/target/classes/static"
 
 # backend package
 echo "[build] mvn clean package ..."
 ( cd "$ROOT/backend" && mvn -q -Dmaven.test.skip=true clean package )
 
-echo "[build] OK: backend/target/holzyn-actor-0.1.0.jar"
+echo "[build] OK: backend/target/holzyn-actor-1.0.0-beta.1.jar"

@@ -1,0 +1,173 @@
+{
+  "code": "worldgen_build_v1",
+  "name": "世界观生成（6 维 · 前3并行后3链式）",
+  "version": 2,
+  "nodes": [
+    {
+      "id": "agent_corelaws",
+      "label": "维度一：核心法则",
+      "nodeType": "agent",
+      "agentType": "novel-worldbuilder-corelaws",
+      "firstMessage": "【题材创意】\n{{premise}}\n\n【题材类型】\n{{genre}}\n\n请生成世界观维度一：核心法则。这一维度决定整个世界的底层运行逻辑，必须只描述客观世界事实，不写剧情。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_corelaws_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "world/core_laws.json",
+      "nodeParams": {
+        "temperature": 0.7,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "agent_spacetime",
+      "label": "维度二：时空地理",
+      "nodeType": "agent",
+      "agentType": "novel-worldbuilder-spacetime",
+      "firstMessage": "【题材创意】\n{{premise}}\n\n【题材类型】\n{{genre}}\n\n请生成世界观维度二：时空地理。这一维度定义世界的空间与时间面貌，必须只描述客观世界事实，不写剧情。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_spacetime_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "world/space_time.json",
+      "nodeParams": {
+        "temperature": 0.7,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "agent_society",
+      "label": "维度三：社会权力",
+      "nodeType": "agent",
+      "agentType": "novel-worldbuilder-society",
+      "firstMessage": "【题材创意】\n{{premise}}\n\n【题材类型】\n{{genre}}\n\n请生成世界观维度三：社会权力。这一维度定义世界的种族、阶层、势力与权力格局，必须只描述客观世界事实，不写剧情。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_society_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "world/society.json",
+      "nodeParams": {
+        "temperature": 0.7,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "agent_historyculture",
+      "label": "维度四：历史文化",
+      "nodeType": "agent",
+      "agentType": "novel-worldbuilder-historyculture",
+      "firstMessage": "【题材创意】\n{{premise}}\n\n【题材类型】\n{{genre}}\n\n【前序维度】\n核心法则：\n{{agent_corelaws_output}}\n时空地理：\n{{agent_spacetime_output}}\n社会权力：\n{{agent_society_output}}\n\n请根据以上信息，生成世界观维度四：历史文化。你的设定必须与已确立的前序维度相容，不推翻、不矛盾。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_historyculture_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "world/history_culture.json",
+      "nodeParams": {
+        "temperature": 0.7,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "agent_existence",
+      "label": "维度五：存在基础",
+      "nodeType": "agent",
+      "agentType": "novel-worldbuilder-existence",
+      "firstMessage": "【题材创意】\n{{premise}}\n\n【题材类型】\n{{genre}}\n\n【前序维度】\n核心法则：\n{{agent_corelaws_output}}\n时空地理：\n{{agent_spacetime_output}}\n社会权力：\n{{agent_society_output}}\n历史文化：\n{{agent_historyculture_output}}\n\n请根据以上信息，生成世界观维度五：存在基础。你的设定必须与已确立的前序维度相容，不推翻、不矛盾。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_existence_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "world/existence.json",
+      "nodeParams": {
+        "temperature": 0.7,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "agent_information",
+      "label": "维度六：信息传播",
+      "nodeType": "agent",
+      "agentType": "novel-worldbuilder-information",
+      "firstMessage": "【题材创意】\n{{premise}}\n\n【题材类型】\n{{genre}}\n\n【前序维度】\n核心法则：\n{{agent_corelaws_output}}\n时空地理：\n{{agent_spacetime_output}}\n社会权力：\n{{agent_society_output}}\n历史文化：\n{{agent_historyculture_output}}\n存在基础：\n{{agent_existence_output}}\n\n请根据以上信息，生成世界观维度六：信息传播。你的设定必须与已确立的前五维度相容，不推翻、不矛盾。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_information_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "world/information.json",
+      "nodeParams": {
+        "temperature": 0.7,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "script_checkpoint",
+      "label": "检查点存档",
+      "nodeType": "script",
+      "scriptName": "local_archive",
+      "scriptArgs": "checkpoint --files world/core_laws.json world/space_time.json world/society.json world/history_culture.json world/existence.json world/information.json",
+      "nodeParams": {
+        "timeout": 30
+      }
+    },
+    {
+      "id": "script_render",
+      "label": "合并渲染世界观文档",
+      "nodeType": "script",
+      "scriptName": "render_worldview",
+      "scriptArgs": "--input-dir world --output meta/world_foundation.md --title 世界观基础",
+      "nodeParams": {
+        "timeout": 30
+      }
+    },
+    {
+      "id": "script_persist",
+      "label": "映射落库世界观分节",
+      "nodeType": "script",
+      "scriptName": "persist_to_world_setting",
+      "scriptArgs": "--project-id {{projectId}} --preview-only true",
+      "nodeParams": {
+        "timeout": 30
+      }
+    }
+  ],
+  "edges": [
+    { "source": "__start__", "target": "agent_corelaws" },
+    { "source": "__start__", "target": "agent_spacetime" },
+    { "source": "__start__", "target": "agent_society" },
+    { "source": "agent_corelaws", "target": "agent_historyculture" },
+    { "source": "agent_spacetime", "target": "agent_historyculture" },
+    { "source": "agent_society", "target": "agent_historyculture" },
+    { "source": "agent_historyculture", "target": "agent_existence" },
+    { "source": "agent_existence", "target": "agent_information" },
+    { "source": "agent_information", "target": "script_checkpoint" },
+    { "source": "script_checkpoint", "target": "script_render" },
+    { "source": "script_render", "target": "script_persist" },
+    { "source": "script_persist", "target": "__end__" }
+  ],
+  "variables": [
+    {
+      "key": "premise",
+      "name": "题材创意",
+      "type": "textarea",
+      "defaultValue": "",
+      "required": true,
+      "description": "描述故事前提、主角设定、核心概念等，作为全部维度生成的基础"
+    },
+    {
+      "key": "genre",
+      "name": "题材类型",
+      "type": "text",
+      "defaultValue": "",
+      "required": true,
+      "description": "如：东方玄幻、都市异能、科幻末世、历史架空、悬疑推理 等"
+    },
+    {
+      "key": "language",
+      "name": "输出语言",
+      "type": "text",
+      "defaultValue": "中文",
+      "required": true,
+      "description": "所有 agent 的产出语言。中文 / English"
+    }
+  ]
+}

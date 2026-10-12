@@ -12,13 +12,36 @@
 
     <groupId>com.holzyn</groupId>
     <artifactId>holzyn-actor</artifactId>
-    <version>0.1.0</version>
+    <version>1.0.0-beta.1</version>
     <name>holzyn-actor</name>
     <description>Holzyn 全境 - NPC 角色 AI 驱动模块（Spring Boot）</description>
 
     <properties>
         <java.version>21</java.version>
+        <!-- AI 接入层重构 M1（2026-09-02）：Spring AI 版本锁定（方案《AI接入层重构_SpringAI_LangChain4j_技术方案_V1.0》§9 M1）：
+             2.0.1 = Maven Central 最新维护版（2026-08-21，2.0.0 GA 后首个维护版，含 CVE 修复），
+             官方支持 Spring Boot 4.0/4.1 + Spring Framework 7.0（本仓库 Boot 4.1.0 在其支持范围）。 -->
+        <spring-ai.version>2.0.1</spring-ai.version>
+        <!-- AI 接入层重构 M3（2026-09-05）：LangChain4j 版本锁定（方案《AI接入层重构_SpringAI_LangChain4j_技术方案_V1.0》§9 M3）：
+             1.19.0 = Maven Central 最新稳定版（2026-08-15 发布；Boot 4.0 兼容 bug #4268 已修复，
+             本仓库不引入 langchain4j-spring-boot4-starter、程序化构建模型，核心库 + langchain4j-open-ai
+             [OpenAiEmbeddingModel，自定义 Java 实现经 Spring RestClient 调 /embeddings，.baseUrl() 指向任意
+             OpenAI 兼容端点] 与 Spring Boot 4.1 / Java 21 兼容）。 -->
+        <langchain4j.version>1.19.0</langchain4j.version>
     </properties>
+
+    <!-- AI 接入层重构 M1（2026-09-02）：spring-ai-bom 统一管理 Spring AI 2.0.1 全部模块版本 -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Web MVC（REST API）-->
@@ -26,10 +49,42 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
+        <!-- U1 Unity 对接层（2026-09-21）：WebSocket 双向实时通道（原生 WebSocketHandler，不经 STOMP；
+             /ws/unity/{projectId} 主通道——Unity 主导实时世界，HA 纯 AI 大脑服务；版本由 spring-boot-dependencies 管理） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
         <!-- JSON 序列化（Jackson：REST 请求/响应体）-->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-json</artifactId>
+        </dependency>
+        <!-- AI 接入层重构 M1（2026-09-02）：Spring AI OpenAI 兼容协议接入（OpenAiChatModel/ChatClient，
+             经 .baseUrl() 指向 DeepSeek/豆包/通义等任意兼容端点；版本由 spring-ai-bom 2.0.1 统一管理） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-openai</artifactId>
+        </dependency>
+        <!-- AI 接入层重构 M1（2026-09-02）：Spring AI ChatClient + CallAdvisor/StreamAdvisor（HolzynTraceAdvisor 记账观测
+             挂载点；2.0 起 ChatClient/advisor 独立于 spring-ai-openai 模块，需显式引入；版本由 spring-ai-bom 统一管理） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-client-chat</artifactId>
+        </dependency>
+        <!-- AI 接入层重构 M3（2026-09-05）：LangChain4j 核心（EmbeddingModel/TextSegment/InMemoryEmbeddingStore/
+             Filter 元数据过滤/Response 用量，版本 ${langchain4j.version} 显式锁定） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <!-- AI 接入层重构 M3（2026-09-05）：LangChain4j OpenAI 兼容 embedding（OpenAiEmbeddingModel，
+             .baseUrl() 指向 DeepSeek/豆包/通义等任意兼容 /embeddings 端点；版本 ${langchain4j.version} 显式锁定） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>${langchain4j.version}</version>
         </dependency>
         <!-- 入参校验 -->
         <dependency>
@@ -41,11 +96,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
-        <!-- 本地嵌入式数据库（主）：H2 MySQL 兼容模式，Web/exe 本地运行默认使用 -->
+        <!-- 本地嵌入式数据库（主）：H2 MySQL 兼容模式，Web/exe 本地运行默认使用；
+             compile 作用域（2026-08-21）：H2TcpServerConfig 编译期引用 org.h2.tools.Server 启动
+             TCP Server（应用运行中 DataGrip 直连同一库实例）；运行时行为与 runtime 作用域一致 -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <scope>runtime</scope>
         </dependency>
         <!-- 远程数据库（预留）：MySQL 驱动，remote profile 使用 -->
         <dependency>

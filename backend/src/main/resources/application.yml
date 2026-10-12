@@ -1,25 +1,47 @@
+# ============================================================
+# HolzynActor 系统底层配置（application.yml 主文件）
+# 用途：项目运行基础底座 —— 服务端口 / 版本 / 数据源 / 上传 / JPA / Jackson /
+#      项目基础目录与密钥 / AI 接入层（网关·超时·思考·检索·缓存·护栏·路由·NanoJev）/
+#      embedding / H2 TCP / CORS / 日志级别。
+# 加载：顶部 spring.config.import 引入 application-actor.yml（功能业务配置）。
+#      优先级：本文件 > application-actor.yml > application-{profile}.yml 之上——
+#      ⚠️ 实际优先级链为 application-{profile}.yml（最高）> 本文件 > application-actor.yml，
+#      故远程 profile 仍可覆盖本文件数据源；两文件配置键互斥不重复。
+# 说明：功能业务配置（记忆/世界引擎/成长/宏观/群聊/实时决策等）在 application-actor.yml。
+# ============================================================
+
 server:
-  # 后端端口：8080（前端 Vite 代理 /api、/uploads 指向 8080，两端保持一致；历史约定 8081 已废弃）
+  # 后端服务端口（前端 Vite 代理 /api、/uploads 指向此端口）
   port: 8080
   servlet:
     encoding:
       charset: UTF-8
       force: true
 
+# Spring AI 版本（banner.txt 占位符解析用，与 backend/pom.xml 保持一致）
+spring-ai:
+  version: ${HOLOZYN_ACTOR_SPRING_AI_VERSION:2.0.1}
+
+# LangChain4j 版本（banner.txt 占位符解析用，与 backend/pom.xml 保持一致）
+langchain4j:
+  version: ${HOLOZYN_ACTOR_LANGCHAIN4J_VERSION:1.19.0}
+
 spring:
+  # 引入功能业务配置（application-actor.yml；优先级低于本文件与 application-{profile}.yml）
+  config:
+    import: classpath:application-actor.yml
   application:
     name: holzyn-actor
-  # ===== 数据源（默认本地 H2 嵌入式，MySQL 兼容模式；远程 MySQL 预留，见 application-remote.yml）=====
+  # 数据源：本地 H2 文件库（MySQL 兼容模式，支持 LONGTEXT/JSON/DATETIME 等语法）
   datasource:
-    # 本地 H2 文件库（主）：数据存 <工作目录>/data/holzyn-actor（exe 化时改 %APPDATA%\HolzynActor\data）
-    # MODE=MySQL 兼容模式：支持 LONGTEXT/JSON/DATETIME 等 MySQL 语法，JPA 业务层零改动
-    url: ${HOLOZYN_ACTOR_DB_URL:jdbc:h2:file:${HOLOZYN_ACTOR_DATA_DIR:./data}/holzyn-actor;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE}
+    # LOCK_TIMEOUT=10000ms：并发写热点表时让竞争者排队而非立即失败（AI 结果不因锁超时丢弃）
+    url: ${HOLOZYN_ACTOR_DB_URL:jdbc:h2:file:${HOLOZYN_ACTOR_DATA_DIR:./data}/holzyn-actor;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;LOCK_TIMEOUT=10000}
     username: ${HOLOZYN_DB_USER:sa}
     password: ${HOLOZYN_DB_PASSWORD:}
     driver-class-name: org.h2.Driver
-  # 文件上传限制（头像/图片，单文件 5MB、请求 6MB）
   servlet:
     multipart:
+      # 文件上传限制（头像/图片：单文件 5MB、请求 20MB）
       max-file-size: 5MB
       max-request-size: 20MB
   jpa:
@@ -29,7 +51,7 @@ spring:
     open-in-view: false
     properties:
       hibernate:
-        # 本地 H2 方言（MySQL 兼容模式）；远程 MySQL 由 application-remote.yml 覆盖为 MySQLDialect
+        # 本地 H2 方言（远程 MySQL 由 application-remote.yml 覆盖为 MySQLDialect）
         dialect: org.hibernate.dialect.H2Dialect
   jackson:
     default-property-inclusion: non_null
@@ -39,64 +61,417 @@ spring:
 # HolzynActor 模块配置
 holzyn:
   actor:
-    # 本地数据目录（H2 文件库与上传文件根目录；exe 化时设为 %APPDATA%\HolzynActor\data）
+    # 本地数据目录（H2 文件库与上传文件根目录）
     data-dir: ${HOLOZYN_ACTOR_DATA_DIR:./data}
-    # AI 供应商 api_key 加密密钥（本地运行需配置，生产必须通过环境变量注入）
+    # AI 供应商 api_key 加密密钥（本地默认值仅供开发，生产必须经环境变量注入）
     api-key-secret: ${HOLOZYN_ACTOR_API_KEY_SECRET:local-dev-secret-change-me}
     # 上传文件根目录（头像等）
     upload-dir: ${HOLOZYN_ACTOR_UPLOAD_DIR:./uploads}
-    # 默认 AI 供应商（P1 起使用，首接 DeepSeek 等 OpenAI 兼容服务）
+    # 应用日志落盘：AI 接入层日志（additivity=false）只进此文件不进控制台，
+    # 世界运行测试须把本项指到绝对路径的证据文件
+    log:
+      file: ${HOLOZYN_ACTOR_LOG_FILE:logs/holzyn-actor.log}
+    # 默认 AI 供应商（OpenAI 兼容服务；为空=按 DB actor_model_provider 配置）
     default-provider: ${HOLOZYN_ACTOR_DEFAULT_PROVIDER:}
-    # 对话/事件后自动评估行动的总开关（成本控制；false 仅手动 + scheduled 触发）
-    action:
-      auto-evaluate: ${HOLOZYN_ACTOR_ACTION_AUTO_EVALUATE:true}
-    # P3 知识库 RAG 总开关（true=对话自动检索注入知识片段 + 人群环境摘要；false=行为与 P2 完全一致）
-    rag:
-      enabled: ${HOLOZYN_ACTOR_RAG_ENABLED:true}
-    # embedding 单次请求最多 input 条数（供应商限制，如 doubao-embedding 单次≤10；超出自动拆分多次调用）
+    # ---- AI 接入层（对话/检索/向量/缓存/护栏/路由/NanoJev）----
+    ai:
+      # 向量库文件根目录（默认空=数据目录下 <data-dir>/vector-store/<projectId>/embeddings.json）
+      vector-store-dir: ${HOLOZYN_ACTOR_VECTOR_STORE_DIR:}
+      # HTTP 调用超时（防网络悬挂的 AI 调用永久阻塞引擎线程）。
+      # ⚠️ 2026-10-02 实测：自托管网关（llm.example.com）重活（story-engine/persona_bootstrap/worldgen 大 prompt）
+      # 生成可达 200s+，原 120s/130s 读超时把慢请求掐断→story-plan 失败、建档反复重试。调大默认值：
+      # read=300s（socket 读）、request=320s（整次硬上限，须 > read）。
+      timeout-read-seconds: ${HOLOZYN_ACTOR_AI_TIMEOUT_READ_SECONDS:300}
+      timeout-connect-seconds: ${HOLOZYN_ACTOR_AI_TIMEOUT_CONNECT_SECONDS:30}
+      timeout-request-seconds: ${HOLOZYN_ACTOR_AI_TIMEOUT_REQUEST_SECONDS:320}
+      # 思考模式全局开关：disabled=下发 thinking={type:disabled}（默认，省 token）；
+      # enabled=下发 thinking={type:enabled}（推理质量优先）；auto=不下发、跟随端点默认（排障对照用）。
+      # ⚠️ 环境变量 = HOLOZYN_ACTOR_AI_THINKING_MODE（松弛绑定删连字符）；非法值 fail-soft 成 auto
+      thinking:
+        mode: ${HOLOZYN_ACTOR_AI_THINKING_MODE:disabled}
+        # 思考强度（仅 mode=enabled 下发；取值如 high/max；空=不下发跟随端点默认）
+        effort: ${HOLOZYN_ACTOR_AI_THINKING_EFFORT:}
+      # 知识检索（RAG）参数
+      rag:
+        # 检索头部余量倍数（双粒度合并前条数 = topK × headroom）
+        headroom: ${HOLOZYN_ACTOR_AI_RAG_HEADROOM:4}
+        # 最低相似度阈值（调高可过滤低相关命中，可能影响召回）
+        min-score: ${HOLOZYN_ACTOR_AI_RAG_MIN_SCORE:0}
+      # 语义缓存（仅非流式 chatCompletion 生效）。⚠️ 默认关闭：世界运行的决策/情绪/行动 prompt
+      # 高度相似，开启会导致「旧情境答案回放现在」毁掉世界真实性 + 每次查询先 embed 的隐形成本；
+      # 仅「同一次调用重放」工作流（worldgen 重试/预览/A-B）按场景白名单显式开启
+      semantic-cache-enabled: ${HOLOZYN_ACTOR_AI_SEMANTIC_CACHE_ENABLED:false}
+      semantic-cache:
+        # 生效场景白名单（逗号分隔、前缀匹配；* = 全部场景仅供开发临时开启；空=全部不缓存）
+        scene-allow: ${HOLOZYN_ACTOR_AI_SEMANTIC_CACHE_SCENE_ALLOW:}
+        # 相似度阈值（0~1，≥ 视为语义相近）
+        threshold: ${HOLOZYN_ACTOR_AI_SEMANTIC_CACHE_THRESHOLD:0.9}
+        # 缓存容量上限（内存态，FIFO 淘汰最旧）
+        max-size: ${HOLOZYN_ACTOR_AI_SEMANTIC_CACHE_MAX_SIZE:200}
+        # 最小参与缓存的 query 长度（字符，过短语义含糊不参与）
+        min-query-length: ${HOLOZYN_ACTOR_AI_SEMANTIC_CACHE_MIN_QUERY_LENGTH:8}
+      # 网关并发限流（2026-09-29_07 网关并发错峰观察项）：自托管模型网关（本地 35B 单实例）并发
+      # 排队 → chat 调用 120s 超时；DeepSeek API 主用场景无此问题（官方网关并发容量大）→ 默认关闭
+      # （0=不限流）。max-concurrent>0 启用：超出上限的 chat 调用排队等待空位（与 R1 异步化叠加削峰），
+      # 等待超时按既有失败语义重试/兜底。收口=AiSpringChatGateway（NanoJev/embedding 独立通道不受影响）
+      gateway-concurrency:
+        max-concurrent: ${HOLOZYN_ACTOR_AI_GATEWAY_CONCURRENCY_MAX_CONCURRENT:0}
+        wait-timeout-seconds: ${HOLOZYN_ACTOR_AI_GATEWAY_CONCURRENCY_WAIT_TIMEOUT_SECONDS:45}
+      # 统一护栏：全项目 AI 调用唯一策略源（重试/空输出/重复检测/连续失败上限），网关统一执行
+      guard:
+        # 护栏总开关（false=网关不执行空输出/重复检测，业务侧重试上限回退代码默认）
+        enabled: ${HOLOZYN_ACTOR_AI_GUARD_ENABLED:true}
+        # 默认重试上限（每场景可覆盖）
+        default-max-retries: ${HOLOZYN_ACTOR_AI_GUARD_DEFAULT_MAX_RETRIES:2}
+        # 输出最短有效长度（trim 后低于该值视为空输出）
+        min-output-chars: ${HOLOZYN_ACTOR_AI_GUARD_MIN_OUTPUT_CHARS:1}
+        # 输出重复检测总开关（流式对话豁免硬拦截仅告警）
+        duplicate-enabled: ${HOLOZYN_ACTOR_AI_GUARD_DUPLICATE_ENABLED:true}
+        # 重复窗口（连续 N 次输出全部两两相似才判定复读机）
+        duplicate-window: ${HOLOZYN_ACTOR_AI_GUARD_DUPLICATE_WINDOW:3}
+        # 重复判定 Dice 二元组重叠阈值
+        duplicate-dice-threshold: ${HOLOZYN_ACTOR_AI_GUARD_DUPLICATE_DICE_THRESHOLD:0.9}
+        # 重复检测指纹文本长度上限（字符，超长截断防计算开销）
+        duplicate-max-text-chars: ${HOLOZYN_ACTOR_AI_GUARD_DUPLICATE_MAX_TEXT_CHARS:800}
+        # 连续失败硬上限（单链路连续失败 N 次触发告警）
+        max-consecutive-failures: ${HOLOZYN_ACTOR_AI_GUARD_MAX_CONSECUTIVE_FAILURES:10}
+      # 场景-模型路由：按场景类别指定温度与输出上限（优先级：运行时覆盖 > 逐场景表 > 类别档位 > 全局默认）
+      routing:
+        # 路由总开关（false=网关按调用方原样参数与默认供应商调用）
+        enabled: ${HOLOZYN_ACTOR_AI_ROUTING_ENABLED:true}
+        default-tier:
+          # 全局默认温度
+          temperature: 0.5
+          # 未归类/未覆盖场景兜底输出上限（≥2048 防截断）
+          max-tokens: ${HOLOZYN_ACTOR_AI_ROUTING_DEFAULT_MAX_TOKENS:4096}
+        # 类别默认档位（每个值都可用同名环境变量覆盖，便于云端 reasoning 回合整体抬高）
+        tiers:
+          # 决策类：主决策/恢复/协商/计划
+          decision: { temperature: 0.3, max-tokens: "${HOLOZYN_ACTOR_AI_ROUTING_DECISION_MAX_TOKENS:4096}" }
+          # 对话类：单聊/群聊/标题
+          dialog: { temperature: 0.8, max-tokens: "${HOLOZYN_ACTOR_AI_ROUTING_DIALOG_MAX_TOKENS:2048}" }
+          # 记忆类：抽取/蒸馏/反思/编年史（结构化事实条目最多）
+          memory: { temperature: 0.2, max-tokens: "${HOLOZYN_ACTOR_AI_ROUTING_MEMORY_MAX_TOKENS:3072}" }
+          # 世界类：世界帧/环境润色/宏观叙事
+          world: { temperature: 0.7, max-tokens: "${HOLOZYN_ACTOR_AI_ROUTING_WORLD_MAX_TOKENS:4096}" }
+          # 人群类：轻量 AI，输出本就短
+          crowd: { temperature: 0.6, max-tokens: "${HOLOZYN_ACTOR_AI_ROUTING_CROWD_MAX_TOKENS:2048}" }
+          # 一次性生成类：worldgen/角色卡/导入（需大上限）
+          tool: { temperature: 0.5, max-tokens: "${HOLOZYN_ACTOR_AI_ROUTING_TOOL_MAX_TOKENS:8192}" }
+        # 场景→类别映射（键=AiCallContext scene；未列出场景=default）
+        category-map:
+          action: decision
+          interrupt_resume: decision
+          interrupt_probe: decision
+          negotiate: decision
+          plan_day: decision
+          plan_replan: decision
+          goal_gen: decision
+          npc_crowd_decision: decision
+          npc_emotion_eval: decision
+          dialog: dialog
+          autonomous_chat: dialog
+          title_gen: dialog
+          memory: memory
+          memory_fuzz: memory
+          memory_sleep_merge: memory
+          memory_distill: memory
+          memory_tier: memory
+          reflection: memory
+          chronicle_distill: memory
+          entity_state_update: memory
+          world_frame_daily: world
+          environment_desc: world
+          info_distortion: world
+          world_event: world
+          world_event_polish: world
+          macro_impact: world
+          macro_event: world
+          meso_directive: world
+          macro_emergence: world
+          crowd_ai: crowd
+          worldgen: tool
+          card_gen: tool
+          relation_gen: tool
+          relation_refine: tool
+          location_extract: tool
+          world_segment: tool
+          world_segment_characters: tool
+          world_time_infer: tool
+          ordinary_npc_gen: tool
+          crowd_category_gen: tool
+          import: tool
+        # 逐场景覆盖表（优先级：运行时覆盖 > 本表 > 类别档位 > 全局默认）
+        scenes:
+          # 两段式建档：AI 生成 11 维角色档案（输出上限给足余量防截断导致建档失败）
+          persona_bootstrap_fill_a: { temperature: 0.4, max-tokens: 8192 }
+          persona_bootstrap_fill_b: { temperature: 0.5, max-tokens: 8192 }
+          # 普通居民批量生成：每批多位居民的 11 维档案（结构列+档案），tool 档 8192 会被
+          # 多人档案撑爆截断（2026-10-02 云栖镇实证：输出满 8192 只完成 1 人残缺档案→整批 JSON 报废）。
+          # 提到 16384（云端 deepseek-v4-flash / 本地 qwen3.6-35B 均接受），配合批量收窄仍防超限。
+          ordinary_npc_gen: { temperature: 0.5, max-tokens: 16384 }
+          # 世界地图生成（M1）：完整地图 JSON（15+ 区域/道路/摆放/住所）需大输出窗口；
+          # 本地默认 provider（qwen3.6-35B，上下文 4096）会截断 → 固定路由云端 deepseek-v4-flash（provider 1）。
+          world_map_generate: { temperature: 0.5, max-tokens: 16384, provider-id: 1 }
+          # 人格偏移评估：JSON 判定需低温稳定
+          growth_persona_shift_eval: { temperature: 0.3, max-tokens: 2048 }
+          # 婚育判定/新生儿档案/婚礼叙事：低温稳定 + 克制输出
+          growth_romance_decision: { temperature: 0.4, max-tokens: 2048 }
+          growth_proposal_decision: { temperature: 0.4, max-tokens: 2048 }
+          growth_fertility_decision: { temperature: 0.4, max-tokens: 2048 }
+          growth_newborn_persona: { temperature: 0.6, max-tokens: 2048 }
+          growth_wedding_narrative: { temperature: 0.8, max-tokens: 2048 }
+          # 运行时活跃场景显式登记（未登记会静默回退 default-tier 且调试表不可见；多为短 JSON 判定或走 NanoJev）
+          agent_decision: { temperature: 0.5, max-tokens: 2048 }
+          agent_learning: { temperature: 0.5, max-tokens: 2048 }
+          attention: { temperature: 0.5, max-tokens: 2048 }
+          growth_space_generate: { temperature: 0.5, max-tokens: 4096 }
+          mask_breach: { temperature: 0.5, max-tokens: 2048 }
+          micro_decision: { temperature: 0.5, max-tokens: 2048 }
+          nanojev_sample: { temperature: 0.5, max-tokens: 2048 }
+          relation_delta: { temperature: 0.5, max-tokens: 2048 }
+          social_willingness: { temperature: 0.5, max-tokens: 2048 }
+          space_decision: { temperature: 0.5, max-tokens: 2048 }
+          space_trigger: { temperature: 0.5, max-tokens: 2048 }
+      # NanoJev 并行决策模型（System One 判定层：输入 state+questions、输出完整概率分布、零解码）
+      # ⚠️ 唯一可用入口 = POST /v1/nanojev/evaluate；chat/completions 传 model=nanojev 会静默回退 35B
+      nanojev:
+        # 判定调用总开关（默认 false：未配置 base-url 前一律禁用，调用方回退 Qwen/程序化，fail-closed）
+        enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_ENABLED:false}
+        # evaluate 网关 Base URL（已含 /v1；外网=https://llm.example.com:14443/v1，内网=http://127.0.0.1:9100/v1）
+        base-url: ${HOLOZYN_ACTOR_AI_NANOJEV_BASE_URL:}
+        # NanoJev 专用 API Key（空=沿用当前 chat provider Key；非空=专用。env 正确形态 HOLOZYN_ACTOR_AI_NANOJEV_APIKEY）
+        api-key: ${HOLOZYN_ACTOR_AI_NANOJEV_API_KEY:}
+        # 建连超时（秒）
+        timeout-connect-seconds: ${HOLOZYN_ACTOR_AI_NANOJEV_TIMEOUT_CONNECT_SECONDS:10}
+        # 读超时（秒；单次前向数十 ms 级，30s 足够宽松）
+        timeout-read-seconds: ${HOLOZYN_ACTOR_AI_NANOJEV_TIMEOUT_READ_SECONDS:30}
+        # 单次请求总时长上限（秒；硬性兜底防悬挂）
+        timeout-request-seconds: ${HOLOZYN_ACTOR_AI_NANOJEV_TIMEOUT_REQUEST_SECONDS:60}
+        # 失败重试次数（总计最多尝试 N+1 次；仍失败 fail-closed 返回 null）
+        max-retries: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_RETRIES:1}
+        # 官方契约批上限（states≤32 / questions≤96 / 候选路径≤256 / 请求体≤2MB）
+        max-states-per-request: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_STATES:32}
+        max-questions-per-request: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_QUESTIONS:96}
+        max-paths-per-request: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_PATHS:256}
+        max-body-bytes: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_BODY_BYTES:2097152}
+        # 采样：sample=按完整概率分布加权随机（真实优先/行为多样）；argmax=取概率最大项（测试与回放确定性）
+        sampling:
+          mode: ${HOLOZYN_ACTOR_AI_NANOJEV_SAMPLING_MODE:sample}
+          # 固定随机种子（空=每次随机；注入后采样可复现，供测试/回放）
+          seed: ${HOLOZYN_ACTOR_AI_NANOJEV_SAMPLING_SEED:}
+        # NanoJev A/B 质量评估（离线批跑设施，不影响世界运行）
+        ab:
+          # A/B 评估总开关（显式开启后才可批跑）
+          enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_ENABLED:false}
+          # 异步批跑并发路数
+          concurrency: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_CONCURRENCY:4}
+          # 三类场景样本配额（情绪 75 / 候选选择 75 / 社交意愿 50）
+          sample-quotas:
+            emotion_eval: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QUOTA_EMOTION:75}
+            crowd_decision: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QUOTA_CROWD:75}
+            social_willingness: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QUOTA_SOCIAL:50}
+          # Qwen 同题型重问（对照基线）
+          qwen:
+            scene: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QWEN_SCENE:nanojev_ab_qwen}
+            temperature: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QWEN_TEMPERATURE:0.3}
+            max-tokens: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QWEN_MAX_TOKENS:512}
+          # Judge 四维合理性评分（复用 LLM-as-Judge）
+          judge:
+            scene: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_JUDGE_SCENE:nanojev_ab_judge}
+            max-input-chars: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_JUDGE_MAX_INPUT_CHARS:4000}
+          # 置信度升级阈值（分布不尖锐 → 升 Qwen 同题重问；键=emotion_eval/crowd_decision/social_willingness）
+          escalation:
+            enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_ESCALATION_ENABLED:false}
+            # ⚠️ 省略配置 → 字段保持 Java 默认空 Map（勿写空 {}——Spring Boot 4.x 宽松绑定会报
+            # ConverterNotFoundException）
+        # 判定类落地统一框架（全部判定场景走「开关 + 回退 + 采样/argmax」；未配置场景=代码默认关）
+        decision:
+          # 判定层总开关（场景级 + NanoJev client 双重门控后的第三重总闸）
+          enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_ENABLED:true}
+          scenes:
+            # 社交意愿门控：默认开；top-1 < 阈值升 Qwen 同题重问
+            social_willingness:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SOCIAL:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SOCIAL_SAMPLING:sample}
+              escalation:
+                enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SOCIAL_ESCALATION:true}
+                top1-prob: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SOCIAL_TOP1:0.5}
+            # 普通 NPC 行动选择：默认开；程序化候选集 + sample 直接采纳（不设升级阈值）
+            crowd_decision:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_CROWD:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_CROWD_SAMPLING:sample}
+            # 空间候选选择：特殊 NPC action 决策在空间候选集内由 NanoJev 选择（sample 直接采纳）
+            space_decision:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SPACE:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SPACE_SAMPLING:sample}
+            # 婚育三插拔点（实现就绪、未过 A/B 评估 → 默认关）
+            romance_attract:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ROMANCE:false}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ROMANCE_SAMPLING:sample}
+            proposal:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PROPOSAL:false}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PROPOSAL_SAMPLING:sample}
+            fertility:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_FERTILITY:false}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_FERTILITY_SAMPLING:sample}
+            # 面具情境判定（实现就绪、未过 A/B 评估 → 默认关）
+            mask_context:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MASK_CONTEXT:false}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MASK_CONTEXT_SAMPLING:sample}
+            # 面具破绽判定（boolean 门控容错高 + 失败回退程序化 → 默认开）
+            mask_breach:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MASK_BREACH:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MASK_BREACH_SAMPLING:sample}
+            # 打断仲裁（未过 A/B 评估 → 默认关）
+            negotiate:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_NEGOTIATE:false}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_NEGOTIATE_SAMPLING:sample}
+            # 护栏语义复核（未过 A/B 评估 → 默认关）
+            guard_semantic:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_GUARD:false}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_GUARD_SAMPLING:sample}
+            # 认知注意力（每 tick 全 NPC 注意力状态批量 + 事件相关度批量）——默认开
+            attention:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ATTENTION:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ATTENTION_SAMPLING:sample}
+            # 高频微决策（choice 即时意向：继续当下事/放空/张望/小动作/搭话/起身活动）——默认开
+            micro_decision:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MICRO:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MICRO_SAMPLING:sample}
+            # 事件驱动重算触发判定（情绪漂移/关系跨档/面具情境切换）——默认开
+            space_trigger:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SPACE_TRIGGER:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SPACE_TRIGGER_SAMPLING:sample}
+            # 人格偏移评估（证据强度 + 偏移方向）——默认开，分布尖锐才采纳否则升 Qwen
+            persona_shift:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PERSONA_SHIFT:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PERSONA_SHIFT_SAMPLING:sample}
+              escalation:
+                enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PERSONA_SHIFT_ESCALATION:true}
+                top1-prob: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PERSONA_SHIFT_TOP1:0.6}
+            # 关系变化量（幅度 + 方向）——默认开，好感/信任平滑更新
+            relation_delta:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_RELATION_DELTA:true}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_RELATION_DELTA_SAMPLING:sample}
+            # 意外事件（boolean 低概率采样）——默认关（涉及健康影响/世界事件，仅调试开关开启时生效）
+            accident:
+              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ACCIDENT:false}
+              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ACCIDENT_SAMPLING:sample}
+    # embedding 单次请求最多 input 条数（供应商限制；超出自动拆分多次调用）
     embedding:
       batch-size: ${HOLOZYN_ACTOR_EMBEDDING_BATCH_SIZE:10}
-    # P4 长期记忆总开关（true=每轮回复后 AI 抽取关键事实/摘要写入并注入；false=行为与 P3 完全一致）
-    memory:
-      enabled: ${HOLOZYN_ACTOR_MEMORY_ENABLED:true}
-      # 记忆注入 top-K：每轮注入的角色级事实记忆条数（重要度 desc + 较新优先）
-      top-k: ${HOLOZYN_ACTOR_MEMORY_TOP_K:8}
-      # 记忆注入 top-K：每轮注入的项目级记忆条数（世界大事记，所有角色可见）
-      project-top-k: ${HOLOZYN_ACTOR_MEMORY_PROJECT_TOP_K:4}
-      # 记忆预算：每角色/项目记忆条数上限，超限按「重要度×新旧」滚动淘汰低价值记忆
-      budget: ${HOLOZYN_ACTOR_MEMORY_BUDGET:50}
-      # 会话摘要生成间隔：每 N 轮（user+assistant 各一条计 1 轮）生成一条 summary 记忆（S2 上下文压缩承接）
-      summary-interval: ${HOLOZYN_ACTOR_MEMORY_SUMMARY_INTERVAL:10}
-      # 去重阈值：新事实与已有记忆的文本重叠度（Dice 二元组系数 0~1）高于该值则判定重复丢弃
-      dedup-threshold: ${HOLOZYN_ACTOR_MEMORY_DEDUP_THRESHOLD:0.6}
-      # 记忆门控（2026-08-18）：寒暄/无实质信息的轮次跳过提取，连 AI 都不调用（省 token）
-      gate:
-        # 门控总开关（true=寒暄跳过；false=回到每轮无条件提取）
-        enabled: ${HOLOZYN_ACTOR_MEMORY_GATE_ENABLED:true}
-        # 单聊寒暄最大字符数：最新用户消息含寒暄词且长度 ≤ 该值 → 视为寒暄跳过
-        greeting-max-len: ${HOLOZYN_ACTOR_MEMORY_GATE_GREETING_MAX_LEN:20}
-        # 群聊寒暄最大字符数（群聊更容易产生实质信息，阈值更宽松：≤8 字且含寒暄词才算寒暄）
-        group-greeting-max-len: ${HOLOZYN_ACTOR_MEMORY_GATE_GROUP_GREETING_MAX_LEN:8}
-        # AI 复核开关（默认 false）：开启后启发式通过后再让 AI 判断一次是否有值得记住的事实
-        ai-review: ${HOLOZYN_ACTOR_MEMORY_GATE_AI_REVIEW:false}
-      # 会话结束懒检查阈值（真实分钟）：距上条消息超过该值视为上次会话已结束，
-      # 下次对话开始前异步补提一次完整记忆（事实+摘要，门控过滤寒暄）
-      session-timeout-minutes: ${HOLOZYN_ACTOR_MEMORY_SESSION_TIMEOUT_MINUTES:30}
-    # P4 世界持续模拟总开关（true=定时推进活跃项目的角色/人群/世界事件；false=行为与 P3 完全一致）
-    world:
-      sim-enabled: ${HOLOZYN_ACTOR_WORLD_SIM_ENABLED:true}
-      # 世界时钟速率：每真实小时推进的游戏小时数（默认 24=1真实小时推进1游戏日；每项目可单独覆盖）
-      time-rate: ${HOLOZYN_ACTOR_WORLD_TIME_RATE:24}
-      # 模拟扫描周期（真实毫秒，默认 180000=3 分钟）
-      scan-interval-ms: ${HOLOZYN_ACTOR_WORLD_SCAN_INTERVAL_MS:180000}
-      # 单次补算封顶（游戏小时，默认 24，防长时间离线后雪崩）
-      max-catch-up-hours: ${HOLOZYN_ACTOR_WORLD_MAX_CATCH_UP_HOURS:24}
-      # 每 tick AI 调用上限（角色行动 + 世界事件生成，默认 5；超限走程序化兜底）
-      max-ai-calls: ${HOLOZYN_ACTOR_WORLD_MAX_AI_CALLS:5}
-      # 活跃项目窗口（真实分钟，默认 30：仅推进最近有对话的项目）
-      active-window-minutes: ${HOLOZYN_ACTOR_WORLD_ACTIVE_WINDOW_MINUTES:30}
+    # 知识检索（RAG）质量参数（知识检索质量深化 2026-09-29_04）
+    knowledge:
+      # 多路召回总开关（默认 true：原 query 向量检索 + 话题词独立向量检索合并去重取 topK；
+      # 话题词 = 项目知识文档标题+正文高频 2~4 字窗口，query 包含匹配提取）
+      multi-recall-enabled: ${HOLOZYN_ACTOR_KNOWLEDGE_MULTI_RECALL_ENABLED:true}
+      # 话题词数量上限（默认 2；每个话题词 = 一次额外 embedding 检索；0=关闭多路）
+      topic-limit: ${HOLOZYN_ACTOR_KNOWLEDGE_TOPIC_LIMIT:2}
+      # 话题词索引缓存有效期（真实毫秒；知识库变更经检索缓存 invalidate 显式失效）
+      topic-index-ttl-ms: ${HOLOZYN_ACTOR_KNOWLEDGE_TOPIC_INDEX_TTL_MS:600000}
+      # 知识层生命周期（P1 ②-2，2026-10-03）：
+      # 知识文档四态状态机（hot/warm/stale/archived）——引用率（access_count + last_access_at，
+      # 检索命中即引用）驱动衰减，按游戏日差判定（世界冻结则知识不衰减）；
+      # @Scheduled 定期扫描（默认 6 小时，对齐记忆归档维护周期）+ 手动端点
+      # （scan-lifecycle / archive / restore）。stale 检索命中标注「可能过时」；
+      # archived 排除检索（可手动还原）。
+      lifecycle:
+        # 总开关（false=不评估不计数不归档，检索行为回退现状）
+        enabled: ${HOLOZYN_ACTOR_KNOWLEDGE_LIFECYCLE_ENABLED:true}
+        # 定期扫描开关（@Scheduled maintenance）
+        scan-enabled: ${HOLOZYN_ACTOR_KNOWLEDGE_LIFECYCLE_SCAN_ENABLED:true}
+        # 定期扫描间隔（真实毫秒，默认 6 小时，对齐记忆归档维护周期）
+        maintenance-interval-ms: ${HOLOZYN_ACTOR_KNOWLEDGE_LIFECYCLE_MAINTENANCE_INTERVAL_MS:21600000}
+        # hot→warm 阈值（距上次引用超 N 游戏日）
+        hot-days: ${HOLOZYN_ACTOR_KNOWLEDGE_LIFECYCLE_HOT_DAYS:3}
+        # warm→stale 阈值
+        stale-days: ${HOLOZYN_ACTOR_KNOWLEDGE_LIFECYCLE_STALE_DAYS:7}
+        # stale→archived 阈值
+        archive-days: ${HOLOZYN_ACTOR_KNOWLEDGE_LIFECYCLE_ARCHIVE_DAYS:14}
+    # NPC 状态模块 · 生理需求→行动决策耦合（2026-10-02 生理需求耦合轮）：
+    # 低值区候选注入 / 危险区程序化强制 / 三餐窗口 / 轻行动抑制，全部可配 + env 逃生门
+    npc-state:
+      physio:
+        # 耦合总开关（false=行为回到修复前，仅状态文本注入）
+        enabled: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_ENABLED:true}
+        # 低值注入阈值（低于 → 生理行动候选注入决策候选池）
+        low-hunger: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_LOW_HUNGER:45}
+        low-thirst: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_LOW_THIRST:45}
+        low-bladder: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_LOW_BLADDER:35}
+        low-hygiene: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_LOW_HYGIENE:50}
+        # 危险强制阈值（低于 → 程序化强制，可实时打断；0 AI）
+        danger-hunger: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_DANGER_HUNGER:20}
+        danger-thirst: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_DANGER_THIRST:20}
+        danger-bladder: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_DANGER_BLADDER:15}
+        danger-hygiene: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_DANGER_HYGIENE:25}
+        # 三餐窗口（仅约束进食；饮水/如厕/清洗不受限；危险区不受窗口限制）
+        meal-windows:
+          - { start-hour: 6, end-hour: 9 }
+          - { start-hour: 11, end-hour: 14 }
+          - { start-hour: 17, end-hour: 20 }
+        # 轻行动抑制（生理候选命中时，候选池「歇一歇/找人说说话」不再注入；continue 恒在）
+        light-action-suppress-enabled: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_LIGHT_SUPPRESS:true}
+        # 危险区实时打断（核心角色专属：PHYSIOLOGICAL_URGE 刺激放下手头事）
+        danger-interrupt-enabled: ${HOLOZYN_ACTOR_NPC_STATE_PHYSIO_DANGER_INTERRUPT:true}
+    # 自省-行为一致性校验（自省漂移检测·候选 A，2026-10-02）：
+    # 决策链命中产出后，把「最近反思洞察 vs 已产出决策」交给 AI 判定一致/漂移，
+    # 漂移写 trace（stepType=self_check）并注入下次反思输入（反思闭环）。
+    # 旁路语义：不产出/不覆盖决策，失败降级 fail-open 零干扰；仅特殊 NPC + 非 programmatic 档。
+    self-check:
+        # 校验总开关
+        enabled: ${HOLOZYN_ACTOR_SELF_CHECK_ENABLED:true}
+        # 概率抽样率（0~1；命中才校验——自省漂移是采样观测，非全量审计）
+        sample-rate: ${HOLOZYN_ACTOR_SELF_CHECK_SAMPLE_RATE:0.3}
+        # 反思洞察取用条数（最近 N 条 reflection 记忆）
+        reflection-top-n: ${HOLOZYN_ACTOR_SELF_CHECK_REFLECTION_TOP_N:3}
+        # 反思窗口（近 N 游戏日内有反思才校验；陈旧反思不参与）
+        reflection-window-game-days: ${HOLOZYN_ACTOR_SELF_CHECK_REFLECTION_WINDOW_GAME_DAYS:1}
+    # 主动记忆检索（ProactAgent「Ask Only When Needed」，P1 ②-1，2026-10-03）：
+    # 决策全局（含 SpaceChoice/NanoJev 快判；programmatic 档 0 AI 除外）+ 反思双入口，
+    # AI 按情境判定「是否需要主动想起/查证」→ 定向检索三源（角色记忆+世界大事记+知识卡）
+    # → 独立【主动想起】段注入（决策 {{proactive_memory}} / 快判情境文本 / 反思 {{proactive_memory}}）。
+    # 失败降级 fail-open 零阻断；need=true 后冷却期内不再自问（间歇性回忆）。
+    proactive-retrieval:
+        # 总开关
+        enabled: ${HOLOZYN_ACTOR_PROACTIVE_RETRIEVAL_ENABLED:true}
+        # 冷却期（游戏小时；need=true 后冷却期内不再自问）
+        cooldown-game-hours: ${HOLOZYN_ACTOR_PROACTIVE_RETRIEVAL_COOLDOWN_GAME_HOURS:2}
+        # 每源检索条数上限（角色记忆/世界大事记/知识卡各 top-K）
+        top-k: ${HOLOZYN_ACTOR_PROACTIVE_RETRIEVAL_TOP_K:3}
+        # 【主动想起】段 token 预算
+        max-tokens: ${HOLOZYN_ACTOR_PROACTIVE_RETRIEVAL_MAX_TOKENS:300}
+        # AI 判定输入情境截断长度（字符）
+        max-situation-length: ${HOLOZYN_ACTOR_PROACTIVE_RETRIEVAL_MAX_SITUATION_LENGTH:600}
+        # query 最大长度（字符，防 AI 输出失控）
+        max-query-length: ${HOLOZYN_ACTOR_PROACTIVE_RETRIEVAL_MAX_QUERY_LENGTH:100}
+    # 潜在世界预测注入（P1 ③-2，2026-10-03）：
+    # 角色「脑内预演世界走向」——程序化趋势摘要（历史快照环比：粮价/民怨/势力/议题方向）
+    # + AI 预测【未来一天世界走向】段（按游戏日缓存，同日不重复 AI）。
+    # 三通道注入：AI 深思 action_gen {{world_outlook}} / NanoJev 快判情境首部（仅程序化趋势，
+    # 零 AI）/ 前瞻推演宏观段升级（【当下时局】+【未来一天世界走向】）。
+    # 失败降级 fail-open：AI 失败回退趋势摘要；未装配/无数据省略段零阻断。
+    world-outlook:
+        # 总开关
+        enabled: ${HOLOZYN_ACTOR_WORLD_OUTLOOK_ENABLED:true}
+    # 记忆-知识桥接层（P1 ②-3，2026-10-03）：
+    # 反思洞察 → 独立 AI 判定（scene=knowledge_bridge）抽取「可复用事实型知识候选」
+    # → 全自动确认（规则，无人工确认端点）→ 写入角色级「经历沉淀」知识文档
+    # （防知识卡僵化，不动模板化人物知识卡）→ 候选留档（promoted/duplicate/rejected）。
+    # 挂载：反思写阶段提交后（AfterCommit，独立 AI 调用）+ 手动端点（冒烟/运维直驱）。
+    knowledge-bridge:
+        # 总开关
+        enabled: ${HOLOZYN_ACTOR_KNOWLEDGE_BRIDGE_ENABLED:true}
+    # H2 TCP Server：应用运行中外部工具（DataGrip 等）直连同一库实例
+    # 连接 URL：jdbc:h2:tcp://localhost:{tcp-port}/holzyn-actor;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE
+    # 同 JVM 复用已打开的库实例（不产生第二个文件锁）；应用停止后 TCP 自动关闭
+    h2:
+      tcp-enabled: ${HOLOZYN_ACTOR_H2_TCP_ENABLED:true}
+      tcp-port: ${HOLOZYN_ACTOR_H2_TCP_PORT:9092}
+      # 是否允许非本机连接（本库无鉴权，勿公网暴露）
+      tcp-allow-others: ${HOLOZYN_ACTOR_H2_TCP_ALLOW_OTHERS:false}
   cors:
-    # CORS 允许的来源模式（逗号分隔），默认 * 允许所有（本地桌面/本地 Web 场景）
+    # CORS 允许的来源模式（逗号分隔；* = 允许所有，本地桌面/本地 Web 场景）
     allowed-origins: ${HOLOZYN_CORS_ORIGINS:*}
 
 logging:

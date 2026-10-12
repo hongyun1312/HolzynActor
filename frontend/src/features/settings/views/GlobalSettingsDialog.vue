@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <el-dialog v-model="visible" title="设置 · 全局（用户级）" width="900px" top="4vh"
     class="global-settings-dialog" :close-on-click-modal="false" destroy-on-close>
@@ -30,7 +43,7 @@
 
 <script setup>
 /**
- * 全局（用户级）设置弹窗 —— 项目空间外所有「设置」入口的统一弹窗（V1.8）。
+ * 全局（用户级）设置弹窗 —— 项目空间外所有「设置」入口的统一弹窗。
  * <p>背景：首页「设置」此前为「内嵌 ModelApiSettings 页 + 打开完整设置页路由跳转」，
  * 路由跳转在用户环境不可靠（次对接文档 §13/§14），且弹窗 UI 与其它弹窗不统一；本次重构为
  * 标准 el-dialog（标题 + 说明 + Tab 内容 + 底部按钮），与画廊导入/导出等弹窗形态一致。</p>

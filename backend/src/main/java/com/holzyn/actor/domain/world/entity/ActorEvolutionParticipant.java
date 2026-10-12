@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.entity;
 
 import jakarta.persistence.*;
@@ -5,10 +23,9 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 世界演化参与者实体，对应表 actor_evolution_participant（V2.1）。
+ * 世界演化参与者实体，对应表 actor_evolution_participant。
  * <p>职责：记录一次演化会话的参与角色及在场状态——加入（join_at）/ 退场（leave_at，status=left）；
  * 演化结束后，仅参与者（含已退场者）会获得归档事件的「角色级记忆」（记忆隔离：非当事人不知道）。</p>
- * <p>所属模块：model/entity（实体层-世界演化子域）</p>
  */
 @Data
 @Entity

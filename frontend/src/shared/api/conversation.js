@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // 对话功能域 API：单聊/群聊会话 / 消息（SSE 流式）/ 世界事件注入 / 群聊配置
 import http from './http'
 
@@ -14,9 +32,12 @@ export const conversationStreamUrl = (conversationId, forceCharacterId) => {
   const q = forceCharacterId ? `?forceCharacterId=${forceCharacterId}` : ''
   return `/api/conversations/${conversationId}/stream${q}`
 }
+// ：会话实时消息订阅 URL（NPC 内群围观：订阅型长连接，被动推送已落库消息；
+// 事件：connected/ping/message-start/token/done/message[系统]；断线由统一客户端自动重连）
+export const conversationLiveStreamUrl = (conversationId) => `/api/conversations/${conversationId}/live-stream`
 
 // ==================== 对话场景（所在地 + 世界时间） ====================
-// 更新会话「对话场景」：{location?, gameTimeText?}（location 空串=清空为远程通讯）
+// 会话「对话场景」：{location?, gameTimeText?}（location 空串=清空为远程通讯）
 export const updateConversationScene = (conversationId, data) => http.put(`/api/conversations/${conversationId}/scene`, data)
 // AI 生成对话专属标题（创建弹窗「AI 重写」）：{characterId?, location?, gameTimeText?} → { title }
 export const generateConversationTitle = (projectId, data) => http.post(`/api/projects/${projectId}/conversations/generate-title`, data)
@@ -24,7 +45,7 @@ export const generateConversationTitle = (projectId, data) => http.post(`/api/pr
 // ==================== 世界事件 + 无玩家轮次 ====================
 // 世界事件：手填文本或 AI 生成（generate:true），返回后前端打开 SSE 触发在场角色回应
 export const injectWorldEvent = (conversationId, data) => http.post(`/api/conversations/${conversationId}/world-event`, data)
-// 「无玩家轮次」自主推进（P4 世界模拟预留）
+// 「无玩家轮次」自主推进
 export const advanceConversation = (conversationId) => http.post(`/api/conversations/${conversationId}/advance`)
 
 // ==================== 群聊配置（用户级） ====================

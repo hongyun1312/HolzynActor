@@ -1,17 +1,30 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="manual-add-panel">
     <!-- 顶部说明 -->
-    <div class="page-header">
-      <div>
-        <div class="page-title">手动添加</div>
-        <div class="page-desc">在本页一次性填写项目信息与完整世界观设定（均非必填）；创建后可选是否进行默认世界初始化。</div>
-      </div>
-      <div class="header-ops">
+    <PageHeader
+      size="sm"
+      title="手动添加"
+      desc="在本页一次性填写项目信息与完整世界观设定（均非必填）；创建后可选是否进行默认世界初始化。"
+    >
+      <template #actions>
         <el-button type="primary" :loading="creating" @click="doCreate">
           <el-icon><HIcon name="Plus" /></el-icon>&nbsp;创建项目
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 项目基本信息 -->
     <div class="block-card tech-card">
@@ -38,7 +51,7 @@
     <!-- 世界观设定：左侧 Tab 分块，布局参考世界详情页 -->
     <div class="block-card tech-card world-card">
       <div class="block-title">世界观设定<span class="block-tip">（均非必填，可留空稍后在项目空间补充）</span></div>
-      <el-tabs v-model="activeSection" tab-position="left" class="world-tabs">
+      <PageTabs v-model="activeSection" position="left">
         <el-tab-pane label="基本信息" name="basic">
           <div class="wc-grid">
             <div class="wc-cell">
@@ -91,14 +104,14 @@
             <el-input v-model="worldForm.freeText" type="textarea" :rows="10" placeholder="上述分类之外的其他设定、补充内容…" />
           </div>
         </el-tab-pane>
-      </el-tabs>
+      </PageTabs>
     </div>
   </div>
 </template>
 
 <script setup>
 /**
- * 手动添加面板（2026-08-19 新建项目页重构）。
+ * 手动添加面板（新建项目页重构）。
  * <p>职责：一次性填写项目信息 + 完整世界观设定（均非必填，布局参考项目空间世界详情页左侧 Tab 分块）；
  * 创建项目 + 落世界观表后，弹窗询问是否进行默认世界初始化（是→跳专属世界初始化页 / 否→进项目空间仪表盘）。</p>
  */
@@ -106,6 +119,8 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createProject, saveWorldSetting } from '@/shared/api'
+import PageHeader from '@/shared/layout/PageHeader.vue'
+import PageTabs from '@/shared/layout/PageTabs.vue'
 
 const router = useRouter()
 
@@ -162,7 +177,7 @@ function askInit(projectId, projectName) {
     router.replace(`/project/${projectId}/init`)
   }).catch((action) => {
     if (action === 'cancel') {
-      router.replace(`/project/${projectId}/dashboard`)
+      router.replace(`/project/${projectId}/sandbox`)
     }
     // close（点 X）留在本页
   })
@@ -171,18 +186,12 @@ function askInit(projectId, projectName) {
 
 <style scoped>
 .manual-add-panel { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; }
-.page-title { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); }
-.page-desc { font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px; }
-.header-ops { display: flex; gap: 8px; }
+/* 页头（size="sm"）与左置标签样式由全局类/PageTabs 统一提供 */
 .block-card { padding: 18px 22px; }
 .block-title { font-weight: 700; color: var(--text-primary); margin-bottom: 12px; }
 .block-tip { font-size: 0.75rem; color: var(--text-tertiary); font-weight: 400; margin-left: 8px; }
 .proj-form { max-width: 760px; }
 .world-card { min-height: 420px; }
-.world-tabs :deep(.el-tabs__header) { margin-right: 0; }
-.world-tabs :deep(.el-tabs__nav-wrap) { width: 128px; }
-.world-tabs :deep(.el-tabs__content) { overflow: visible; }
 .wc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
 .wc-cell { min-width: 0; }
 .wc-label { font-size: 0.78rem; color: var(--text-secondary); font-weight: 600; margin-bottom: 6px; }

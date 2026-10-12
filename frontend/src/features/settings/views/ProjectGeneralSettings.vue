@@ -1,5 +1,26 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="general-settings">
+    <!-- 统一页头（项目/全局两态说明不同；内嵌设置弹窗时由弹窗标题与 Tab 标签承担，不再重复） -->
+    <PageHeader
+      v-if="!embedded"
+      title="通用设置"
+      :desc="projectId
+        ? '项目级设置：基本信息、世界时钟、导入导出与危险区操作；用户级偏好（账户、主题外观）在此一并可达。'
+        : '全局（用户级）设置：本地账户、主题与外观、群聊每轮回复上限。项目专属设置请进入对应项目空间 → 设置。'"
+    />
     <!-- 全局设置提示：仅首页/未进入项目时显示（项目专属设置在项目空间内；内嵌弹窗时由弹窗顶部说明承担） -->
     <div v-if="!projectId && !embedded" class="gs-card tech-card">
       <div class="gs-title">全局设置（首页）</div>
@@ -81,8 +102,13 @@
     <!-- ② 世界时钟（仅项目空间） -->
     <div v-if="projectId" class="gs-card tech-card">
       <div class="gs-title">世界时钟</div>
-      <div class="gs-desc">速率（每真实小时推进的游戏小时数）、暂停/恢复开关、锚点与起始游戏时刻；与「世界演化」控制条联动。</div>
+      <div class="gs-desc">速率（每真实小时推进的游戏小时数）、暂停/恢复开关、锚点与起始游戏时刻；与「世界演化」控制条联动。
+        <b>持续运行</b>是无人值守自转的常驻开关（关闭=世界引擎完全不推进该项目；暂停=临时冻结，可随时恢复）。</div>
       <el-form label-width="140px" class="gs-form">
+        <el-form-item label="持续运行">
+          <el-switch v-model="clockForm.worldRunning" active-text="持续运行" inactive-text="已关闭" />
+          <span class="gs-hint">{{ clockForm.worldRunning ? '世界引擎每扫描周期自动推进（无对话项目也自转）' : '已关闭：世界引擎不推进该项目（需手动开启或手动补推）' }}</span>
+        </el-form-item>
         <el-form-item label="速率（游戏时/真实时）">
           <el-input-number v-model="clockForm.rate" :min="1" :max="240" style="width: 140px" />
           <span class="gs-hint">默认 24 = 1 真实小时推进 1 游戏日</span>
@@ -100,6 +126,35 @@
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="savingClock" @click="saveClock">保存世界时钟</el-button>
+        </el-form-item>
+      </el-form>
+    </div>
+
+    <!-- ②.5 智能体运行模式（，仅项目空间） -->
+    <div v-if="projectId" class="gs-card tech-card">
+      <div class="gs-title">智能体运行模式</div>
+      <div class="gs-desc">项目级世界引擎运行模式三档，控制「该项目下的 AI 投入」：
+        <b>极简</b>=系统自动能力降级/关闭（目标/日计划/反思机制化，预算压到最低，省钱优先）；
+        <b>普通（默认）</b>=现状 + 机制化日计划（普通 NPC 机制，特殊 NPC 正常 AI）；
+        <b>极致</b>=全量 AI（普通 NPC 也 AI 生成当日计划，预算拉满、反思优先）。特殊 NPC 仍尊重各自的脑力配置（不强制覆盖）。
+        <br /><b>M5 AI 强度</b>为独立四档维度（与运行模式正交可叠加：运行模式管引擎节奏，AI 强度管智能体 AI 使用密度）：
+        <b>纯规则</b>=零 AI（宏观层全机制化）；<b>轻 AI</b>=预算减半；<b>标准（默认）</b>=阈值 AI 叙事 + 常规 AI；
+        <b>全 AI</b>=宏观事件全部 AI 叙事、叙事拉满。微观层（实时决策/记忆提炼等）全量接线列入 M5.5 阶段。</div>
+      <el-form label-width="140px" class="gs-form">
+        <el-form-item label="运行模式">
+          <el-select v-model="engineForm.runMode" style="width: 220px" :loading="engineLoading">
+            <el-option v-for="m in RUN_MODES" :key="m.value" :label="m.label" :value="m.value" />
+          </el-select>
+          <span class="gs-hint" v-if="engineForm.runModeLabel">当前：<b>{{ engineForm.runModeLabel }}</b></span>
+        </el-form-item>
+        <el-form-item label="AI 强度（M5）">
+          <el-select v-model="engineForm.aiIntensity" style="width: 220px" :loading="engineLoading">
+            <el-option v-for="l in AI_INTENSITY_LEVELS" :key="l.value" :label="l.label" :value="l.value" />
+          </el-select>
+          <span class="gs-hint" v-if="engineForm.aiIntensityLabel">当前：<b>{{ engineForm.aiIntensityLabel }}</b></span>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="savingEngine" @click="saveEngine">保存运行模式 / AI 强度</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -175,7 +230,7 @@
 
 <script setup>
 /**
- * 设置-通用设置（模块化重构 V1.0 + 主题与外观；双模式改造 V1.2）。
+ * 设置-通用设置。
  * <p>职责：项目/全局双模式通用设置——
  * 项目模式（/project/:id/settings/general）：本地账户 + 主题与外观 + 基本信息 + 世界时钟 + 群聊配置 + 导入/导出 + 危险区；
  * 全局模式（/settings/general，首页顶栏「设置」进入）：仅本地账户 + 主题与外观（无项目覆盖）+ 群聊配置（全局），
@@ -190,9 +245,11 @@ import {
   fetchWorldClock, updateWorldClock,
   fetchGroupChatConfig, saveGroupChatConfig,
   fetchWorldSetting,
-  exportProjectPackage, importProjectPackage
+  exportProjectPackage, importProjectPackage,
+  fetchWorldEngineConfig, updateWorldEngineConfig
 } from '@/shared/api'
 import { useTheme, THEME_PRESETS } from '@/shared/theme'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -242,14 +299,62 @@ function onResetProjectOverride() {
 const infoForm = reactive({ name: '', code: '', summary: '' })
 const savingInfo = ref(false)
 
-const clockForm = reactive({ rate: 24, paused: false, worldStartAt: null, worldStartGameHour: 0 })
+const clockForm = reactive({ rate: 24, worldRunning: 1, paused: false, worldStartAt: null, worldStartGameHour: 0 })
 const savingClock = ref(false)
+
+// ===== 智能体运行模式（：minimal/standard/ultimate 三档，actor_world_engine.run_mode） =====
+const RUN_MODES = [
+  { value: 'minimal', label: '极简（省钱优先）' },
+  { value: 'standard', label: '普通（标准）' },
+  { value: 'ultimate', label: '极致（全量 AI）' }
+]
+// ===== AI 强度（独立四档维度，与 runMode 正交：runMode=引擎节奏，AI 强度=智能体 AI 使用密度） =====
+const AI_INTENSITY_LEVELS = [
+  { value: 'programmatic', label: '纯规则（零 AI）' },
+  { value: 'light', label: '轻 AI（预算减半）' },
+  { value: 'full', label: '标准（默认）' },
+  { value: 'max', label: '全 AI（叙事拉满）' }
+]
+const engineForm = reactive({ runMode: 'standard', runModeLabel: '', aiIntensity: 'full', aiIntensityLabel: '' })
+const engineLoading = ref(false)
+const savingEngine = ref(false)
+
+/** 加载世界引擎运行模式 + AI 强度 */
+async function loadEngineConfig() {
+  if (!projectId.value) return
+  engineLoading.value = true
+  try {
+    const c = await fetchWorldEngineConfig(projectId.value)
+    engineForm.runMode = c.runMode || 'standard'
+    engineForm.runModeLabel = c.runModeLabel || ''
+    engineForm.aiIntensity = c.aiIntensity || 'full'
+    engineForm.aiIntensityLabel = c.aiIntensityLabel || ''
+  } catch (_) { /* 引擎行懒创建，读取失败保持默认 */ }
+  finally { engineLoading.value = false }
+}
+
+/** 保存运行模式 / AI 强度 */
+async function saveEngine() {
+  if (!projectId.value) return
+  savingEngine.value = true
+  try {
+    const c = await updateWorldEngineConfig(projectId.value, {
+      runMode: engineForm.runMode,
+      aiIntensity: engineForm.aiIntensity
+    })
+    engineForm.runMode = c.runMode
+    engineForm.runModeLabel = c.runModeLabel
+    engineForm.aiIntensity = c.aiIntensity
+    engineForm.aiIntensityLabel = c.aiIntensityLabel
+    ElMessage.success(`运行模式「${c.runModeLabel}」· AI 强度「${c.aiIntensityLabel}」已保存`)
+  } catch (e) { ElMessage.error(e.message || '保存失败') } finally { savingEngine.value = false }
+}
 
 const groupReplies = ref(5)
 
 const exportDialog = ref(false)
 const importDialog = ref(false)
-// 导出/导入表单状态（V2.0 真实功能）
+// 导出/导入表单状态
 const exportForm = reactive({ includeSensitive: false, password: '', loading: false })
 const importForm = reactive({ file: null, password: '', loading: false })
 
@@ -263,13 +368,20 @@ async function loadAll() {
     } catch (_) { /* 忽略 */ }
     try {
       const c = await fetchWorldClock(projectId.value)
-      if (c) Object.assign(clockForm, { rate: c.rate || 24, paused: !!c.paused, worldStartAt: c.worldStartAt, worldStartGameHour: c.worldStartGameHour || 0 })
+      if (c) Object.assign(clockForm, {
+        rate: c.rate || 24,
+        worldRunning: c.worldRunning === 1,
+        paused: !!c.paused,
+        worldStartAt: c.worldStartAt,
+        worldStartGameHour: c.worldStartGameHour || 0
+      })
     } catch (_) { /* 忽略 */ }
     // 当前项目世界观题材（主题联动展示）
     try {
       const w = await fetchWorldSetting(projectId.value)
       worldGenre.value = w?.genre || null
     } catch (_) { /* 忽略 */ }
+    await loadEngineConfig()
   }
   try {
     const r = await fetchGroupChatConfig()
@@ -295,6 +407,7 @@ async function saveClock() {
   try {
     await updateWorldClock(projectId.value, {
       rate: clockForm.rate,
+      worldRunning: clockForm.worldRunning ? 1 : 0,
       paused: clockForm.paused,
       worldStartAt: clockForm.worldStartAt || undefined,
       worldStartGameHour: clockForm.worldStartGameHour

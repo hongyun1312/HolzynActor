@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.common;
 
 import jakarta.persistence.AttributeConverter;
@@ -15,15 +33,14 @@ import tools.jackson.databind.ObjectMapper;
  * 角色卡结构化卡空白、Prompt 渲染降级、行动/世界演化/群聊/导入导出解析缺失等一连串问题。</p>
  * <p>转换规则：</p>
  * <ul>
- *   <li>入库（convertToDatabaseColumn）：原样返回单层 JSON 文本（H2 自动解析为 JSON 值存储）；</li>
- *   <li>读库（convertToEntityAttribute）：若读回文本整体是合法 JSON 且根节点为文本节点
- *       （即被 JSON 字符串包了一层的「双重编码」特征），解包一层返回真正的 JSON 文本；
- *       否则原样返回（兼容 MySQL 原生 JSON 列的单层读取，以及非法/旧数据的容错）。
- *       由于修复前导出的 .holzyn 文件可能已携带一层「字符串字面量」包裹，读库时循环解包
- *       （上限 5 层），直到根节点不是文本节点或内层文本不再是 JSON 形状为止。</li>
+ * <li>入库（convertToDatabaseColumn）：原样返回单层 JSON 文本（H2 自动解析为 JSON 值存储）；</li>
+ * <li>读库（convertToEntityAttribute）：若读回文本整体是合法 JSON 且根节点为文本节点
+ * （即被 JSON 字符串包了一层的「双重编码」特征），解包一层返回真正的 JSON 文本；
+ * 否则原样返回（兼容 MySQL 原生 JSON 列的单层读取，以及非法/旧数据的容错）。
+ * 由于修复前导出的 .holzyn 文件可能已携带一层「字符串字面量」包裹，读库时循环解包
+ * （上限 5 层），直到根节点不是文本节点或内层文本不再是 JSON 形状为止。</li>
  * </ul>
- * <p>2026-08-18 引入：应用于 actor_character_card.persona_json 等全部 JSON 列。</p>
- * <p>所属模块：common（通用组件）</p>
+ * <p>引入：应用于 actor_character_card.persona_json 等全部 JSON 列。</p>
  */
 @Converter
 public class JsonColumnConverter implements AttributeConverter<String, String> {
@@ -40,6 +57,7 @@ public class JsonColumnConverter implements AttributeConverter<String, String> {
      * 不做任何改写，避免破坏已存储的数据格式。</p>
      *
      * @param attribute 实体侧的单层 JSON 文本
+     *
      * @return 原样返回
      */
     @Override
@@ -54,6 +72,7 @@ public class JsonColumnConverter implements AttributeConverter<String, String> {
      * 直到根节点不是文本节点为止。返回调用方期望的单层 JSON 文本。</p>
      *
      * @param dbData 数据库读回的原始文本
+     *
      * @return 归一化后的 JSON 文本
      */
     @Override

@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.settings.controller;
 
 import com.holzyn.actor.domain.account.CurrentUserProvider;
@@ -19,11 +37,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Prompt 模板控制器（P2 管理后台「Prompt 模板」，后端项目化改造 V2.0）。
+ * Prompt 模板控制器。
  * <p>职责：提供模板接口（非 /api/admin）——列表（项目覆盖 ∪ 用户覆盖 ∪ 内置）、
  * 保存覆盖、重置回退；支持可选 projectId（传=项目级覆盖，随 .holzyn 包导入导出；
  * 不传=用户级覆盖）。归属一律以当前会话用户为准。</p>
- * <p>所属模块：controller/prompt（模板子域）</p>
  */
 @RestController
 @RequestMapping("/api")
@@ -40,6 +57,7 @@ public class PromptTemplateController {
      * 有效模板列表（项目覆盖 ∪ 用户覆盖 ∪ 内置，含 isOverride/projectScope 标记）。
      *
      * @param projectId 项目 ID（可空=仅用户覆盖/内置）
+     *
      * @return 模板列表
      */
     @GetMapping("/prompt-templates")
@@ -52,8 +70,11 @@ public class PromptTemplateController {
      * 保存覆盖模板（不存在则新建）。projectId 非空=项目级覆盖，空=用户级覆盖。
      *
      * @param projectId 项目 ID（可空）
-     * @param code      模板编码
-     * @param body      请求体：{name?, template}
+     *
+     * @param code 模板编码
+     *
+     * @param body 请求体：{name?, template}
+     *
      * @return 保存后的模板
      */
     @PutMapping("/prompt-templates/{code}")
@@ -71,7 +92,9 @@ public class PromptTemplateController {
      * 重置为低一级：删除项目级/用户级覆盖行，回退用户覆盖或内置模板。
      *
      * @param projectId 项目 ID（可空=删除用户级覆盖）
-     * @param code      模板编码
+     *
+     * @param code 模板编码
+     *
      * @return 重置后的有效模板
      */
     @DeleteMapping("/prompt-templates/{code}")
@@ -88,7 +111,9 @@ public class PromptTemplateController {
      * 模板实体 → 视图 Map（isOverride 标记是否覆盖、projectScope 标记是否项目级）。
      *
      * @param userId 当前用户 ID
-     * @param t      模板实体
+     *
+     * @param t 模板实体
+     *
      * @return 视图 Map
      */
     private Map<String, Object> toVO(Long userId, ActorPromptTemplate t) {
@@ -108,6 +133,7 @@ public class PromptTemplateController {
      * 取值辅助：Object 转字符串。
      *
      * @param v 原始对象
+     *
      * @return 字符串
      */
     private String str(Object v) {

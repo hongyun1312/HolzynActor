@@ -54,6 +54,43 @@ class MemoryExtractParseTest {
     }
 
     /**
+     * 抽取解析：对象包装 {facts:[...]} 兼容（2026-09-12 M3 交接冒烟抓修——
+     * deepseek json_object 模式在「只输出严格 JSON」+「只输出 JSON 数组」双重指令下
+     * 常把数组包成对象且字段名用 facts，原实现仅认 memories → 解析为空静默丢事实）。
+     */
+    @Test
+    void parseExtractAcceptsFactsWrapper() {
+        String ai = "{\"facts\":[{\"kind\":\"fact\",\"content\":\"罗小黑否认自己曾说要改名墨白\",\"importance\":4},"
+                + "{\"content\":\"罗小黑的师父是无限\",\"importance\":2}]}";
+        List<MemoryExtractParse.ExtractedMemory> out = MemoryExtractParse.parseExtract(ai);
+        assertEquals(2, out.size());
+        assertEquals("罗小黑否认自己曾说要改名墨白", out.get(0).content());
+        assertEquals(4, out.get(0).importance());
+        assertEquals("罗小黑的师父是无限", out.get(1).content());
+    }
+
+    /**
+     * 抽取解析：{facts:[...], reason:"..."} 混合对象（facts 优先，reason 等非数组字段忽略）。
+     */
+    @Test
+    void parseExtractAcceptsFactsWrapperWithReason() {
+        String ai = "{\"reason\":\"无\",\"facts\":[{\"content\":\"a\"},{\"content\":\"b\"}]}";
+        List<MemoryExtractParse.ExtractedMemory> out = MemoryExtractParse.parseExtract(ai);
+        assertEquals(2, out.size());
+    }
+
+    /**
+     * 抽取解析：memories 与 facts 同时存在时优先 memories（既有行为不回归）。
+     */
+    @Test
+    void parseExtractPrefersMemoriesOverFacts() {
+        String ai = "{\"memories\":[{\"content\":\"m\"}],\"facts\":[{\"content\":\"f\"}]}";
+        List<MemoryExtractParse.ExtractedMemory> out = MemoryExtractParse.parseExtract(ai);
+        assertEquals(1, out.size());
+        assertEquals("m", out.get(0).content());
+    }
+
+    /**
      * 抽取解析：空数组/空白/非法 JSON → 空列表（不抛异常）。
      */
     @Test
@@ -75,6 +112,20 @@ class MemoryExtractParseTest {
         assertEquals(1, out.size(), "空白 content 应被丢弃");
         assertEquals("有效记忆", out.get(0).content());
         assertEquals(1, out.get(0).importance(), "importance 越界应钳制到 1");
+    }
+
+    /**
+     * 抽取解析：兼容单对象输出（模型偶尔返回 {kind,content,importance} 而非数组；
+     * 2026-08-21 B5 冒烟抓修——否则记忆抽取静默丢事实，普通 NPC 记忆沉淀不落库）。
+     */
+    @Test
+    void parseExtractAcceptsSingleObject() {
+        String ai = "{\"kind\":\"fact\",\"content\":\"玩家来自猎户村，名叫阿明\",\"importance\":3}";
+        List<MemoryExtractParse.ExtractedMemory> out = MemoryExtractParse.parseExtract(ai);
+        assertEquals(1, out.size(), "单对象应解析为一条记忆");
+        assertEquals("fact", out.get(0).kind());
+        assertEquals("玩家来自猎户村，名叫阿明", out.get(0).content());
+        assertEquals(3, out.get(0).importance());
     }
 
     /**

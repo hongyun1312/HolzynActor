@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="dashboard-view">
     <!-- 欢迎区：项目名 + 题材标签 + 快捷操作 -->
@@ -14,7 +27,7 @@
         <el-button type="primary" @click="go('/chat')"><el-icon><HIcon name="ChatDotRound" /></el-icon>&nbsp;进入对话</el-button>
         <el-button @click="go('/evolve')"><el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;世界演化</el-button>
         <el-button plain @click="go('/characters')"><el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增角色</el-button>
-        <!-- 世界初始化/重新初始化入口（2026-08-19：点击弹提醒确认后进入独立初始化页） -->
+        <!-- 世界初始化/重新初始化入口（点击弹提醒确认后进入独立初始化页） -->
         <el-button plain type="warning" @click="openWorldInit"><el-icon><HIcon name="Setting" /></el-icon>&nbsp;世界初始化</el-button>
       </div>
     </div>
@@ -29,19 +42,75 @@
       <div class="wo-divider"></div>
       <div class="wo-cell">
         <div class="wo-label">当前游戏时刻</div>
-        <div class="wo-value" v-if="clock">{{ clock.periodText }} · 第 {{ clock.day }} 日</div>
+        <!-- 实时时钟（本地插值 + SSE clock 校准，暂停冻结；完整世界历到分） -->
+        <div class="wo-value clock-live" v-if="clock">{{ clockText }}</div>
         <div class="wo-value" v-else>—</div>
         <div class="wo-sub" v-if="clock">速率×{{ clock.rate }}（每真实小时推进的游戏小时数）</div>
       </div>
       <div class="wo-divider"></div>
       <div class="wo-cell">
         <div class="wo-label">世界模拟状态</div>
-        <div class="wo-value">
+        <div class="wo-value" style="display:flex; align-items:center; gap:6px;">
           <el-tag :type="clock?.paused ? 'warning' : 'success'" effect="light" size="small">
             {{ clock?.paused ? '已暂停' : '推进中' }}
           </el-tag>
+          <!-- +：世界运行时状态（启动全静止；打开沙盘/演化页自动运行，或手动常开） -->
+          <el-tag :type="rtDecision.active ? 'success' : 'info'" effect="plain" size="small">
+            {{ rtDecision.active ? '世界运行中' : '世界静止（启动全静止，进入沙盘才运行）' }}
+          </el-tag>
         </div>
-        <el-button size="small" text type="primary" @click="go('/evolve')">前往世界演化控制 →</el-button>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+          <el-button size="small" text type="primary" @click="go('/evolve')">前往世界演化控制 →</el-button>
+          <span style="display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--text-secondary);">
+            <el-switch size="small" :model-value="rtDecision.manualEnabled" :loading="rtBusy" @change="toggleRtManual" />
+            手动常开
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 宏观社会卡片 -->
+    <div class="world-ov-card tech-card">
+      <div class="wo-cell">
+        <div class="wo-label">宏观社会</div>
+        <div class="wo-value">{{ macro?.templateId ? templateLabel(macro.templateId) : '未初始化' }}</div>
+        <div class="wo-sub" v-if="macro">AI 强度：{{ aiIntensityLabel }} · 第 {{ (macro.gameDay || 0) + 1 }} 日</div>
+        <div class="wo-sub" v-else>世界模拟推进后自动初始化（每日 00:05 宏观 tick）</div>
+      </div>
+      <div class="wo-divider"></div>
+      <div class="wo-cell">
+        <div class="wo-label">人口</div>
+        <div class="wo-value">{{ macro?.population ?? '—' }}</div>
+        <div class="wo-sub">口（宏观人口池）</div>
+      </div>
+      <div class="wo-divider"></div>
+      <div class="wo-cell">
+        <div class="wo-label">粮价</div>
+        <div class="wo-value">{{ macro?.grainPrice != null ? Math.round(macro.grainPrice) : '—' }}</div>
+        <div class="wo-sub">文/石 · 市集 {{ macro?.marketActivity != null ? Math.round(macro.marketActivity) : '—' }}</div>
+      </div>
+      <div class="wo-divider"></div>
+      <div class="wo-cell">
+        <div class="wo-label">民怨</div>
+        <div class="wo-value" style="display:flex; align-items:center; gap:8px;">
+          <span>{{ macro?.grievance != null ? Math.round(macro.grievance) : '—' }}</span>
+          <el-progress v-if="macro?.grievance != null" :percentage="Math.round(macro.grievance)" :stroke-width="6"
+            :show-text="false" style="width: 80px" :color="grievanceColor(macro.grievance)" />
+        </div>
+        <div class="wo-sub">生计→舆论→势力因果链</div>
+      </div>
+      <div class="wo-divider"></div>
+      <div class="wo-cell">
+        <div class="wo-label">季节 · 收成</div>
+        <div class="wo-value">{{ seasonName(macro?.season) }}{{ macro?.harvestFactor ? ' · ' + macro.harvestFactor.toFixed(2) : '' }}</div>
+        <div class="wo-sub">收成系数（季节×天气×累积）</div>
+      </div>
+      <div class="wo-divider"></div>
+      <!-- 宏观详情入口 → 沙盘宏观面板（实时民怨/事件流） -->
+      <div class="wo-cell" style="cursor: pointer;" @click="go('/sandbox')">
+        <div class="wo-label">宏观详情</div>
+        <div class="wo-value" style="font-size: 13px; color: var(--brand-primary);">沙盘宏观面板 →</div>
+        <div class="wo-sub">民怨 / 最近宏观事件</div>
       </div>
     </div>
 
@@ -102,19 +171,23 @@
 
 <script setup>
 /**
- * 项目仪表盘（前端布局重构 V1.0，设计文档 §3.3）。
+ * 项目仪表盘。
  * <p>职责：进入项目空间后的默认落地页，一屏总览——
  * 欢迎区（项目名/题材标签/快捷操作）+ 世界概况（世界观/当前游戏时刻/模拟状态）+
  * 统计行（角色/知识库/记忆/用量四卡，点击跳转）+ 最近动态（事件/行动/对话/记忆，点击定位）。</p>
  * <p>数据来源：projects、world-setting、world-clock、characters、knowledge-docs、memories、usage/stats、
  * actions/timeline、conversations 等现有接口。</p>
  */
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { createSubscription } from '@/shared/sse/sseClient'
+import { gameSecondNow, engineSecondNow, formatWorldTimeMinute, calendarNameOf } from '@/shared/worldClock'
 import {
   fetchProject, fetchWorldSetting, fetchWorldClock, fetchCharacters, fetchKnowledgeDocs,
-  fetchMemories, fetchUsageStats, fetchProjectActionTimeline, fetchConversations
+  fetchMemories, fetchUsageStats, fetchProjectActionTimeline, fetchConversations,
+  sandboxStreamUrl, fetchRealtimeDecision, setRealtimeDecision,
+  fetchMacroState, fetchWorldEngineConfig
 } from '@/shared/api'
 
 const route = useRoute()
@@ -124,6 +197,51 @@ const projectId = Number(route.params.id)
 const project = ref(null)
 const world = ref(null)
 const clock = ref(null)
+
+// ：宏观社会状态（/macro/state 摘要 + AI 强度标签；60s 周期刷新）
+const macro = ref(null)
+const aiIntensityLabel = ref('—')
+let macroTimer = null
+
+/** 季节显示名 */
+function seasonName(s) {
+  return { spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季' }[s] || '—'
+}
+/** 模板显示名 */
+function templateLabel(t) {
+  return {
+    xianxia: '仙侠·农耕', ancient: '古代·农耕', wuxia: '高武·农耕',
+    modern: '现代·工业', future: '未来·信息'
+  }[t] || t || '—'
+}
+/** 民怨进度条颜色（<50 绿 / <80 橙 / ≥80 红） */
+function grievanceColor(g) {
+  return g >= 80 ? '#e74c3c' : g >= 50 ? '#e6a23c' : '#52c41a'
+}
+
+/** 加载宏观状态摘要 + AI 强度（404=未初始化静默） */
+async function loadMacro() {
+  try { macro.value = await fetchMacroState(projectId) } catch (_) { /* 未初始化/接口异常静默 */ }
+  try {
+    const c = await fetchWorldEngineConfig(projectId)
+    aiIntensityLabel.value = c.aiIntensityLabel || '标准'
+  } catch (_) { /* 引擎行懒创建，保持默认 */ }
+}
+
+// ：实时决策激活状态（默认关；active=手动常开 ∪ 沙盘页打开 ∪ 演化会话进行）
+const rtDecision = reactive({ active: false, manualEnabled: false, sandboxActive: false, evolutionActive: false })
+const rtBusy = ref(false)
+
+// ：实时时钟（本地插值 + SSE clock 校准；暂停冻结）
+const liveGameSecond = ref(0)
+let clockTick = null
+let clockSub = null
+
+/** 实时时钟文案（完整世界历到分；历法名取 VO calendarName 或从 gameTimeText 解析） */
+const clockText = computed(() => {
+  if (!clock.value) return '—'
+  return formatWorldTimeMinute(liveGameSecond.value, clock.value.calendarName || calendarNameOf(clock.value.gameTimeText))
+})
 
 // 统计
 const charCount = reactive({ special: 0, common: 0 })
@@ -142,7 +260,7 @@ function statusType(s) { return s === 1 ? 'success' : (s === 2 ? 'primary' : 'in
 function go(sub) { router.push(`/project/${projectId}${sub}`) }
 
 /**
- * 世界初始化/重新初始化入口（2026-08-19 新增）。
+ * 世界初始化/重新初始化入口。
  * 点击弹提醒确认（可能重建/重新生成地点/角色卡/普通NPC/关系/世界时间/向量化），
  * 确认后进入独立全屏世界初始化页（/project/:id/init），可在页内选择「跳过已生成/全量重建」。
  */
@@ -185,6 +303,15 @@ function recentTagType(t) {
   return { event: 'warning', action: 'primary', dialog: 'success', memory: 'info' }[t] || 'info'
 }
 
+/** 记忆类型显示名 */
+function memKindLabel(m) {
+  if (m.type === 'semantic') return m.subtype === 'summary' ? '摘要' : '事实'
+  if (m.type === 'episodic') return '经历'
+  if (m.type === 'reflection') return '反思'
+  if (m.type === 'plan') return '计划'
+  return '记忆'
+}
+
 /** 最近动态跳转（事件/行动 → 时间线；对话 → 对话页；记忆 → 世界详情/知识库） */
 function jumpTo(r) {
   if (r.type === 'dialog') go('/chat')
@@ -196,7 +323,68 @@ function jumpTo(r) {
 async function loadBase() {
   try { project.value = await fetchProject(projectId) } catch (_) { /* 忽略 */ }
   try { world.value = await fetchWorldSetting(projectId) } catch (_) { /* 忽略 */ }
-  try { clock.value = await fetchWorldClock(projectId) } catch (_) { /* 忽略 */ }
+  try { applyClockPayload(await fetchWorldClock(projectId)) } catch (_) { /* 忽略 */ }
+}
+
+// ====================：实时时钟（插值 + SSE 校准） ====================
+
+/**
+ * 合并 clock 载荷并校准插值锚点：world-clock VO（含 calendarName/gameSecond/refRealTime/rate/paused）
+ * 或沙盘 SSE clock 事件（gameDay/gameSecond/refRealTime/rate/paused/gameTimeText，无独立 calendarName）。
+ */
+function applyClockPayload(data) {
+  if (!data) return
+  if (!clock.value) clock.value = {}
+  Object.assign(clock.value, data)
+  const cal = data.calendarName || calendarNameOf(data.gameTimeText)
+  if (cal) clock.value.calendarName = cal
+  liveGameSecond.value = calcLiveGameSecond()
+}
+
+/**
+ * 基于锚点本地插值当前游戏秒（起：载荷含引擎位置 engineGameSecond → 显示引擎实际推进位置
+ * [世界的实际时间，AI 慢/引擎停顿不虚快]；载荷缺引擎字段 → 回退 流动时钟换算插值）
+ */
+function calcLiveGameSecond() {
+  const c = clock.value
+  if (!c) return 0
+  if (c.engineGameSecond != null) {
+    return engineSecondNow(c.engineGameSecond, c.engineRefRealTime, c.rate, c.paused, c.engineTickGameSeconds)
+  }
+  return gameSecondNow(c.gameSecond, c.refRealTime, c.rate, c.paused)
+}
+
+/** 启动本地时钟插值 tick（每 1 真实秒重算一次，驱动时钟连续跳动） */
+function startClockTick() {
+  stopClockTick()
+  clockTick = setInterval(() => { liveGameSecond.value = calcLiveGameSecond() }, 1000)
+  liveGameSecond.value = calcLiveGameSecond()
+}
+
+/** 停止本地时钟插值 tick（组件卸载时清理） */
+function stopClockTick() {
+  if (clockTick) { clearInterval(clockTick); clockTick = null }
+}
+
+/**
+ * 订阅沙盘实时流的 clock 事件校准锚点（：与沙盘页同协议——「收到 clock 事件 → 记锚点 → 本地插值」；
+ * 仅消费 clock / sandbox:init 的 clock 段，其余事件忽略；断线/失败静默，一次性锚点仍可本地插值）。
+ */
+function connectClockStream() {
+  try {
+    clockSub = createSubscription({
+      url: sandboxStreamUrl(projectId),
+      events: ['sandbox:init', 'clock'],
+      heartbeatTimeoutMs: 45000,
+      onEvent: (name, data) => {
+        if (!data) return
+        if (name === 'sandbox:init') { if (data.clock) applyClockPayload(data.clock) }
+        else if (name === 'clock') applyClockPayload(data)
+      },
+      onError: () => { /* 静默：world-clock 锚点 + 本地插值仍可用 */ },
+      onGiveUp: () => { /* 静默 */ }
+    })
+  } catch (_) { /* 连接失败静默 */ }
 }
 
 /** 加载统计 */
@@ -244,13 +432,50 @@ async function loadRecent() {
   try {
     const page = await fetchMemories(projectId, { page: 1, size: 10 })
     ;(page.list || []).forEach(m => {
-      items.push({ type: 'memory', time: m.createdAt, text: `记忆（${m.kind === 'summary' ? '摘要' : '事实'}）：${m.content}`.slice(0, 80) })
+      items.push({ type: 'memory', time: m.createdAt, text: `记忆（${memKindLabel(m)}）：${m.content}`.slice(0, 80) })
     })
   } catch (_) { /* 忽略 */ }
   recent.value = items.sort((a, b) => String(b.time || '').localeCompare(String(a.time || ''))).slice(0, 12)
 }
 
-onMounted(() => { loadBase(); loadStats(); loadRecent() })
+onMounted(() => {
+  loadBase(); loadStats(); loadRecent(); startClockTick(); connectClockStream(); loadRtState(); loadMacro()
+  macroTimer = setInterval(loadMacro, 60000) // ：宏观指标 60s 周期刷新（世界持续推进时保持新鲜）
+})
+onBeforeUnmount(() => {
+  stopClockTick()
+  if (macroTimer) { clearInterval(macroTimer); macroTimer = null }
+  if (clockSub) { clockSub.close(); clockSub = null }
+})
+
+// ====================：实时决策激活（默认关；仅展示与手动常开，不驱动页面打开） ====================
+
+/** 主动拉取激活状态（仪表盘仅展示 + 手动常开；沙盘/演化页才驱动页面自动开/关） */
+async function loadRtState() {
+  try {
+    const st = await fetchRealtimeDecision(projectId)
+    if (st) {
+      rtDecision.active = !!st.active
+      rtDecision.manualEnabled = !!st.manualEnabled
+      rtDecision.sandboxActive = !!st.sandboxActive
+      rtDecision.evolutionActive = !!st.evolutionActive
+    }
+  } catch (_) { /* 静默 */ }
+}
+
+/** 手动常开开关（手动优先于页面自动态：常开=不开页面世界也持续推进） */
+async function toggleRtManual(enabled) {
+  rtBusy.value = true
+  try {
+    const st = await setRealtimeDecision(projectId, { action: 'set', enabled })
+    if (st) {
+      rtDecision.active = !!st.active
+      rtDecision.manualEnabled = !!st.manualEnabled
+    }
+  } catch (_) { /* 静默 */ } finally {
+    rtBusy.value = false
+  }
+}
 </script>
 
 <style scoped>

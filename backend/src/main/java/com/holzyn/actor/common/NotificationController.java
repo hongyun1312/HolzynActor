@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.common;
 
 import com.holzyn.actor.common.R;
@@ -8,10 +26,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 通知占位控制器（P4+ 实现）。
+ * 通知占位控制器。
  * <p>职责：提供 /api/notifications 占位接口（返回空数据），消除前端铃铛组件在 actor
- * 模块未实现通知时的 404 噪音；P4 阶段对接 web 通知中心与 Redis 实时推送。</p>
- * <p>所属模块：controller/common（通用控制器）</p>
+ * 模块未实现通知时的 404 噪音； 阶段对接 web 通知中心与 Redis 实时推送。</p>
  */
 @RestController
 @RequestMapping("/api/notifications")
@@ -22,7 +39,9 @@ public class NotificationController {
      * 通知列表（占位：返回空列表）。
      *
      * @param page 页码（默认 1）
+     *
      * @param size 每页条数（默认 8）
+     *
      * @return 空通知列表与总数 0
      */
     @GetMapping
@@ -45,6 +64,7 @@ public class NotificationController {
      * 标记单条通知已读（占位）。
      *
      * @param id 通知主键
+     *
      * @return 标记结果
      */
     @PutMapping("/{id}/read")

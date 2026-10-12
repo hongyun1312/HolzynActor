@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.settings.vo;
 
 import lombok.Data;
@@ -8,7 +26,6 @@ import java.time.LocalDateTime;
  * AI 模型 API 视图对象。
  * <p>用途：向前端返回脱敏后的 API 配置信息。api_key 以掩码形式（**** 尾 4 位）展示，
  * 明文 Key 永不下发前端。</p>
- * <p>所属模块：model/vo（视图对象层-用户 AI API 子域）</p>
  */
 @Data
 public class ModelApiVO {
@@ -22,7 +39,7 @@ public class ModelApiVO {
     /** API 名称 */
     private String name;
 
-    /** API Base URL */
+    
     private String baseUrl;
 
     /** 默认模型名 */
@@ -46,7 +63,7 @@ public class ModelApiVO {
     /** 是否启用：0 否 / 1 是 */
     private Integer enabled;
 
-    /** 是否启用该供应商的 embedding 能力：0 否 / 1 是（P3 RAG） */
+    /** 是否启用该供应商的 embedding 能力：0 否 / 1 是 */
     private Integer embeddingEnabled;
 
     /** embedding 模型名（如 doubao-embedding / bge-m3） */
@@ -58,6 +75,6 @@ public class ModelApiVO {
     /** 创建时间 */
     private LocalDateTime createdAt;
 
-    /** 更新时间 */
+    /** 时间 */
     private LocalDateTime updatedAt;
 }

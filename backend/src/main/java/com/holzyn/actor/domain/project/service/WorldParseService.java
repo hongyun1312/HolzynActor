@@ -1,12 +1,31 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.project.service;
 
 import com.holzyn.actor.ai.AiChatRequest;
 import com.holzyn.actor.ai.AiChatResult;
-import com.holzyn.actor.ai.AiProviderRouter;
+import com.holzyn.actor.ai.spring.AiSpringChatGateway;
 import com.holzyn.actor.common.BizException;
 import com.holzyn.actor.common.JsonUtil;
 import com.holzyn.actor.domain.character.dto.CharacterDTO;
 import com.holzyn.actor.domain.character.service.CharacterService;
+import com.holzyn.actor.domain.debug.service.AiCallContext;
 import com.holzyn.actor.domain.knowledge.service.KnowledgeService;
 import com.holzyn.actor.domain.project.dto.ProjectDTO;
 import com.holzyn.actor.domain.project.dto.ProjectImportDTO;
@@ -27,7 +46,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 新建项目「文件解析工作流」服务（2026-08-19 新建项目解析重构）。
+ * 新建项目「文件解析工作流」服务（新建项目解析重构）。
  * <p>职责：把上传的世界观文件按【地理设定 / 势力格局 / 规则体系 / 社会文化 / 历史脉络 / 补充设定 / 角色信息】
  * 七类分段——文件严格按该格式描写时原文逐段保留（不更改内容），格式不明确时交给 AI 总结分段；
  * 对地理/势力/规则/文化/历史/补充六段计算字数，小于 1500 字则按既有扩写规则扩写（保证逻辑自洽、符合原本世界观）；
@@ -36,14 +55,13 @@ import java.util.Map;
  * 全部落表后返回结果（供前端弹窗询问是否默认世界初始化）。</p>
  * <p>每个步骤同时输出后端终端日志（log.info）与工作流回调日志（WorkflowLog），
  * 前端「文件解析」页控制台实时显示后端解析日志（工作流进度）。</p>
- * <p>所属模块：service/project（新建项目工作流子域）</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class WorldParseService {
 
-    /** 分段最小字数：小于则触发 AI 扩写（2026-08-19 新规则，由原 1000 提升到 1500） */
+    /** 分段最小字数：小于则触发 AI 扩写（新规则，由原 1000 提升到 1500） */
     static final int SEGMENT_MIN = 1500;
 
     /** 分段最大字数：AI 扩写原生不得超过此值，超出按段落边界收尾 */
@@ -95,7 +113,7 @@ public class WorldParseService {
     private final ProjectService projectService;
     private final CharacterService characterService;
     private final KnowledgeService knowledgeService;
-    private final AiProviderRouter aiProviderRouter;
+    private final AiSpringChatGateway aiChatGateway;
     private final PromptTemplateService templateService;
     private final UsageLogService usageLogService;
     private final ObjectMapper objectMapper;
@@ -103,11 +121,16 @@ public class WorldParseService {
     /**
      * 解析工作流主入口：分段 → （可选）扩写 → 建项目落世界观表 → 知识库存储 → 角色分离入库。
      *
-     * @param userId     归属用户 ID
-     * @param fileTexts  各文件文本
-     * @param fileNames  各文件名
-     * @param expand     true=自动 AI 扩写不足 {@link #SEGMENT_MIN} 字的分段；false=分段后原样入库（默认，由用户决定是否扩写）
-     * @param wf         工作流日志回调（可为 null；后端终端日志始终输出）
+     * @param userId 归属用户 ID
+     *
+     * @param fileTexts 各文件文本
+     *
+     * @param fileNames 各文件名
+     *
+     * @param expand true=自动 AI 扩写不足 {@link #SEGMENT_MIN} 字的分段；false=分段后原样入库（默认，由用户决定是否扩写）
+     *
+     * @param wf 工作流日志回调（可为 null；后端终端日志始终输出）
+     *
      * @return 解析结果 VO（项目已创建）
      */
     public WorldParseResultVO parseAndCreate(Long userId, List<String> fileTexts, List<String> fileNames,
@@ -200,10 +223,14 @@ public class WorldParseService {
      * 内容分段：严格格式（Markdown 标题命中 ≥5/7 类）→ 原文逐段提取不修改；
      * 格式不明确 → AI 总结分段为七类。
      *
-     * @param userId       归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param filesContent 全部文件拼接文本
-     * @param fileNames    文件名（项目名兜底用）
-     * @param wf           日志回调
+     *
+     * @param fileNames 文件名（项目名兜底用）
+     *
+     * @param wf 日志回调
+     *
      * @return 分段结果
      */
     private Segments segment(Long userId, String filesContent, List<String> fileNames, WorkflowLog wf) {
@@ -236,9 +263,12 @@ public class WorldParseService {
     /**
      * AI 总结分段（world_segment 模板，输出七段 JSON）。
      *
-     * @param userId       归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param filesContent 全部文件拼接文本
-     * @param wf           日志回调
+     *
+     * @param wf 日志回调
+     *
      * @return 分段结果（可能部分为空串）
      */
     private Segments segmentByAi(Long userId, String filesContent, WorkflowLog wf) {
@@ -254,7 +284,8 @@ public class WorldParseService {
                                 PromptTemplateService.CODE_WORLD_SEGMENT,
                                 Map.of("files_content", truncate(filesContent, TOTAL_MAX)))),
                         new AiChatRequest.ChatMessage("user", prompt)), 0.3, AI_MAX_TOKENS, true);
-                AiChatResult result = aiProviderRouter.chatCompletion(userId, null, null, req);
+                AiChatResult result = AiCallContext.run("world_segment", null, () ->
+                        aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "world_segment",
                         result.promptTokens(), result.completionTokens(),
                         result.cacheHitTokens(), result.cacheMissTokens(),
@@ -278,6 +309,7 @@ public class WorldParseService {
      * 解析 AI 分段输出为 Segments（容错：缺字段用空串，剥离 JSON 外文字）。
      *
      * @param content AI 输出
+     *
      * @return 分段结果
      */
     static Segments parseSegments(String content) {
@@ -310,10 +342,14 @@ public class WorldParseService {
      * 分段扩写：地理/势力/规则/文化/历史/补充六段字数 &lt; 1500 时按既有规则 AI 扩写
      * （确保逻辑自洽、符合原本世界观；角色段不扩写）。
      *
-     * @param userId       归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param filesContent 全部文件拼接文本（取相关章节作扩写输入源）
-     * @param seg          分段结果
-     * @param wf           日志回调
+     *
+     * @param seg 分段结果
+     *
+     * @param wf 日志回调
+     *
      * @return 扩写后的分段
      */
     private Segments expandSegments(Long userId, String filesContent, Segments seg, WorkflowLog wf) {
@@ -331,13 +367,20 @@ public class WorldParseService {
      * 单段扩写：不足 1500 字则 AI 扩写（复用 project_import_field 模板，要求 1500~4000 字），
      * 失败或仍不足时程序化兜底；超过 4000 字按段落边界收尾。
      *
-     * @param userId       归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param filesContent 全部文件拼接文本（供提取相关章节作输入源）
-     * @param seg          分段结果（提供项目名/世界观名）
-     * @param fieldLabel   分段中文名
-     * @param fieldKey     世界观字段键
-     * @param current      当前分段内容
-     * @param wf           日志回调
+     *
+     * @param seg 分段结果（提供项目名/世界观名）
+     *
+     * @param fieldLabel 分段中文名
+     *
+     * @param fieldKey 世界观字段键
+     *
+     * @param current 当前分段内容
+     *
+     * @param wf 日志回调
+     *
      * @return 扩写后的分段内容
      */
     private String expandIfShort(Long userId, String filesContent, Segments seg,
@@ -359,7 +402,8 @@ public class WorldParseService {
                 AiChatRequest req = new AiChatRequest(null, List.of(
                         new AiChatRequest.ChatMessage("system", "你只输出严格的 JSON，不输出任何其他文字。"),
                         new AiChatRequest.ChatMessage("user", prompt)), 0.3, AI_MAX_TOKENS, true);
-                AiChatResult result = aiProviderRouter.chatCompletion(userId, null, null, req);
+                AiChatResult result = AiCallContext.run("world_segment", null, () ->
+                        aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "import",
                         result.promptTokens(), result.completionTokens(),
                         result.cacheHitTokens(), result.cacheMissTokens(),
@@ -396,10 +440,14 @@ public class WorldParseService {
     /**
      * 程序化兜底：基于已有内容 + 主题模板句扩展，保证达到 1500 字（AI 不可用时保证功能可用）。
      *
-     * @param base        已有内容（可为空）
+     * @param base 已有内容（可为空）
+     *
      * @param projectName 项目名
-     * @param worldName   世界观名
-     * @param fieldLabel  分段中文名
+     *
+     * @param worldName 世界观名
+     *
+     * @param fieldLabel 分段中文名
+     *
      * @return 扩展后的文本（≥1500 字）
      */
     static String padSegment(String base, String projectName, String worldName, String fieldLabel) {
@@ -446,7 +494,9 @@ public class WorldParseService {
      * 创建项目 + 世界观分段按类别落库（补充设定 → freeText）。
      *
      * @param userId 归属用户 ID
-     * @param seg    分段结果
+     *
+     * @param seg 分段结果
+     *
      * @return 创建后的项目 VO
      */
     private ProjectVO createProjectAndWorld(Long userId, Segments seg) {
@@ -466,10 +516,14 @@ public class WorldParseService {
      * 角色分段 AI 完整分离每个角色，逐个调用新增角色方法（type=special，不生成角色卡）。
      * 重要度（1-5）与是否主角（可多位）由 AI 依据世界观与角色详细信息自行判断。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID
-     * @param seg       分段结果（取角色信息段）
-     * @param wf        日志回调
+     *
+     * @param seg 分段结果（取角色信息段）
+     *
+     * @param wf 日志回调
+     *
      * @return 创建角色数
      */
     private int extractAndCreateCharacters(Long userId, Long projectId, Segments seg, WorkflowLog wf) {
@@ -486,7 +540,8 @@ public class WorldParseService {
                                 PromptTemplateService.CODE_WORLD_SEGMENT_CHARACTERS,
                                 Map.of("characters_content", charactersContent))),
                         new AiChatRequest.ChatMessage("user", prompt)), 0.3, AI_MAX_TOKENS, true);
-                AiChatResult result = aiProviderRouter.chatCompletion(userId, null, null, req);
+                AiChatResult result = AiCallContext.run("world_segment_characters", null, () ->
+                        aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "world_segment_characters",
                         result.promptTokens(), result.completionTokens(),
                         result.cacheHitTokens(), result.cacheMissTokens(),
@@ -502,7 +557,7 @@ public class WorldParseService {
                             : Math.max(1, Math.min(5, p.importance()));
                     CharacterDTO dto = new CharacterDTO("special", truncate(p.name(), 50), truncate(p.title(), 50),
                             truncate(p.detail(), 20000), null,
-                            Integer.valueOf(1).equals(p.isProtagonist()) ? 1 : 0, importance);
+                            Integer.valueOf(1).equals(p.isProtagonist()) ? 1 : 0, importance, null);
                     characterService.create(projectId, dto);
                     created++;
                     info(wf, "[角色分离] 已新增角色：" + p.name()
@@ -527,10 +582,11 @@ public class WorldParseService {
     /**
      * 严格格式检测：Markdown 标题行命中 ≥5/7 类分段关键词（只看标题，不看正文）即视为
      * 「严格按照以上格式描写」。与 {@link #extractFullSection} 的判定口径完全一致
-     * （2026-08-19 修复：此前检测按「标题或正文」打分、提取只按「标题」找块，Windows \r\n
+     * （此前检测按「标题或正文」打分、提取只按「标题」找块，Windows \r\n
      * 换行下两者不一致导致判定严格却提取全空）。
      *
      * @param content 世界观原文
+     *
      * @return true=严格格式（原文逐段提取不修改）
      */
     static boolean isStrictFormat(String content) {
@@ -559,14 +615,16 @@ public class WorldParseService {
      * 按关键词提取完整分段（严格格式）：对每个「标题行命中任一关键词」的标题取其【整块】
      * ——从该标题直到下一个同级或更高级别标题为止（含所有下级子标题与正文，完整保留原文），
      * 拼接全部命中块。
-     * <p>要点（2026-08-19 修复）：
+     * <p>要点：
      * ① 与 isStrictFormat 判定口径一致（只看标题）；
      * ② 同一类别可能存在多个同级章节块（如 角色信息 分「核心NPC角色」「主要配角」「其他角色速览」三块），全部收集；
      * ③ 子标题（### 九月 等）正文属于父块，父标题命中即整块提取（不能只取父标题那一行）；
      * ④ 已被「命中关键词的父级标题」包含的嵌套命中（如 父块内某个 ### 小标题恰好含关键词）跳过，避免重复拼接。</p>
      *
-     * @param content  世界观原文
+     * @param content 世界观原文
+     *
      * @param keywords 分段关键词
+     *
      * @return 提取的分段全文（未命中返回空串）
      */
     static String extractFullSection(String content, String[] keywords) {
@@ -647,6 +705,7 @@ public class WorldParseService {
      * 章节标题行 = 章节块的首个非空行（一般为 Markdown 标题）。
      *
      * @param section 章节块（标题行 + 正文）
+     *
      * @return 标题行（去首尾空白；无非空行返回空串）
      */
     static String sectionHeading(String section) {
@@ -665,8 +724,10 @@ public class WorldParseService {
     /**
      * 标题行是否命中任一关键词（只看标题，不看正文；对 \r\n 换行免疫——contains 不区分换行）。
      *
-     * @param heading  标题行（已 trim）
+     * @param heading 标题行（已 trim）
+     *
      * @param keywords 关键词列表
+     *
      * @return true=命中
      */
     static boolean headingMatches(String heading, String[] keywords) {

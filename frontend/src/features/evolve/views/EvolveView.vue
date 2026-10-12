@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="evolve-view">
     <!-- 左栏：时间线缩略 + 演化会话列表 -->
@@ -145,7 +158,7 @@
         </div>
       </template>
       <el-divider />
-      <div v-if="!sceneRole" class="side-empty">选择角色查看角色卡 / Prompt / 记忆</div>
+      <div v-if="!sceneRole" class="side-empty">选择角色查看角色档案（11 维）/ 记忆</div>
       <template v-else>
         <div class="scene-role-head">
           <el-avatar :size="36" class="role-avatar">{{ sceneRole.name?.charAt(0) }}</el-avatar>
@@ -155,13 +168,15 @@
           </div>
         </div>
         <el-tabs v-model="infoTab" class="info-tabs">
-          <el-tab-pane v-if="roleCard" label="角色卡" name="card"><pre class="info-pre">{{ prettyJson(roleCard.personaJson) }}</pre></el-tab-pane>
-          <el-tab-pane v-if="roleCard" label="Prompt" name="prompt"><pre class="info-pre">{{ roleCard.systemPrompt }}</pre></el-tab-pane>
+          <!-- 只读 11 维档案（与 NPC 角色页同源组件）；Prompt Tab 随 system_prompt 废弃一并移除 -->
+          <el-tab-pane v-if="roleCard" label="角色档案（11 维）" name="card">
+            <PersonaArchivePanel :card="roleCard" compact :character-name="sceneRole?.name" />
+          </el-tab-pane>
           <el-tab-pane label="记忆" name="memory">
             <div v-if="memories.length === 0" class="side-empty">暂无记忆</div>
             <div v-for="m in memories" :key="m.id" class="mem-item">
               <div class="mem-head">
-                <el-tag size="small" :type="m.kind === 'summary' ? 'primary' : 'info'" effect="plain">{{ m.kind === 'summary' ? '摘要' : '事实' }}</el-tag>
+                <el-tag size="small" :type="m.subtype === 'summary' ? 'primary' : 'info'" effect="plain">{{ m.subtype === 'summary' ? '摘要' : '事实' }}</el-tag>
                 <el-tag size="small" type="info" effect="light">重要度 {{ m.importance }}</el-tag>
               </div>
               <div class="mem-content">{{ m.content }}</div>
@@ -270,15 +285,15 @@
 
 <script setup>
 /**
- * 世界演化页（前端布局重构 V1.0 §3.7 + V2.1 世界演化增强 + vP5-7.9 群聊式连续演化）。
+ * 世界演化页。
  * <p>职责：世界模拟控制台（三栏）——
  * 左栏：时间线缩略 + 演化会话列表；中栏：世界时钟控制 + 演化控制区（开始/播放/加入/退场/结束归档）+
  * 演化消息流（调度/系统环境变化/角色行动/角色对话）+ 自动收尾状态；右栏：场景角色信息。
- * 演化能力：手动选择全局/场景/背景/角色 或 AI 自动选择；<b>连续演化</b>（vP5-7.9）——
+ * 演化能力：手动选择全局/场景/背景/角色 或 AI 自动选择；<b>连续演化</b>——
  * 与群聊运行逻辑一致：AI 逐拍调度选出最有发言/行动欲望的角色 → 该角色流式发言或行动（结合场景环境），
  * 不按轮次计算，直到用户手动停止或场景只剩 1 人自动收尾归档（事件入时间线 + 角色级记忆隔离）。
  * 保留单轮推进接口（/turn）供兼容/调试。</p>
- * <p>数据来源：world-clock、scenes、evolutions、characters 等现有 + V2.1 新接口 + stream SSE。</p>
+ * <p>数据来源：world-clock、scenes、evolutions、characters 等现有 + 新接口 + stream SSE。</p>
  */
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
@@ -288,8 +303,12 @@ import {
   fetchCharacters, fetchCharacterCard, fetchMemories, fetchProjectTimeline,
   fetchScenes, createScene, updateScene, deleteScene, aiGenerateScenes,
   fetchEvolutions, startEvolution, fetchEvolutionDetail,
-  joinEvolution, leaveEvolution, finishEvolution, deleteEvolution
+  joinEvolution, leaveEvolution, finishEvolution, deleteEvolution,
+  setRealtimeDecision
 } from '@/shared/api'
+import { createGeneration, SSE_EVENTS } from '@/shared/sse/sseClient'
+// 角色档案（11 维）只读面板（与 NPC 角色页同源组件）
+import PersonaArchivePanel from '@/features/character/components/PersonaArchivePanel.vue'
 
 const route = useRoute()
 const projectId = Number(route.params.id)
@@ -312,9 +331,9 @@ const leaveCharId = ref(null)
 const finishing = ref(false)
 const archiveEventTitle = ref('')
 
-// ===== 连续演化播放（SSE 流式，vP5-7.9 群聊式） =====
+// ===== 连续演化播放 =====
 const streaming = ref(false)
-let es = null
+let genClient = null
 
 // ===== 中栏：消息流 =====
 const streamRef = ref(null)
@@ -335,7 +354,7 @@ const starting = ref(false)
 const scenes = ref([])
 const sceneDialog = reactive({ visible: false })
 const sceneForm = reactive({ visible: false, loading: false, id: null, name: '', location: '', description: '', background: '', source: '', enabled: 1 })
-// AI 自动填充场景（vP5-7.6）
+// AI 自动填充场景
 const sceneAiDialog = reactive({ visible: false, generating: false, count: 3 })
 
 /** 不在场景中的角色（可加入候选） */
@@ -421,7 +440,7 @@ async function doStart() {
   finally { starting.value = false }
 }
 
-// ===== 连续演化播放（SSE 流式，vP5-7.9） =====
+// ===== 连续演化播放 =====
 
 /** SSE 流式通道 URL（EventSource 消费；不经过 axios 解包） */
 function evolutionStreamUrl(id) {
@@ -438,60 +457,65 @@ function startPlayback() {
   if (streaming.value) return
   closePlayback()
   streaming.value = true
-  const source = new EventSource(evolutionStreamUrl(current.value.id))
-  es = source
+  genClient = createGeneration({
+    url: evolutionStreamUrl(current.value.id),
+    events: [SSE_EVENTS.SCHEDULE, SSE_EVENTS.SYSTEM, SSE_EVENTS.MESSAGE_START,
+      SSE_EVENTS.TOKEN, SSE_EVENTS.DONE, SSE_EVENTS.FINISHED, SSE_EVENTS.ERROR],
+    // 终止判定：仅 finished（自动收尾归档）为终止；done 为本拍完成不算
+    isTerminal: (name) => name === SSE_EVENTS.FINISHED,
+    onEvent: (name, d) => handlePlaybackEvent(name, d),
+    onDone: (d) => handlePlaybackFinished(d),
+    onError: (err) => handlePlaybackError(err)
+  })
+}
 
-  source.addEventListener('schedule', (ev) => {
-    const d = JSON.parse(ev.data)
-    const name = d.characterId ? charName(d.characterId) : '？'
+/** 演化播放事件分发（schedule/system/message-start/token/done） */
+function handlePlaybackEvent(name, d) {
+  if (!d || typeof d !== 'object') return
+  if (name === SSE_EVENTS.SCHEDULE) {
+    const nameText = d.characterId ? charName(d.characterId) : '？'
     const kind = d.beatType === 'action' ? '行动' : '接话'
     turns.value.push({
       id: `sch-${Date.now()}-${Math.random()}`, type: 'schedule', streaming: false,
-      content: `「${name}」想${kind}（欲望 ${d.desire}）：${d.reason || ''}`
+      content: `「${nameText}」想${kind}（欲望 ${d.desire}）：${d.reason || ''}`
     })
     scrollStream()
-  })
-  source.addEventListener('system', (ev) => {
-    const d = JSON.parse(ev.data)
+  } else if (name === SSE_EVENTS.SYSTEM) {
     turns.value.push({ id: `sys-${Date.now()}-${Math.random()}`, type: 'system', streaming: false, content: d.content })
     scrollStream()
-  })
-  source.addEventListener('message-start', (ev) => {
-    const d = JSON.parse(ev.data)
+  } else if (name === SSE_EVENTS.MESSAGE_START) {
     turns.value.push({
       id: `s-${Date.now()}`, type: d.type === 'action' ? 'action' : 'text', streaming: true,
       characterId: d.characterId, characterName: d.characterName, content: ''
     })
     scrollStream()
-  })
-  source.addEventListener('token', (ev) => {
-    const d = JSON.parse(ev.data)
+  } else if (name === SSE_EVENTS.TOKEN) {
     const row = [...turns.value].reverse().find(t => t.streaming && t.characterId === d.characterId)
     if (row) { row.content += d.delta; scrollStream() }
-  })
-  source.addEventListener('done', (ev) => {
-    const d = JSON.parse(ev.data)
+  } else if (name === SSE_EVENTS.DONE) {
     const row = [...turns.value].reverse().find(t => t.streaming && t.characterId === d.characterId)
     if (row) { row.streaming = false; row.content = d.content || row.content }
     scrollStream()
-  })
-  source.addEventListener('finished', async (ev) => {
-    const d = JSON.parse(ev.data)
-    closePlayback()
-    archiveEventTitle.value = d.event?.title || ''
-    ElMessage.success('场景只剩 1 人，演化已自动收尾并归档（参与者获得角色级记忆）')
-    await loadEvolutions()
-    await loadDetail(current.value.id)
-    await loadTimelineThumb()
-  })
-  source.addEventListener('error', async (ev) => {
-    let msg = '演化播放失败，请重试'
-    try { msg = JSON.parse(ev.data).message || msg } catch (_) { /* 忽略 */ }
-    closePlayback()
-    ElMessage.error(msg)
-    await loadDetail(current.value.id)
-  })
-  source.onerror = () => { /* EventSource 自身错误（连接关闭）已由 done/error 处理 */ }
+  }
+}
+
+/** 自动收尾归档（finished 终止事件） */
+async function handlePlaybackFinished(d) {
+  closePlayback()
+  archiveEventTitle.value = d?.event?.title || ''
+  ElMessage.success('场景只剩 1 人，演化已自动收尾并归档（参与者获得角色级记忆）')
+  await loadEvolutions()
+  await loadDetail(current.value.id)
+  await loadTimelineThumb()
+}
+
+/** 播放失败（后端 error / 断线 / 超时：统一分类提示） */
+async function handlePlaybackError(err) {
+  let msg = err?.message || '演化播放失败，请重试'
+  if (err && err.kind === 'event' && err.data && err.data.message) msg = err.data.message
+  closePlayback()
+  ElMessage.error(msg)
+  await loadDetail(current.value.id)
 }
 
 /** 手动停止播放（关闭 SSE，后端循环感知连接断开后停止；演化保持 running 可再次播放） */
@@ -502,7 +526,7 @@ function stopPlayback() {
 
 /** 关闭当前 SSE 流 */
 function closePlayback() {
-  if (es) { es.close(); es = null }
+  if (genClient) { genClient.close(); genClient = null }
   streaming.value = false
 }
 
@@ -546,7 +570,7 @@ async function doFinish() {
   finally { finishing.value = false }
 }
 
-/** 删除演化会话（vP5-7.11：级联清理参与者与轮次消息；归档事件保留在时间线） */
+/** 删除演化会话 */
 async function doDeleteEvolution(ev) {
   try {
     await ElMessageBox.confirm(`确认删除演化会话「${ev.title || '演化'}」？相关参与者与轮次消息将一并删除（已归档事件保留在时间线）。`, '删除确认', { type: 'warning' })
@@ -666,7 +690,7 @@ async function doDeleteScene(row) {
   } catch (e) { ElMessage.error(e.message || '删除失败') }
 }
 
-// ===== 场景 AI 自动填充（vP5-7.6） =====
+// ===== 场景 AI 自动填充 =====
 
 /** 打开 AI 自动填充对话框（重置数量） */
 function openSceneAiGen() {
@@ -687,24 +711,25 @@ async function doSceneAiGen() {
   finally { sceneAiDialog.generating = false }
 }
 
-/** JSON 美化 */
-function prettyJson(text) {
-  if (!text) return ''
-  try { return JSON.stringify(JSON.parse(text), null, 2) } catch (_) { return text }
-}
-
 onMounted(() => {
   loadBase()
+  // ：打开演化页自动激活实时决策（世界推进，演化导演可读真实世界状态；失败静默）
+  setRealtimeDecision(projectId, { action: 'open', reason: 'evolution' }).catch(() => {})
 })
-// 离开页面时关闭演化播放流（后端感知连接断开后停止推进）
-onBeforeUnmount(closePlayback)
+// 离开页面时关闭演化播放流（后端感知连接断开后停止推进）+ 去激活演化原因（世界暂停）
+onBeforeUnmount(() => {
+  closePlayback()
+  setRealtimeDecision(projectId, { action: 'close', reason: 'evolution' }).catch(() => {})
+})
 </script>
 
 <style scoped>
-.evolve-view { display: flex; gap: 16px; height: calc(100vh - 140px); }
+/* 高度取外壳内容区 100%（替代 calc(100vh - 140px) 魔法值） */
+.evolve-view { display: flex; gap: 16px; height: 100%; min-height: 0; }
 
 /* 左栏 */
-.ev-side { width: 260px; background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 12px; display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; }
+/* 左栏统一取页内双栏令牌（原 260px 硬编码） */
+.ev-side { width: var(--page-aside-w, 260px); background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 12px; display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; }
 .side-header { display: flex; align-items: center; justify-content: space-between; font-weight: 600; color: var(--text-primary); padding: 4px 2px 8px; }
 .side-empty { color: var(--text-secondary); font-size: 0.82rem; padding: 12px 4px; }
 .tl-thumb { flex: 1; overflow-y: auto; position: relative; max-height: 180px; }

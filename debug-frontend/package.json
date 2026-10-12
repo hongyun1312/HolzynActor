@@ -1,0 +1,22 @@
+{
+  "name": "holzyn-actor-debug",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HolzynActor 调试可视化前端（独立第二个前端：总览/实时日志/AI Trace/用量图/DB 浏览/事件流/配置查看）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "echarts": "^6.1.0",
+    "element-plus": "^2.14.4",
+    "vue": "^3.5.41",
+    "vue-router": "^5.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^8.2.2"
+  }
+}

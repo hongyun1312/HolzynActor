@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================
 # HolzynActor clone-and-run launcher (macOS / Linux)
-# - Clean start: H2 database is auto-created at <repo>/data
-# - If the jar is missing, build.sh is run first (needs JDK21 + Maven + Node)
+# - Uses <repo>/data (local H2 database, auto-created) and <repo>/uploads
+# - Requires JDK 21; uses a prebuilt jar from backend/target if present
 # ============================================================
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 export HOLOZYN_ACTOR_DATA_DIR="$ROOT/data"
 export HOLOZYN_ACTOR_UPLOAD_DIR="$ROOT/uploads"
-JAR="$ROOT/backend/target/holzyn-actor-0.1.0.jar"
+JAR="$ROOT/backend/target/holzyn-actor-1.0.0-beta.1.jar"
 
 if [ ! -f "$JAR" ]; then
   echo "[run] jar not found - building first (needs JDK21 + Maven + Node) ..."

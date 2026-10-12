@@ -1,5 +1,26 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="project-usage-settings">
+    <!-- 统一页头（内嵌设置弹窗时由弹窗标题与 Tab 标签承担） -->
+    <PageHeader
+      v-if="!embedded"
+      title="AI 用量"
+      :desc="projectId
+        ? '项目级 AI 用量统计：调用次数、Token 与缓存命中，支持近 7/30 天与自定义范围，含角色与场景维度。'
+        : '全部项目的用户级用量聚合：按项目 / 场景 / 模型 / 日期维度查看，支持近 7/30 天与自定义范围。'"
+    />
     <!-- 项目级/全局用量说明（双模式；内嵌设置弹窗时由弹窗顶部说明承担） -->
     <el-alert v-if="!embedded && projectId" type="success" :closable="false" show-icon class="usage-alert"
       title="AI 用量为项目级统计（随 .holzyn 包导入导出）。"
@@ -28,7 +49,7 @@
       </el-radio-group>
       <el-date-picker v-if="rangePreset === 'custom'" v-model="customRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始" end-placeholder="结束" size="small" style="width: 240px" @change="loadUsage" />
       <el-button size="small" type="primary" @click="loadUsage">查询</el-button>
-      <span class="filter-tip">场景：dialog=对话 / card_gen=角色卡 / action=行动 / crowd=人群 / title_gen=标题 / location_extract=地点 / memory=记忆 / import=导入 / embedding=向量化</span>
+      <span class="filter-tip">场景：dialog=对话 / card_gen=角色卡 / action=行动 / crowd=人群 / title_gen=标题 / location_extract=地点 / memory=记忆 / import=导入 / embedding=向量化 / world_event=世界事件生成</span>
     </div>
 
     <!-- 聚合 Tab -->
@@ -119,7 +140,7 @@
 
 <script setup>
 /**
- * 设置-AI 用量（前端布局重构 V1.0，设计文档 §3.10.4；双模式改造 V1.2）。
+ * 设置-AI 用量。
  * <p>职责：项目/全局双模式 AI 用量统计——概览卡片（调用次数/输入输出 Tokens/缓存命中率/总耗时）+
  * 多维度聚合（项目[全局]/场景/模型/日期/角色）+ 时间范围筛选（近7/30天/自定义）+ 明细。
  * 项目模式：默认过滤当前项目（fetchUsageStats 传 projectId）；
@@ -130,6 +151,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchUsageStats } from '@/shared/api'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const route = useRoute()
 // 当前项目 ID：项目空间内存在；全局设置（首页 /settings）为 null（= 全部项目总用量）

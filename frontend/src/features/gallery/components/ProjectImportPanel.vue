@@ -1,12 +1,24 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="project-import-panel">
     <!-- 顶部说明 -->
-    <div class="page-header">
-      <div>
-        <div class="page-title">项目导入</div>
-        <div class="page-desc">导入 .holzyn 项目包（ZIP 容器，含世界观/角色/对话/知识/记忆/设置），导入后完整还原项目；支持可选密码加密包。</div>
-      </div>
-    </div>
+    <PageHeader
+      size="sm"
+      title="项目导入"
+      desc="导入 .holzyn 项目包（ZIP 容器，含世界观/角色/对话/知识/记忆/设置），导入后完整还原项目；支持可选密码加密包。"
+    />
 
     <div class="import-card tech-card">
       <el-alert type="info" :closable="false" show-icon
@@ -32,13 +44,14 @@
 
 <script setup>
 /**
- * 项目导入面板（2026-08-19 新建项目页重构：布局适配）。
+ * 项目导入面板（新建项目页重构：布局适配）。
  * <p>职责：导入 .holzyn 项目包（完整还原项目），成功后进入项目空间仪表盘。</p>
  */
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { importProjectPackage } from '@/shared/api'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const router = useRouter()
 
@@ -58,7 +71,7 @@ async function doImport() {
   try {
     const res = await importProjectPackage(file.value, password.value || undefined)
     ElMessage.success(`项目「${res.name}」导入成功（角色 ${res.characterCount} 位）`)
-    router.replace(`/project/${res.projectId}/dashboard`)
+    router.replace(`/project/${res.projectId}/sandbox`)
   } catch (e) {
     ElMessage.error(e.message || '导入失败')
   } finally {
@@ -69,9 +82,7 @@ async function doImport() {
 
 <style scoped>
 .project-import-panel { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; }
-.page-title { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); }
-.page-desc { font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px; }
+/* 页头（size="sm"）样式由全局类提供 */
 .import-card { padding: 22px 26px; max-width: 760px; }
 .holzyn-upload { margin-top: 16px; }
 .import-foot { margin-top: 16px; display: flex; align-items: center; gap: 12px; }

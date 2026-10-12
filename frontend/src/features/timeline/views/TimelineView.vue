@@ -1,6 +1,34 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="timeline-view">
-    <!-- 头部工具栏：精度切换 + 类型筛选 + 新增事件 + AI 识别 -->
+    <!-- 统一页头：标题 + 说明 + 页面级操作（新增事件 / AI 识别） -->
+    <PageHeader
+      title="时间线"
+      desc="世界事件、角色行动与记忆里程碑的统一时间轴（可按精度与类型筛选）。"
+    >
+      <template #actions>
+        <el-button size="small" type="warning" plain :loading="aiGenerating" @click="doAiGenerate">
+          <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;AI 识别事件
+        </el-button>
+        <el-button size="small" type="primary" @click="openAddEvent">
+          <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增事件
+        </el-button>
+      </template>
+    </PageHeader>
+
+    <!-- 工具栏：精度切换 + 类型筛选 + 当前游戏时间 -->
     <div class="tl-toolbar">
       <div class="toolbar-left">
         <el-segmented v-model="precision" :options="precisionOptions" size="small" @change="load" />
@@ -14,12 +42,6 @@
         <el-tag v-if="clock" size="small" type="danger" effect="light" class="now-tag">
           ▬ 当前：{{ clock.gameTimeText || (`第 ${clock.day} 日 · ${clock.periodText}`) }}
         </el-tag>
-        <el-button size="small" type="warning" plain :loading="aiGenerating" @click="doAiGenerate">
-          <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;AI 识别事件
-        </el-button>
-        <el-button size="small" type="primary" @click="openAddEvent">
-          <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增事件
-        </el-button>
       </div>
     </div>
 
@@ -69,7 +91,7 @@
       </template>
     </el-drawer>
 
-    <!-- 新增事件对话框（手动持久化；AI 识别走上方按钮） -->
+    <!-- 事件对话框（手动持久化；AI 识别走上方按钮） -->
     <el-dialog v-model="addDialog.visible" title="新增事件（手动）" width="520px">
       <el-form label-width="80px">
         <el-form-item label="事件标题">
@@ -89,17 +111,23 @@
 
 <script setup>
 /**
- * 时间线页（前端布局重构 V1.0 §3.8 + V2.1 时间线聚合接口）。
+ * 时间线页。
  * <p>职责：以游戏时间为竖轴的全局事件视图（项目「编年史」）——
  * 头部工具栏（精度切换 + 类型筛选 + 手动新增事件[持久化] + AI 从世界观识别生成事件）；
  * 主体竖轴时间线（分组刻度 + 节点卡片 + 横红线标记当前时间段）；
  * 点击卡片打开详情抽屉。数据来自统一聚合接口 /api/projects/{id}/timeline
- * （actor_event + 行动 plan/log + 世界事件消息 + 记忆摘要）。</p>
+ * （actor_event 多类节点[event/manual/evolution/system/action/crowd/world] + 行动 plan/log +
+ * 世界事件消息 + 记忆摘要）。
+ * <b>B1</b>：接入 /api/projects/{id}/world-events/stream SSE——收到 world-event 自动重新加载，
+ * 行动/居民活动/世界事件/演化归档实时上轴；crowd（居民活动）/world（世界事件）/evolution（演化归档）/
+ * manual（手动）/system（系统）节点标签与配色。</p>
  */
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchProjectTimeline, createProjectEvent, aiGenerateProjectEvent, fetchWorldClock } from '@/shared/api'
+import { fetchProjectTimeline, createProjectEvent, aiGenerateProjectEvent, fetchWorldClock, worldEventsStreamUrl } from '@/shared/api'
+import { createSubscription, SSE_EVENTS } from '@/shared/sse/sseClient'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const route = useRoute()
 const projectId = Number(route.params.id)
@@ -124,17 +152,30 @@ const detailDrawer = ref(false)
 // ===== 新增事件 =====
 const addDialog = reactive({ visible: false, loading: false, title: '', content: '' })
 
-/** 类型文案/颜色 */
+/**
+ * 类型文案（B1：多类节点——event/manual/evolution/system + action/crowd/world； 增 roleplay；
+ * /：world_frame=世界帧事件[每日帧宏观事件/扩散到达/演化归档统一类别]；
+ * crowd/common 同义（新写入 common，历史 crowd 兼容），都按「居民活动」渲染）
+ */
 function nodeKindLabel(kind) {
-  return { event: '世界事件', action: '角色行动', memory: '记忆里程碑' }[kind] || kind
+  return {
+    event: '世界事件', manual: '手动事件', evolution: '演化归档', system: '系统',
+    action: '角色行动', crowd: '居民活动', common: '居民活动', world: '世界事件', memory: '记忆里程碑',
+    roleplay: 'NPC 自发对话', world_frame: '世界帧'
+  }[kind] || kind
 }
 function nodeTagType(kind) {
-  return { event: 'warning', action: 'primary', memory: 'success' }[kind] || 'info'
+  return {
+    event: 'warning', manual: 'info', evolution: 'danger', system: 'info',
+    action: 'primary', crowd: 'success', common: 'success', world: 'warning', memory: 'success',
+    roleplay: 'primary', world_frame: 'warning'
+  }[kind] || 'info'
 }
 
 /** 来源文案 */
 function sourceLabel(s) {
-  return { manual: '手动', ai: 'AI 识别', simulation: '世界模拟', evolution: '演化归档', dialog: '对话' }[s] || s
+  return { manual: '手动', ai: 'AI 识别', simulation: '世界模拟', evolution: '演化归档',
+    dialog: '对话', action: '行动', crowd: '居民活动', common: '居民活动', roleplay: 'NPC 自发' }[s] || s
 }
 
 /** 时间格式化 */
@@ -221,11 +262,33 @@ async function doAiGenerate() {
 onMounted(async () => {
   try { clock.value = await fetchWorldClock(projectId) } catch (_) { clock.value = null }
   await load()
+  connectWorldEvents()
+})
+
+/**
+ * 世界事件流 SSE：收到 world-event 自动重新加载时间线（B1，行动/居民/事件/演化实时上轴；
+ * 统一订阅型客户端——断线自动重连[指数退避]，心跳监听，页面离开关闭）
+ */
+let worldSub = null
+function connectWorldEvents() {
+  try {
+    worldSub = createSubscription({
+      url: worldEventsStreamUrl(projectId),
+      events: [SSE_EVENTS.WORLD_EVENT, SSE_EVENTS.ERROR],
+      heartbeatTimeoutMs: 45000, // 15s 心跳 ×3：超时视为死连自动重连
+      onEvent: (name) => { if (name === SSE_EVENTS.WORLD_EVENT) load() }
+    })
+  } catch (_) { /* 连接失败静默（页面仍可手动刷新） */ }
+}
+
+onBeforeUnmount(() => {
+  if (worldSub) { worldSub.close(); worldSub = null }
 })
 </script>
 
 <style scoped>
-.timeline-view { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; height: calc(100vh - 140px); }
+/* 限宽走统一令牌；高度取外壳内容区 100%（替代 calc(100vh - 140px) 魔法值） */
+.timeline-view { width: 100%; max-width: var(--content-max-w, 1440px); margin: 0 auto; display: flex; flex-direction: column; gap: 14px; height: 100%; min-height: 0; }
 
 /* 工具栏 */
 .tl-toolbar { background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -248,6 +311,13 @@ onMounted(async () => {
 .tl-node.kind-event::after { background: #e6a23c; box-shadow: 0 0 0 2px #e6a23c; }
 .tl-node.kind-action::after { background: #409eff; box-shadow: 0 0 0 2px #409eff; }
 .tl-node.kind-memory::after { background: #67c23a; box-shadow: 0 0 0 2px #67c23a; }
+.tl-node.kind-crowd::after, .tl-node.kind-common::after { background: #67c23a; box-shadow: 0 0 0 2px #67c23a; }
+.tl-node.kind-world::after { background: #e6a23c; box-shadow: 0 0 0 2px #e6a23c; }
+.tl-node.kind-evolution::after { background: #f56c6c; box-shadow: 0 0 0 2px #f56c6c; }
+.tl-node.kind-world_frame::after { background: #e6a23c; box-shadow: 0 0 0 2px #e6a23c; }
+.tl-node.kind-manual::after { background: #909399; box-shadow: 0 0 0 2px #909399; }
+.tl-node.kind-system::after { background: #909399; box-shadow: 0 0 0 2px #909399; }
+.tl-node.kind-roleplay::after { background: #409eff; box-shadow: 0 0 0 2px #409eff; }
 .tl-card { border: 1px solid var(--border-light); border-radius: 10px; padding: 10px 14px; transition: box-shadow .2s, border-color .2s; max-width: 680px; }
 .tl-card:hover { box-shadow: var(--card-shadow); border-color: var(--brand-primary); }
 .tl-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }

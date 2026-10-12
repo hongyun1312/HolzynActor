@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.common;
 
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +39,6 @@ import java.util.Base64;
  * iv 为 12 字节随机数，每次加密独立生成（GCM 安全性要求 IV 不重用）。</p>
  * <p>演示模式兜底：当未配置 api-key-secret 时使用内置开发密钥并告警，
  * 保证演示模式（casdoor.enabled=false）可独立跑通；生产必须通过环境变量注入。</p>
- * <p>所属模块：service/common（通用服务层-安全子域）</p>
  */
 @Slf4j
 @Component
@@ -71,6 +88,7 @@ public class AesCipherService {
      * 加密明文 API Key。
      *
      * @param plain 明文 API Key
+     *
      * @return 密文字符串（v1:iv:data）；明文为空时返回 null
      */
     public String encrypt(String plain) {
@@ -93,6 +111,7 @@ public class AesCipherService {
      * 解密 API Key 密文。
      *
      * @param cipherText 密文字符串（v1:iv:data）
+     *
      * @return 明文 API Key；密文为空时返回 null
      */
     public String decrypt(String cipherText) {
@@ -120,7 +139,9 @@ public class AesCipherService {
      * 尝试用指定密钥解密密文（失败返回 null，不抛异常）。
      *
      * @param cipherText 密文字符串（v1:iv:data）
-     * @param key        32 字节密钥
+     *
+     * @param key 32 字节密钥
+     *
      * @return 明文；解析/解密失败返回 null
      */
     private String tryDecrypt(String cipherText, byte[] key) {
@@ -144,6 +165,7 @@ public class AesCipherService {
      * 由指定密钥文本派生 256 位密钥（SHA-256 摘要）。
      *
      * @param secret 密钥文本
+     *
      * @return 32 字节密钥
      */
     private byte[] deriveKey(String secret) {

@@ -1,0 +1,95 @@
+{
+  "code": "worldgen_character_v1",
+  "name": "角色阵容生成（骨架/信念/深层/声线）",
+  "version": 1,
+  "nodes": [
+    {
+      "id": "agent_roster",
+      "label": "角色阵容设计",
+      "nodeType": "agent",
+      "agentType": "holzyn-character-roster",
+      "firstMessage": "【世界设定】\n{{worldSetting}}\n\n【题材类型】\n{{genre}}\n\n请为这个世界设计核心角色阵容。角色必须活在既有设定里（种族/势力/职业须符合世界观），宁缺毋滥。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_roster_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "characters/roster.json",
+      "nodeParams": {
+        "temperature": 0.6,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "script_persist_roster",
+      "label": "角色阵容检查点",
+      "nodeType": "script",
+      "scriptName": "persist_character_roster",
+      "scriptArgs": "",
+      "nodeParams": {
+        "timeout": 30
+      }
+    },
+    {
+      "id": "agent_character_depth",
+      "label": "逐角色深度生成（骨架/信念/深层/声线）",
+      "nodeType": "agent",
+      "agentType": "holzyn-character-depth",
+      "firstMessage": "【角色阵容】\n{{agent_roster_output}}\n\n请为阵容中的每个角色逐一生成深度档案。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_character_depth_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "characters/depth.json",
+      "nodeParams": {
+        "batch": true,
+        "batchInputVariable": "agent_roster_output",
+        "batchOutputPattern": "characters/{name}.json",
+        "temperature": 0.7,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "script_persist_characters",
+      "label": "角色落库（actor_profile）",
+      "nodeType": "script",
+      "scriptName": "persist_character_profiles",
+      "scriptArgs": "",
+      "nodeParams": {
+        "timeout": 60
+      }
+    }
+  ],
+  "edges": [
+    { "source": "__start__", "target": "agent_roster" },
+    { "source": "agent_roster", "target": "script_persist_roster" },
+    { "source": "script_persist_roster", "target": "agent_character_depth" },
+    { "source": "agent_character_depth", "target": "script_persist_characters" },
+    { "source": "script_persist_characters", "target": "__end__" }
+  ],
+  "variables": [
+    {
+      "key": "worldSetting",
+      "name": "世界设定",
+      "type": "textarea",
+      "defaultValue": "",
+      "required": false,
+      "description": "世界观设定摘要（创建任务时自动从项目注入；也可手动提供）"
+    },
+    {
+      "key": "genre",
+      "name": "题材类型",
+      "type": "text",
+      "defaultValue": "",
+      "required": false,
+      "description": "题材类型（可选；创建任务时自动从项目注入）"
+    },
+    {
+      "key": "language",
+      "name": "输出语言",
+      "type": "text",
+      "defaultValue": "中文",
+      "required": true,
+      "description": "所有 agent 的产出语言。中文 / English"
+    }
+  ]
+}

@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.account;
 
 import com.holzyn.actor.domain.account.entity.SysUser;
@@ -10,7 +28,6 @@ import org.springframework.stereotype.Component;
  * <p>职责：统一解析「当前用户」——本地桌面/单机模式恒返回本地单用户（id=1），
  * 已移除 OIDC/登录鉴权逻辑；昵称优先取本地账户档案，缺省「本地用户」。</p>
  * <p>用法：各功能域控制器/服务注入本类，调用 currentUserId() / resolveUserId() 获取归属用户。</p>
- * <p>所属模块：domain/account（本地账户功能域）</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -48,6 +65,7 @@ public class CurrentUserProvider {
      * 解析"有效用户 ID"：本地单用户模式下恒为 1（忽略前端传入参数，保证数据归属统一）。
      *
      * @param paramUserId 前端传入的用户 ID（忽略）
+     *
      * @return 有效用户 ID（1）
      */
     public Long resolveUserId(Long paramUserId) {
@@ -56,8 +74,6 @@ public class CurrentUserProvider {
 
     /**
      * 判断当前用户是否为管理员（本地单用户默认 true，保留兼容语义）。
-     *
-     * @return true
      */
     public boolean isAdmin() {
         return true;

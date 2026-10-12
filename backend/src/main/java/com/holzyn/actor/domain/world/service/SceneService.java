@@ -1,19 +1,38 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.service;
 
 import com.holzyn.actor.common.BizException;
 import com.holzyn.actor.common.JsonUtil;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
-import com.holzyn.actor.domain.character.entity.ActorCharacter;
+import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
 import com.holzyn.actor.domain.project.entity.ActorProject;
 import com.holzyn.actor.domain.world.entity.ActorScene;
 import com.holzyn.actor.domain.world.entity.ActorWorldSetting;
-import com.holzyn.actor.domain.character.repository.ActorCharacterRepository;
+import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import com.holzyn.actor.domain.world.repository.ActorSceneRepository;
 import com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository;
 import com.holzyn.actor.ai.AiChatRequest;
 import com.holzyn.actor.ai.AiChatResult;
-import com.holzyn.actor.ai.AiProviderRouter;
+import com.holzyn.actor.ai.spring.AiSpringChatGateway;
+import com.holzyn.actor.domain.debug.service.AiCallContext;
 import com.holzyn.actor.domain.settings.service.PromptTemplateService;
 import com.holzyn.actor.domain.usage.service.UsageLogService;
 import lombok.RequiredArgsConstructor;
@@ -30,12 +49,11 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 场景/地点服务（V2.1 世界演化）。
+ * 场景/地点服务。
  * <p>职责：承载 /api/projects/{id}/scenes 系列接口——项目场景（地点）的增删改查，
  * 供世界演化「选择指定场景（地点）」与时间线事件关联使用。场景背景设定作为演化 AI 注入源。</p>
- * <p>vP5-7.6 新增：AI 自动填充场景（aiGenerate）——以「世界观设定 + 角色档案 + 已有场景」
+ * <p>新增：AI 自动填充场景（aiGenerate）——以「世界观设定 + 角色档案 + 已有场景」
  * 为数据源调用 AI 生成一批场景，每个场景记录 source（来源依据），保证有来源、逻辑自洽。</p>
- * <p>所属模块：service/world（世界演化子域）</p>
  */
 @Slf4j
 @Service
@@ -55,7 +73,7 @@ public class SceneService {
     private final ActorCharacterRepository characterRepository;
 
     /** AI Provider 路由（AI 自动填充调用） */
-    private final AiProviderRouter aiProviderRouter;
+    private final AiSpringChatGateway aiChatGateway;
 
     /** Prompt 模板服务（渲染 scene_generate 模板） */
     private final PromptTemplateService promptTemplateService;
@@ -79,6 +97,7 @@ public class SceneService {
      * 查询项目场景列表（启用优先、ID 升序）。
      *
      * @param projectId 项目 ID
+     *
      * @return 场景视图列表
      */
     @Transactional(readOnly = true)
@@ -89,10 +108,12 @@ public class SceneService {
     }
 
     /**
-     * 新增场景。
+     * 场景。
      *
      * @param projectId 项目 ID
-     * @param body      入参：{name 必填, description, location, background}
+     *
+     * @param body 入参：{name 必填, description, location, background}
+     *
      * @return 新增后的场景视图
      */
     @Transactional
@@ -117,8 +138,10 @@ public class SceneService {
     /**
      * 编辑场景。
      *
-     * @param id   场景主键
+     * @param id 场景主键
+     *
      * @param body 入参
+     *
      * @return 更新后的场景视图
      */
     @Transactional
@@ -160,8 +183,11 @@ public class SceneService {
      * 与已有场景不重复。AI 失败或输出无有效场景时抛出 BizException（用户可见中文提示）。</p>
      *
      * @param projectId 项目 ID
-     * @param userId    归属用户 ID（AI 调用凭据归属）
-     * @param body      入参：{count? 生成数量 1~10，默认 3}
+     *
+     * @param userId 归属用户 ID（AI 调用凭据归属）
+     *
+     * @param body 入参：{count? 生成数量 1~10，默认 3}
+     *
      * @return 本次新增的场景视图列表
      */
     @Transactional
@@ -191,7 +217,9 @@ public class SceneService {
         long startMs = System.currentTimeMillis();
         AiChatResult result;
         try {
-            result = aiProviderRouter.chatCompletion(userId, projectId, null, req);
+            // AI 调用埋点（调试前端）：scene=world_event（场景批量生成）
+            result = AiCallContext.run("world_event", null, () ->
+                    aiChatGateway.chatCompletion(userId, projectId, null, req));
         } catch (Exception e) {
             // AI 不可用（未配置 API / 调用失败）：给出友好提示
             throw new BizException(400, "AI 生成失败：" + (e.getMessage() == null ? "请检查模型 API 配置" : e.getMessage()));
@@ -232,6 +260,7 @@ public class SceneService {
      * 组装世界观设定文本（结构化字段 + 完整自由文本，AI 生成场景的数据源）。
      *
      * @param projectId 项目 ID
+     *
      * @return 世界观文本（无设定时返回占位）
      */
     private String buildWorldSettingText(Long projectId) {
@@ -244,6 +273,7 @@ public class SceneService {
      * 将世界观实体组装为带【分节标签】的文本（便于 AI 引用来源）。
      *
      * @param w 世界观实体
+     *
      * @return 世界观文本
      */
     private String worldText(ActorWorldSetting w) {
@@ -270,6 +300,7 @@ public class SceneService {
      * 组装角色档案文本（姓名/头衔/常驻位置/详细信息，AI 生成场景的数据源）。
      *
      * @param projectId 项目 ID
+     *
      * @return 角色档案文本（无角色时返回占位）
      */
     private String buildCharactersText(Long projectId) {
@@ -300,8 +331,10 @@ public class SceneService {
      * <p>规则：提取 JSON 数组 → 逐条取 name/location/description/background/source；
      * 名称缺失的条目跳过；最多取 count 条。</p>
      *
-     * @param json  AI 输出文本
+     * @param json AI 输出文本
+     *
      * @param count 期望数量上限
+     *
      * @return 解析出的场景列表（无有效数组返回空）
      */
     static List<Map<String, Object>> parseGenerated(String json, int count) {
@@ -343,8 +376,10 @@ public class SceneService {
     /**
      * 截断长文本（超长加省略号）。
      *
-     * @param s   原始文本
+     * @param s 原始文本
+     *
      * @param max 最大长度
+     *
      * @return 截断后的文本（null 返回空串）
      */
     private String clip(String s, int max) {
@@ -358,6 +393,7 @@ public class SceneService {
      * 场景实体 → 视图 Map。
      *
      * @param scene 场景实体
+     *
      * @return 视图 Map
      */
     private Map<String, Object> toVO(ActorScene scene) {
@@ -379,6 +415,7 @@ public class SceneService {
      * 按主键查询场景（归属校验）。
      *
      * @param id 场景主键
+     *
      * @return 场景实体
      */
     public ActorScene requireScene(Long id) {
@@ -403,6 +440,7 @@ public class SceneService {
      * 取值辅助：Object 转字符串。
      *
      * @param v 原始对象
+     *
      * @return 字符串（null 返回 null）
      */
     private String str(Object v) {

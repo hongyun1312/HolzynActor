@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.entity;
 
 import jakarta.persistence.*;
@@ -5,11 +23,10 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 世界演化会话实体，对应表 actor_evolution（V2.1）。
+ * 世界演化会话实体，对应表 actor_evolution。
  * <p>职责：一次「世界演化」的会话主表——可选择全局（scene_id NULL）或指定场景（scene_id 非空）、
  * 背景（background）与参与角色（participants）；模式分手动选择 / AI 自动选择；
  * 状态 running/finished；结束后 AI 生成收尾摘要（ai_summary）并归档为事件（event_id）。</p>
- * <p>所属模块：model/entity（实体层-世界演化子域）</p>
  */
 @Data
 @Entity
@@ -65,7 +82,7 @@ public class ActorEvolution {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    /** 更新时间 */
+    /** 时间 */
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
@@ -83,7 +100,7 @@ public class ActorEvolution {
     }
 
     /**
-     * 更新前回调：刷新更新时间。
+     * 前回调：刷新更新时间。
      */
     @PreUpdate
     void preUpdate() {

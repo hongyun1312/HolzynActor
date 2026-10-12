@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.entity;
 
 import jakarta.persistence.*;
@@ -10,7 +28,6 @@ import java.time.LocalDateTime;
  * 数据来源：① 新建项目「上传文件解析」流程的地理设定之后新增「地点提取」阶段（AI 从 geography
  * 文本识别并生成简介）；② 世界详情「地点详情」页手动增删改查与「AI 重新提取」。
  * 归属项目级（随 .holzyn 包导入导出）。</p>
- * <p>所属模块：domain/world（世界域-地点子域）</p>
  */
 @Data
 @Entity
@@ -45,11 +62,29 @@ public class ActorWorldLocation {
     @Column(name = "sort_order")
     private Integer sortOrder = 0;
 
+    /**
+     * 地点区域中心 X（地图层事实，0..scene_size，与沙盘 layout_json / Unity 坐标对齐；
+     * AI 世界地图生成回填，感知/渲染/移动消费；未生成地图前为 null）。
+     */
+    @Column(name = "center_x")
+    private Double centerX;
+
+    /** 地点区域中心 Z（地图层事实，0..scene_size；AI 世界地图生成回填）。 */
+    @Column(name = "center_z")
+    private Double centerZ;
+
+    /** 地点区域半径（格=米；AI 世界地图生成回填；感知「在村西口」等口语化描述据此派生）。 */
+    private Double radius;
+
+    /** 区域口语描述（「村西口」「河畔」「村中集市」等，感知/对话素材；AI 地图生成回填）。 */
+    @Column(name = "region_desc", length = 200)
+    private String regionDesc;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    /** 更新时间 */
+    /** 时间 */
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
@@ -66,7 +101,7 @@ public class ActorWorldLocation {
     }
 
     /**
-     * 更新前回调：刷新更新时间。
+     * 前回调：刷新更新时间。
      */
     @PreUpdate
     void preUpdate() {

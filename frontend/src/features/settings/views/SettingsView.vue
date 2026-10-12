@@ -1,80 +1,111 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
-  <div class="settings-page">
-    <!-- 全局设置（首页/未进入项目空间）时显示顶部栏，便于返回画廊 -->
-    <ConsoleTopbar v-if="!projectId" brand-label="HolzynActor" :show-collapse="false" />
-    <div class="settings-view">
-      <div class="settings-head">
-        <div class="settings-title">设置</div>
-        <div class="settings-desc" v-if="projectId">
-          项目设置中心（项目级独立，随项目打包）；进入默认落在「项目通用设置」。
-        </div>
-        <div class="settings-desc" v-else>
-          全局设置中心（首页/未进入项目时使用）：API 配置与 Prompt 模板为「用户级默认」，AI 用量统计全部项目的总用量；项目级设置（基本信息/世界时钟/导入导出/危险区）请在对应项目空间内进行。
-        </div>
-      </div>
-      <div class="settings-body">
-        <!-- 左侧子导航 -->
-        <aside class="settings-nav">
-          <router-link
-            v-for="item in navItems"
-            :key="item.path"
-            :to="item.path"
-            class="settings-nav-item"
-            :class="{ active: isActive(item.path) }"
-          >
-            <el-icon><HIcon :name="item.icon" /></el-icon>
-            <span>{{ item.name }}</span>
-          </router-link>
-        </aside>
-        <!-- 右侧内容 -->
-        <main class="settings-content">
-          <router-view />
-        </main>
-      </div>
+  <!--
+    设置中心外壳（双模式）。
+    关键重构点：项目模式**不再自绘顶部栏与左侧子导航**——外壳由 ProjectLayout/AppShell 提供，
+    设置子页作为「设置域」直接出现在域侧栏里（与其它域同一套导航），因此不再有「设置页里还有一层侧栏」的嵌套观感。
+    全局模式（首页 /settings/*）自身就是顶层路由，故自带 AppShell。
+  -->
+  <AppShell
+    v-if="!projectId"
+    mode="global"
+    brand-label="HolzynActor"
+    :show-sidebar="false"
+    :show-back="true"
+  >
+    <template #sidebar>
+      <aside class="settings-rail">
+        <SideNav :sections="globalSections" :active-key="activeKey" @navigate="go" />
+      </aside>
+    </template>
+    <div class="content-col">
+      <!-- 不再自绘「设置」页头：域侧栏已标明当前位置，页头由各子页自己提供（一页一头）。
+           全局/项目差异由子页自身的说明承担，避免出现「设置 + 子页标题」双层页头。 -->
+      <router-view />
     </div>
+  </AppShell>
+
+  <!-- 项目模式：外壳已由 ProjectLayout 提供，这里只渲染子页 -->
+  <div v-else class="content-col">
+    <router-view />
   </div>
 </template>
 
 <script setup>
 /**
- * 设置页外壳（前端布局重构 V1.0，设计文档 §3.10；双模式改造 V1.2）。
- * <p>职责：项目/全局双模式设置中心——左侧子导航（通用设置 / API 配置 / Prompt 模板 / AI 用量）+ 右侧内容区。
- * 项目模式：/project/:id/settings/*，设置均为项目级独立（随 .holzyn 包导入导出）；
- * 全局模式：/settings/*（首页顶栏「设置」进入），API/Prompt 为用户级默认、AI 用量为全部项目总用量。</p>
+ * 设置页外壳。
+ *
+ * <p>职责：承载四个（现为五个）设置子页的路由出口，并按模式决定是否自带外壳：</p>
+ * <ul>
+ *   <li>**项目模式**（`/project/:id/settings/*`）：外壳来自 ProjectLayout，子导航来自域侧栏的「设置」域；</li>
+ *   <li>**全局模式**（`/settings/*`）：自带 AppShell（全局品牌 + 左侧设置导航轨道）。</li>
+ * </ul>
+ *
+ * <p>重构前后差异：原实现在项目模式下也渲染 ConsoleTopbar 与一层 180px 的左侧子导航，
+ * 形成「侧栏里套侧栏」的双层导航；现统一到骨架，导航只有一处。</p>
  */
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
-import ConsoleTopbar from '@/shared/components/console/ConsoleTopbar.vue'
+import { useRoute, useRouter } from 'vue-router'
+import AppShell from '@/shared/layout/AppShell.vue'
+import SideNav from '@/shared/layout/SideNav.vue'
 
 const route = useRoute()
-/** 当前项目 ID：项目空间内存在，全局设置（首页）为 null */
+const router = useRouter()
+
+/** 当前项目 ID：项目空间内存在；全局设置（首页）为 null */
 const projectId = computed(() => (route.params.id ? Number(route.params.id) : null))
 
-// 设置子导航（四个子页）：项目模式 /project/:id/settings/*，全局模式 /settings/*
+/** 设置子页清单（项目/全局共用同一份定义，路径前缀不同） */
 const base = computed(() => (projectId.value ? `/project/${projectId.value}/settings` : '/settings'))
 const navItems = computed(() => [
-  { name: '通用设置', icon: 'Setting', path: `${base.value}/general` },
-  { name: 'API 配置', icon: 'Key', path: `${base.value}/apis` },
-  { name: 'Prompt 模板', icon: 'Document', path: `${base.value}/prompts` },
-  { name: 'AI 用量', icon: 'DataAnalysis', path: `${base.value}/usage` }
+  { key: 'general', name: '通用设置', icon: 'ic_public_settings', desc: '账户、主题外观、世界时钟、导入导出', path: `${base.value}/general` },
+  { key: 'apis', name: 'API 配置', icon: 'ic_public_connection', desc: '模型供应商与密钥', path: `${base.value}/apis` },
+  { key: 'prompts', name: 'Prompt 模板', icon: 'ic_public_edit', desc: '场景模板覆盖与版本', path: `${base.value}/prompts` },
+  { key: 'usage', name: 'AI 用量', icon: 'ic_public_view_list', desc: 'Token 与场景用量统计', path: `${base.value}/usage` },
+  { key: 'appearance', name: '界面与布局', icon: 'ic_public_highlight', desc: '侧栏宽度、密度、面板固定与导览', path: `${base.value}/appearance` }
 ])
+
+/** 全局模式的单分组导航（SideNav 需要 sections 结构） */
+const globalSections = computed(() => [{ key: 'settings', name: '设置', icon: 'ic_public_settings', items: navItems.value }])
+
+/** 当前激活子页 key（供 SideNav 高亮） */
+const activeKey = computed(() => navItems.value.find(i => isActive(i.path))?.key || 'general')
 
 /** 子导航激活判断 */
 function isActive(path) {
   return route.path === path || route.path.startsWith(path + '/')
 }
+
+/** SideNav 点击 → 路由跳转（SideNav 只抛事件，保持表现层纯净） */
+function go(item) {
+  if (item?.path) router.push(item.path)
+}
 </script>
 
 <style scoped>
-.settings-page { min-height: 100vh; background: var(--bg-base, var(--bg-light)); }
-.settings-view { max-width: 1200px; margin: 0 auto; padding: 24px 24px 32px; }
-.settings-head { margin-bottom: 16px; }
-.settings-title { font-size: 1.3rem; font-weight: 700; color: var(--text-primary); }
-.settings-desc { font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px; }
-.settings-body { display: flex; gap: 16px; align-items: flex-start; }
-.settings-nav { width: 180px; background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 8px; flex-shrink: 0; position: sticky; top: 0; }
-.settings-nav-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 6px; color: var(--text-regular); cursor: pointer; font-size: 0.86rem; text-decoration: none; transition: all 0.2s; }
-.settings-nav-item:hover { background: var(--bg-light); color: var(--brand-primary); }
-.settings-nav-item.active { background: var(--brand-gradient-soft); color: var(--brand-primary); font-weight: 600; }
-.settings-content { flex: 1; min-width: 0; }
+/* 全局模式左侧设置导航轨道：与域侧栏同款悬浮岛观感，宽度略窄 */
+.settings-rail {
+  width: 224px;
+  flex-shrink: 0;
+  margin: var(--shell-side-margin, 12px) 0 var(--shell-side-margin, 12px) var(--shell-side-margin, 12px);
+  background: var(--bg-nav);
+  border: 1px solid var(--border-l1);
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: var(--shadow-lv1);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 </style>

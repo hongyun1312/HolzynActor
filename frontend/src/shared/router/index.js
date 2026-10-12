@@ -1,16 +1,43 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAccountStore } from '@/shared/store'
+import { fetchProject } from '@/shared/api'
 
 /**
- * HolzynActor 前端路由（模块化重构 V1.0，功能域划分 + 本地单用户）。
- *
+ * 世界沙盘 S1：应用启动直达上次项目的一次性标记。
+ * <p>语义（用户确认「只写不清」）：每次启动/刷新后首次导航到画廊落地页 时，
+ * 若本地账户记录有 lastProjectId 且项目仍存在 → 直达该项目沙盘；之后本次会话内
+ * 再点「返回画廊」等导航到 / 不再重定向（回画廊可正常停留）。</p>
+ */
+let startupRedirectHandled = false
+
+/**
+ * HolzynActor 前端路由。
  * 顶层路由：/onboarding（首次设置向导）、/（项目画廊）、/project/new（新增项目）。
- * 项目空间路由（带 :projectId，全部位于 ProjectLayout 骨架内）：
- *   /project/:id/dashboard（项目仪表盘）、/world（世界详情，含 /world/edit 修改页）、
- *   /characters（NPC 角色）、/chat（对话·单聊/群聊）、/settings（设置：general/apis/prompts/usage）、
- *   /crowds（普通型人群）、/evolve（世界演化）、/timeline（时间线）、/knowledge（知识库）
- *   —— 后四个原为隐藏页，2026-08-18 恢复侧边栏入口。
+ * 项目空间路由（带:projectId，全部位于 ProjectLayout 骨架内）：
+ * /project/:id/sandbox（世界沙盘·项目主页，默认落地）、/project/:id/dashboard（项目仪表盘）、
+ * /world（世界详情，含 /world/edit 修改页）、/characters（NPC 角色）、/chat（对话·单聊/群聊）、
+ * /settings（设置：general/apis/prompts/usage）、
+ * /crowds（普通型人群）、/evolve（世界演化）、/timeline（时间线）、/knowledge（知识库）
+ * —— 后四个原为隐藏页， 恢复侧边栏入口。
  * 已移除：/login、/register（登录鉴权整体移除，首次启动引导本地账户设置）。
  */
 const routes = [
@@ -30,6 +57,16 @@ const routes = [
     meta: { requiresAccount: true, title: '本地账户设置 · HolzynActor' }
   },
 
+  // ==================== 新手上手教程（全局，随时可回） ====================
+  // 与「界面导览」互补：导览解释界面为什么长这样（一次性、跟随高亮），
+  // 教程中心解释该按什么顺序用它（可回看、按章推进、每步带真实入口）。
+  {
+    path: '/tutorial',
+    name: 'tutorial',
+    component: () => import('@/features/tutorial/views/TutorialCenterView.vue'),
+    meta: { title: '新手上手教程 · HolzynActor' }
+  },
+
   // ==================== 全局设置（首页/未进入项目时，复用项目设置四子页） ====================
   // 与项目空间内的 /project/:id/settings/* 共用同一套 SettingsView 外壳与四个子页组件；
   // 差异：API 配置 / Prompt 模板为「用户级默认/覆盖」（projectId 为空），AI 用量统计全部项目总用量。
@@ -40,10 +77,12 @@ const routes = [
     meta: { requiresAccount: true, title: '设置 · HolzynActor' },
     children: [
       { path: '', redirect: 'general' },
-      { path: 'general', name: 'global-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { requiresAccount: true, title: '通用设置 · HolzynActor' } },
-      { path: 'apis', name: 'global-settings-apis', component: () => import('@/features/settings/views/ProjectApiSettings.vue'), meta: { requiresAccount: true, title: 'API 配置 · HolzynActor' } },
-      { path: 'prompts', name: 'global-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { requiresAccount: true, title: 'Prompt 模板 · HolzynActor' } },
-      { path: 'usage', name: 'global-settings-usage', component: () => import('@/features/settings/views/ProjectUsageSettings.vue'), meta: { requiresAccount: true, title: 'AI 用量 · HolzynActor' } }
+      { path: 'general', name: 'global-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { requiresAccount: true, title: '通用设置 · HolzynActor', domain: 'settings' } },
+      { path: 'apis', name: 'global-settings-apis', component: () => import('@/features/settings/views/ProjectApiSettings.vue'), meta: { requiresAccount: true, title: 'API 配置 · HolzynActor', domain: 'settings' } },
+      { path: 'prompts', name: 'global-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { requiresAccount: true, title: 'Prompt 模板 · HolzynActor', domain: 'settings' } },
+      { path: 'usage', name: 'global-settings-usage', component: () => import('@/features/settings/views/ProjectUsageSettings.vue'), meta: { requiresAccount: true, title: 'AI 用量 · HolzynActor', domain: 'observe' } },
+      // 界面与布局（全局）：面板宽度/信息密度/抽屉固定/导览重看——不依赖具体项目，故项目内外共用同一页
+      { path: 'appearance', name: 'global-settings-appearance', component: () => import('@/features/settings/views/ProjectAppearanceSettings.vue'), meta: { requiresAccount: true, title: '界面与布局 · HolzynActor', domain: 'settings' } }
     ]
   },
 
@@ -64,7 +103,7 @@ const routes = [
   },
 
   // ==================== 专属世界初始化页（独立全屏，不进项目空间侧边栏） ====================
-  // 2026-08-19 新增：新建项目（手动添加/文件解析）完成后弹窗可跳转；项目空间仪表盘也可进入重跑。
+  // 新建项目（手动添加/文件解析）完成后弹窗可跳转；项目空间仪表盘也可进入重跑。
   // 上半屏横向进度条（6 步节点）+ 下半屏控制台日志（SSE 实时推送后端初始化日志）。
   {
     path: '/project/:id/init',
@@ -79,42 +118,55 @@ const routes = [
     component: () => import('@/features/project/ProjectLayout.vue'),
     meta: { requiresAccount: true },
     children: [
-      // 默认落在项目仪表盘
-      { path: '', redirect: 'dashboard' },
-      // 1. 项目仪表盘：概况 + 统计 + 最近动态
-      { path: 'dashboard', name: 'project-dashboard', component: () => import('@/features/project/views/DashboardView.vue'), meta: { title: '项目仪表盘 · HolzynActor' } },
+      // 世界沙盘 S1：项目默认落地页 = 世界沙盘（绝对主界面，侧边栏第一位）
+      { path: '', redirect: 'sandbox' },
+      // 1. 世界地图：项目默认落地页（M4 新首页：2D 地图 + 双主角并置，取代旧 3D 沙盘）
+      //    meta.fullbleed 不再需要（三层壳内布局，非全屏 3D 画布）
+      { path: 'sandbox', name: 'project-sandbox', component: () => import('@/features/home/views/NewHomeView.vue'), meta: { title: '世界地图 · HolzynActor', domain: 'world' } },
+      // 2. 项目仪表盘：概况 + 统计 + 最近动态
+      { path: 'dashboard', name: 'project-dashboard', component: () => import('@/features/project/views/DashboardView.vue'), meta: { title: '项目仪表盘 · HolzynActor', domain: 'observe' } },
+      // 2b. 世界图谱（观测域）：时间/地点/角色/事件/关系/势力/宏观七个只读切面
+      { path: 'graph', name: 'project-world-graph', component: () => import('@/features/observe/views/WorldGraphView.vue'), meta: { title: '世界图谱 · HolzynActor', domain: 'observe' } },
       // 2. 世界详情（只读全文）+ 专属修改页（/world/edit）
-      { path: 'world', name: 'project-world', component: () => import('@/features/world/views/WorldDetailView.vue'), meta: { title: '世界详情 · HolzynActor' } },
-      { path: 'world/edit', name: 'project-world-edit', component: () => import('@/features/world/views/WorldEditView.vue'), meta: { title: '修改世界 · HolzynActor' } },
+      { path: 'world', name: 'project-world', component: () => import('@/features/world/views/WorldDetailView.vue'), meta: { title: '世界详情 · HolzynActor', domain: 'world' } },
+      { path: 'world/edit', name: 'project-world-edit', component: () => import('@/features/world/views/WorldEditView.vue'), meta: { title: '修改世界 · HolzynActor', domain: 'world' } },
       // 3. 角色详情：NPC 角色（特殊型）
-      { path: 'characters', name: 'project-characters', component: () => import('@/features/character/views/CharacterView.vue'), meta: { title: 'NPC 角色 · HolzynActor' } },
+      { path: 'characters', name: 'project-characters', component: () => import('@/features/character/views/CharacterView.vue'), meta: { title: 'NPC 角色 · HolzynActor', domain: 'cast' } },
       // 4. 对话（单聊）
-      { path: 'chat', name: 'project-chat', component: () => import('@/features/chat/views/ChatView.vue'), meta: { title: '对话 · HolzynActor' } },
-      // 5. 设置（默认通用；子页 general/apis/prompts/usage）
+      { path: 'chat', name: 'project-chat', component: () => import('@/features/chat/views/ChatView.vue'), meta: { title: '对话 · HolzynActor', domain: 'cast' } },
+      // 5. 设置（默认通用；子页 general/apis/prompts/usage/appearance）
       {
         path: 'settings',
         component: () => import('@/features/settings/views/SettingsView.vue'),
-        meta: { title: '设置 · HolzynActor' },
+        meta: { title: '设置 · HolzynActor', domain: 'settings' },
         children: [
           { path: '', redirect: 'general' },
-          { path: 'general', name: 'project-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { title: '通用设置 · HolzynActor' } },
-          { path: 'apis', name: 'project-settings-apis', component: () => import('@/features/settings/views/ProjectApiSettings.vue'), meta: { title: 'API 配置 · HolzynActor' } },
-          { path: 'prompts', name: 'project-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { title: 'Prompt 模板 · HolzynActor' } },
-          { path: 'usage', name: 'project-settings-usage', component: () => import('@/features/settings/views/ProjectUsageSettings.vue'), meta: { title: 'AI 用量 · HolzynActor' } }
+          { path: 'general', name: 'project-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { title: '通用设置 · HolzynActor', domain: 'settings' } },
+          { path: 'apis', name: 'project-settings-apis', component: () => import('@/features/settings/views/ProjectApiSettings.vue'), meta: { title: 'API 配置 · HolzynActor', domain: 'settings' } },
+          { path: 'prompts', name: 'project-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { title: 'Prompt 模板 · HolzynActor', domain: 'settings' } },
+          { path: 'usage', name: 'project-settings-usage', component: () => import('@/features/settings/views/ProjectUsageSettings.vue'), meta: { title: 'AI 用量 · HolzynActor', domain: 'observe' } },
+          // 界面与布局（新增）：面板宽度、信息密度、内容宽度、抽屉固定、导览重看
+          { path: 'appearance', name: 'project-settings-appearance', component: () => import('@/features/settings/views/ProjectAppearanceSettings.vue'), meta: { title: '界面与布局 · HolzynActor', domain: 'settings' } }
         ]
       },
 
-      // ===== 恢复页（2026-08-18 从隐藏恢复：入口已回到侧边栏，路由与页面均可用） =====
+      // ===== 恢复页（从隐藏恢复：入口已回到侧边栏，路由与页面均可用） =====
       // 普通型人群
-      { path: 'crowds', name: 'project-crowds', component: () => import('@/features/crowd/views/CrowdView.vue'), meta: { title: '普通型人群 · HolzynActor' } },
+      { path: 'crowds', name: 'project-crowds', component: () => import('@/features/crowd/views/CrowdView.vue'), meta: { title: '普通型人群 · HolzynActor', domain: 'cast' } },
       // 世界演化（世界模拟控制台）
-      { path: 'evolve', name: 'project-evolve', component: () => import('@/features/evolve/views/EvolveView.vue'), meta: { title: '世界演化 · HolzynActor' } },
+      { path: 'evolve', name: 'project-evolve', component: () => import('@/features/evolve/views/EvolveView.vue'), meta: { title: '世界演化 · HolzynActor', domain: 'world' } },
       // 时间线（竖轴 + 横红线 + 精度切换）
-      { path: 'timeline', name: 'project-timeline', component: () => import('@/features/timeline/views/TimelineView.vue'), meta: { title: '时间线 · HolzynActor' } },
+      { path: 'timeline', name: 'project-timeline', component: () => import('@/features/timeline/views/TimelineView.vue'), meta: { title: '时间线 · HolzynActor', domain: 'world' } },
       // 知识库（文档 / 检索 / 项目大事记）
-      { path: 'knowledge', name: 'project-knowledge', component: () => import('@/features/knowledge/views/KnowledgeView.vue'), meta: { title: '知识库 · HolzynActor' } },
+      { path: 'knowledge', name: 'project-knowledge', component: () => import('@/features/knowledge/views/KnowledgeView.vue'), meta: { title: '知识库 · HolzynActor', domain: 'mind' } },
+      // 项目记忆
+      { path: 'world-memory', name: 'project-world-memory', component: () => import('@/features/worldmemory/views/WorldMemoryView.vue'), meta: { title: '项目记忆 · HolzynActor', domain: 'mind' } },
       // 全局关系拓扑（角色页同款组件 variant=page：整页网络图 + 右上角角色卡片 + 补充跳转）
-      { path: 'topology', name: 'project-topology', component: () => import('@/features/character/views/TopologyView.vue'), meta: { title: '关系拓扑 · HolzynActor' } }
+      { path: 'topology', name: 'project-topology', component: () => import('@/features/character/views/TopologyView.vue'), meta: { title: '关系拓扑 · HolzynActor', domain: 'cast' } },
+      // 记忆归档
+      { path: 'archive', name: 'project-archive', component: () => import('@/features/archive/views/ArchiveView.vue'), meta: { title: '记忆归档 · HolzynActor', domain: 'mind' } },
+      // 家族谱系
+      { path: 'lineage', name: 'project-lineage', component: () => import('@/features/lineage/views/LineageView.vue'), meta: { title: '家族谱系 · HolzynActor', domain: 'cast' } }
     ]
   },
 
@@ -149,6 +201,22 @@ router.beforeEach(async (to) => {
   }
   if (to.meta?.requiresAccount && !account.isOnboarded) {
     return { path: '/onboarding', query: { redirect: to.fullPath } }
+  }
+
+  // 世界沙盘 S1：应用启动直达上次所在项目（仅画廊落地页首次导航触发；会话内回画廊不再重定向）
+  if (!startupRedirectHandled && account.isOnboarded && to.path === '/') {
+    startupRedirectHandled = true
+    const lastId = account.lastProjectId
+    if (lastId) {
+      try {
+        const p = await fetchProject(lastId)
+        if (p && p.deleted !== 1) {
+          return { path: `/project/${lastId}/sandbox` }
+        }
+      } catch (_) {
+        // 项目不存在/已删除/后端未就绪 → 留在画廊
+      }
+    }
   }
   return true
 })

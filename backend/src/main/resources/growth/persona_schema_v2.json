@@ -1,0 +1,401 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "holzyn.actor.persona.v2",
+  "title": "HolzynActor 角色统一档案 v2（11 维）",
+  "description": "O6 轨道 G1a 统一档案契约。定位：档案不是平行数据源，而是「各模块数据的聚合视图 + 无归属字段的容器」。分维来源声明见 _sources（MODULE=权威在既有模块、PERSONA=落档案、DER=程序化派生、MIXED=初值落档案+运行期由模块派生）。落库时由 PersonaPersistService 按 _sources 分派写入各模块权威位置。维（数据维度，共 11）与分片（注入切片 S1~S11）解耦：一维可拆多片（①→S1+S11），一片可跨维（S2←④+⑤）。",
+  "type": "object",
+  "required": ["schema_version", "dims", "_sources"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "const": 2 },
+    "profile_id": { "type": "integer", "description": "actor_profile.id（统一身份 npc:{id} 的数字部分）" },
+    "project_id": { "type": "integer" },
+    "persona_version": { "type": "integer", "description": "档案版本号，对齐 actor_profile_revision.version" },
+    "generated_by": { "type": "string", "enum": ["dev", "ai_bootstrap", "ai_worldgen", "ai_migrate", "evolution", "manual"] },
+    "generated_scene": { "type": "string", "description": "生成场景码（persona_bootstrap_fill_a/b、character_card_gen、ordinary_npc_gen…）" },
+    "generated_game_second": { "type": "integer", "description": "生成时的世界时刻（审计用）" },
+
+    "dims": {
+      "type": "object",
+      "description": "11 维数据（维度键固定；来源为 MODULE/DER 的维度可省略，由渲染器实时投影）",
+      "additionalProperties": false,
+      "properties": {
+        "identity": { "$ref": "#/definitions/dimIdentity" },
+        "appearance": { "$ref": "#/definitions/dimAppearance" },
+        "physio": { "$ref": "#/definitions/dimPhysio" },
+        "personality": { "$ref": "#/definitions/dimPersonality" },
+        "values": { "$ref": "#/definitions/dimValues" },
+        "ability": { "$ref": "#/definitions/dimAbility" },
+        "voice": { "$ref": "#/definitions/dimVoice" },
+        "habits": { "$ref": "#/definitions/dimHabits" },
+        "experience": { "$ref": "#/definitions/dimExperience" },
+        "development": { "$ref": "#/definitions/dimDevelopment" },
+        "mask": { "$ref": "#/definitions/dimMask" }
+      }
+    },
+
+    "_sources": {
+      "type": "object",
+      "description": "分维来源声明（11 键固定；权威模块为空串表示无既有模块）",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["MODULE", "PERSONA", "DER", "MIXED"] },
+          "module": { "type": "string", "description": "权威模块/表，如 actor_state / actor_relation / actor_goal / actor_memory / actor_knowledge_doc / macro" },
+          "fields_module": { "type": "array", "items": { "type": "string" }, "description": "该维中归属模块的字段名" },
+          "fields_persona": { "type": "array", "items": { "type": "string" }, "description": "该维中落档案的字段名" },
+          "shards": { "type": "array", "items": { "type": "string" }, "description": "该维参与哪些注入分片" },
+          "writers": { "type": "array", "items": { "type": "string" }, "description": "允许写入该维的角色（scene/servic 码）" },
+          "consumers": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+
+    "_legacy": {
+      "type": "object",
+      "description": "旧数据原样保留（审计/回溯；不参与注入）",
+      "properties": {
+        "detail": { "type": "string" },
+        "card_persona_json": { "type": "string" },
+        "ordinary_detail": { "type": "string" }
+      }
+    }
+  },
+
+  "definitions": {
+    "dimIdentity": {
+      "type": "object",
+      "description": "① 身份与社会（分片 S1 身份锚定 + S11 社会身份与资源）｜结构列 MODULE 投影，财产/声望/别名 PERSONA",
+      "additionalProperties": false,
+      "properties": {
+        "aliases": { "type": "array", "items": { "type": "string" } },
+        "identity_title": { "type": "string" },
+        "social_class": { "type": "string" },
+        "livelihood": { "type": "string", "description": "谋生方式" },
+        "property": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "house": { "type": "string" },
+            "land_mu": { "type": "number" },
+            "grain_shi": { "type": "number" },
+            "money_guan": { "type": "number" },
+            "heirlooms": { "type": "array", "items": { "type": "string" } },
+            "notes": { "type": "string" }
+          }
+        },
+        "reputation": {
+          "type": "object",
+          "description": "分级声望（0-1 或自由描述）",
+          "additionalProperties": { "type": ["number", "string"] }
+        },
+        "status_tags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "dimAppearance": {
+      "type": "object",
+      "description": "② 外貌与体质（分片 S10）｜PERSONA（无既有模块）；health 实时值归 actor_state",
+      "additionalProperties": false,
+      "properties": {
+        "height_cm": { "type": "number" },
+        "build": { "type": "string", "description": "体型：中等偏瘦/魁梧/丰腴…" },
+        "posture": { "type": "string", "description": "体态：肩背微驼…" },
+        "face_features": { "type": "string" },
+        "hair": { "type": "string" },
+        "attire_style": { "type": "string" },
+        "voice_timbre": { "type": "string" },
+        "scent": { "type": "string" },
+        "strength": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "endurance": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "agility": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "balance": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "senses": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "vision": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "hearing": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "smell": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "taste": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "touch": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "notes": { "type": "string", "description": "如：老花，近处需眯眼；右耳背" }
+          }
+        },
+        "illnesses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "season": { "type": "string" },
+              "severity": { "type": "string" }
+            }
+          }
+        },
+        "disabilities": { "type": "array", "items": { "type": "string" } },
+        "constitution_weaknesses": { "type": "array", "items": { "type": "string" } },
+        "appearance_notes": { "type": "string" }
+      }
+    },
+
+    "dimPhysio": {
+      "type": "object",
+      "description": "③ 生理基线（分片 S4）｜★权威在 NPC 状态模块：本维字段落库时写入 actor_state 的 per-NPC 生理参数覆盖列（physio_json）+ 生效系数，档案仅承载渲染描述",
+      "additionalProperties": false,
+      "properties": {
+        "chronotype": { "type": "string", "enum": ["early_bird", "intermediate", "night_owl"] },
+        "sleep_need_hours": { "type": "number", "description": "每游戏日所需睡眠小时（默认 8）" },
+        "sleep_quality": { "type": "string" },
+        "meal_cycle_hours": { "type": "number", "description": "饥饿周期（游戏小时/餐）" },
+        "meals_per_day": { "type": "integer" },
+        "metabolism": { "type": "string", "enum": ["slow", "normal", "fast"] },
+        "pain_tolerance": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "thirst_tolerance": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "cold_tolerance": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "heat_tolerance": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "fertility_state": { "type": "string" },
+        "libido": { "type": "string" },
+        "alcohol_tolerance": { "type": "string" },
+        "stimulants": { "type": "object", "additionalProperties": { "type": "string" }, "description": "茶/烟/酒等摄入习惯" },
+        "excretion_regularity": { "type": "string" },
+        "sweat_tendency": { "type": "string" },
+        "physio_notes": { "type": "string" }
+      }
+    },
+
+    "dimPersonality": {
+      "type": "object",
+      "description": "④ 气质与人格（分片 S2）｜PERSONA 为权威（迁移自 card.personality，OCEAN 1-5 → (v-1)/4 得 0-1）；actor_memory_core 的 personality 块改为派生",
+      "additionalProperties": false,
+      "properties": {
+        "ocean": {
+          "type": "object",
+          "required": ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"],
+          "additionalProperties": false,
+          "properties": {
+            "openness": { "type": "number", "minimum": 0, "maximum": 1 },
+            "conscientiousness": { "type": "number", "minimum": 0, "maximum": 1 },
+            "extraversion": { "type": "number", "minimum": 0, "maximum": 1 },
+            "agreeableness": { "type": "number", "minimum": 0, "maximum": 1 },
+            "neuroticism": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "temperament_type": { "type": "string", "description": "气质型：黏液质偏抑郁…" },
+        "attachment_style": { "type": "string" },
+        "emotion_thresholds": {
+          "type": "object",
+          "description": "情绪反应阈值 0-1（值越高越不易被激起）",
+          "additionalProperties": false,
+          "properties": {
+            "anger": { "type": "number", "minimum": 0, "maximum": 1 },
+            "fear": { "type": "number", "minimum": 0, "maximum": 1 },
+            "joy": { "type": "number", "minimum": 0, "maximum": 1 },
+            "sadness": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "emotion_recovery": { "type": "string", "description": "情绪恢复速率描述 + 半衰期系数" },
+        "impulse_control": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "cognitive_style": { "type": "string", "description": "场依存/场独立…" },
+        "risk_preference": { "type": "string", "enum": ["low", "medium", "high"] },
+        "time_orientation": { "type": "string", "description": "当下/中远期…" },
+        "traits_summary": { "type": "string", "description": "自由文本特质摘要（旧 personality.traits 迁移）" }
+      }
+    },
+
+    "dimValues": {
+      "type": "object",
+      "description": "⑤ 价值观与动机（分片 S2）｜价值权重/底线 PERSONA 为权威；current_goals 消费 actor_goal；life_goals 亦落 actor_goal(长期) 并可回读",
+      "additionalProperties": false,
+      "properties": {
+        "value_weights": {
+          "type": "object",
+          "description": "可量化价值权重 0-1（键为世界观相关价值名，如 宗族/乡邻生计/名节/承诺/秩序/私利/信仰）",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "core_fears": { "type": "array", "items": { "type": "string" } },
+        "core_desires": { "type": "array", "items": { "type": "string" } },
+        "moral_bottom_lines": { "type": "array", "items": { "type": "string" }, "description": "绝不做的事（硬门控红线条目）" },
+        "life_goals": { "type": "array", "items": { "type": "string" }, "description": "长期目标（落 actor_goal priority=2）" },
+        "current_goals": { "type": "array", "items": { "type": "string" }, "description": "中期目标（落 actor_goal priority=4）" },
+        "regrets": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "dimAbility": {
+      "type": "object",
+      "description": "⑥ 能力与知识（分片 S5）｜知识领域/盲区 MODULE（actor_knowledge_doc + RAG 向量库）；技能/识字/语言/天赋 PERSONA（预设）+ 运行期由 learning 模块回写；认知上限 DER（G2 阶段门控）",
+      "additionalProperties": false,
+      "properties": {
+        "skills": {
+          "type": "object",
+          "description": "技能熟练度 0-10（键为技能名，如 村务治理/农事耕作）",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 10 }
+        },
+        "knowledge_domains": { "type": "array", "items": { "type": "string" } },
+        "knowledge_blind_spots": { "type": "array", "items": { "type": "string" } },
+        "literacy": { "type": "string" },
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "level": { "type": "string" }
+            }
+          }
+        },
+        "talents": { "type": "array", "items": { "type": "string" } },
+        "cognitive_ceiling": {
+          "type": "object",
+          "description": "认知上限（G2 由阶段门控派生；本处仅为 AI 生成时的意图，不作为权威）",
+          "additionalProperties": { "type": ["boolean", "string"] }
+        },
+        "secrets": { "type": "array", "items": { "type": "string" }, "description": "知情秘密（旧 knowledge.secrets 迁移；不参与默认注入，仅内部驱动）" }
+      }
+    },
+
+    "dimVoice": {
+      "type": "object",
+      "description": "⑦ 语言与表达（分片 S3）｜PERSONA（迁移自 card.speechStyle 并扩展）",
+      "additionalProperties": false,
+      "properties": {
+        "sentence_length": { "type": "string", "description": "偏长/偏短 + 字数区间" },
+        "register": { "type": "string", "description": "用词雅俗：半文半白…" },
+        "speech_rate": { "type": "string" },
+        "pitch": { "type": "string" },
+        "address_habits": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "称呼习惯：to_junior/to_peer/self_reference…"
+        },
+        "catchphrases": { "type": "array", "items": { "type": "string" } },
+        "dialect": { "type": "string" },
+        "taboo_topics": { "type": "array", "items": { "type": "string" } },
+        "silence_tendency": { "type": "string" },
+        "rhetoric_preference": { "type": "string" },
+        "written_vs_spoken": { "type": "string" },
+        "vocabulary_keys": { "type": "array", "items": { "type": "string" }, "description": "特征词表（旧 speechStyle.vocabulary 迁移）" }
+      }
+    },
+
+    "dimHabits": {
+      "type": "object",
+      "description": "⑧ 习惯与日常（分片 S6）｜日程/作息 MODULE（计划模块 plan_day + 作息状态机，运行态在 actor_state）；癖好/小动作/嗜好/仪式 PERSONA（迁移自 card.dailyRoutine/quirks 并扩展）",
+      "additionalProperties": false,
+      "properties": {
+        "schedule": { "type": "array", "items": { "type": "string" }, "description": "典型日程（投影展示；权威在计划模块）" },
+        "sleep_habits": { "type": "array", "items": { "type": "string" } },
+        "quirks": { "type": "array", "items": { "type": "string" }, "description": "癖好（思考时摩挲印信…）" },
+        "micro_movements": { "type": "array", "items": { "type": "string" } },
+        "food_preferences": { "type": "string" },
+        "addictions": { "type": "array", "items": { "type": "string" } },
+        "ritual_behaviors": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "dimExperience": {
+      "type": "object",
+      "description": "⑨ 经历与创伤（分片 S7）｜出身/荣誉/心结/秘密 PERSONA；关键经历 MIXED（初值预设 + 运行期由记忆/编年史派生补充）；创伤+触发物 PERSONA（确定性输入，供情绪突变与面具破绽消费）",
+      "additionalProperties": false,
+      "properties": {
+        "origin": { "type": "string" },
+        "key_events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "age": { "type": "integer" },
+              "game_second": { "type": "integer" },
+              "what": { "type": "string" },
+              "source": { "type": "string", "enum": ["preset", "memory", "chronicle"] }
+            }
+          }
+        },
+        "traumas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "创伤事件 + 触发物（触发物为面具破绽与情绪突变的确定性输入）",
+            "properties": {
+              "event": { "type": "string" },
+              "age": { "type": "integer" },
+              "triggers": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "honors": { "type": "array", "items": { "type": "string" } },
+        "unresolved_knots": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "dimDevelopment": {
+      "type": "object",
+      "description": "⑩ 发育·遗传·谱系（分片 S9）｜阶段/出生时刻 MODULE（actor_profile 列 + 世界时钟派生）；谱系 MODULE（actor_relation 投影）；基因/表观 PERSONA（G4）",
+      "additionalProperties": false,
+      "properties": {
+        "stage": { "type": "string", "description": "当前阶段码（投影；权威为 actor_profile.stage）" },
+        "stage_entered_game_second": { "type": "integer" },
+        "capacity_curve": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "peak_age": { "type": "number" },
+            "current_ratio": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "death_risk": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "baseline_annual": { "type": "number" }
+          }
+        },
+        "genome": { "type": "object", "additionalProperties": { "type": "string" }, "description": "15 基因位点（G4）" },
+        "epigenetic_marks": { "type": "array", "items": { "type": "string" } },
+        "lineage": {
+          "type": "object",
+          "description": "谱系（投影展示；权威在 actor_relation）",
+          "additionalProperties": { "type": ["string", "array", "null"] }
+        }
+      }
+    },
+
+    "dimMask": {
+      "type": "object",
+      "description": "⑪ 社会面具（分片 S8）｜PERSONA 为权威（新维度）；消费方=情绪模块（写回 actor_state 表达 PAD，G3）",
+      "additionalProperties": false,
+      "properties": {
+        "context_suppression": {
+          "type": "object",
+          "description": "情境码 → 抑制强度 0-1（多情境叠加取最大）",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 },
+          "properties": {
+            "before_authority": { "type": "number", "minimum": 0, "maximum": 1 },
+            "before_partner": { "type": "number", "minimum": 0, "maximum": 1 },
+            "before_stranger": { "type": "number", "minimum": 0, "maximum": 1 },
+            "before_peer": { "type": "number", "minimum": 0, "maximum": 1 },
+            "before_child": { "type": "number", "minimum": 0, "maximum": 1 },
+            "before_rival": { "type": "number", "minimum": 0, "maximum": 1 },
+            "public_place": { "type": "number", "minimum": 0, "maximum": 1 },
+            "private_place": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "allowed_expressions": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+        "forbidden_expressions": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
+        "breaches": {
+          "type": "array",
+          "description": "面具破绽：触发物 → 抑制强度临时增量（负值=抑制下降）",
+          "items": {
+            "type": "object",
+            "properties": {
+              "trigger": { "type": "string" },
+              "suppression_delta": { "type": "number", "minimum": -1, "maximum": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

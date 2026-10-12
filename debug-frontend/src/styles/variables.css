@@ -1,0 +1,225 @@
+/* ============================================================
+   HolzynActor 调试前端 · 设计令牌（DSH 风格分层体系 · 浅/深双主题 + 可换肤主色）
+   —— 与主前端 frontend/src/shared/styles/variables.css 同源移植（2026-08-20 依用户要求统一 UI）。
+   用法：
+   - 浅色：:root 默认；深色：<html data-theme="dark">（JS 设置，见 src/theme/index.js）
+   - 主色：--accent 由 JS 动态设置（默认 DeepSeek 蓝 #4176E6），衍生色用 color-mix 自动生成
+   ============================================================ */
+
+/* ===== HarmonyOS Sans SC 字体（与主前端一致；字体源文件见 src/assets/fonts） ===== */
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../assets/fonts/HarmonyOS_Sans_SC_Thin.ttf') format('truetype'); font-weight: 100; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../assets/fonts/HarmonyOS_Sans_SC_Light.ttf') format('truetype'); font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../assets/fonts/HarmonyOS_Sans_SC_Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../assets/fonts/HarmonyOS_Sans_SC_Medium.ttf') format('truetype'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../assets/fonts/HarmonyOS_Sans_SC_Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../assets/fonts/HarmonyOS_Sans_SC_Black.ttf') format('truetype'); font-weight: 900; font-style: normal; font-display: swap; }
+
+:root {
+  /* ===== 字体（正文/UI 用 HarmonyOS Sans SC；代码等宽字体保留原栈） ===== */
+  --dsw-font-family: "HarmonyOS Sans SC", "HarmonyOS Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --dsw-font-family-code: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
+    "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
+  --dsw-ease: cubic-bezier(.4, 0, .2, 1);
+
+  /* ===== 主色（accent，可换肤）===== */
+  --accent: #4176e6;                                  /* 默认：DeepSeek 蓝 */
+  --accent-strong: color-mix(in srgb, var(--accent) 82%, #000 18%);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-softer: color-mix(in srgb, var(--accent) 7%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 38%, transparent);
+  --accent-contrast: #fff;                            /* accent 底上的文字色 */
+  --accent-text: var(--accent);                       /* 强调文字 */
+
+  /* ===== 语义色 ===== */
+  --state-success: #22c55e;
+  --state-warn: #f59e0b;
+  --state-error: #ef4444;
+  --state-danger-bg: color-mix(in srgb, var(--state-error) 12%, transparent);
+  --state-success-bg: color-mix(in srgb, var(--state-success) 12%, transparent);
+
+  /* ===== 分层背景（浅色） ===== */
+  --bg-base: #e8ebf1;                                 /* 页面底（带轻微蓝灰层次） */
+  --bg-layer-1: #ffffff;                              /* 卡片/浮层 */
+  --bg-layer-2: #f1f3f7;                              /* 次级面/内嵌 */
+  --bg-layer-3: #e9ecf2;                              /* 输入/更深内嵌 */
+  --bg-hover: rgba(15, 17, 21, .07);
+  --bg-active: rgba(15, 17, 21, .14);
+  --bg-mask: rgba(15, 17, 21, .45);
+  --bg-scrim: rgba(232, 235, 241, .85);
+
+  /* ===== 导航区（顶栏 + 侧边栏）：灰色基底 + 极淡个性化主色晕染，与内容区明确分层 ===== */
+  --bg-nav: color-mix(in srgb, var(--accent) 5%, #f3f4f6);
+  --bg-nav-hover: color-mix(in srgb, var(--accent) 9%, #eceef2);
+
+  /* ===== 边框（浅色） ===== */
+  --border-l1: rgba(15, 17, 21, .16);
+  --border-l2: rgba(15, 17, 21, .24);
+  --border-l3: rgba(15, 17, 21, .34);
+
+  /* ===== 文本 ===== */
+  --text-primary: #17191d;
+  --text-regular: #3c4148;
+  --text-secondary: #61666e;
+  --text-tertiary: #8b9098;
+  --text-placeholder: #b2b6bd;
+  --text-caption: #8b9098;
+  --text-inverse: #fff;
+
+  /* ===== 阴影 ===== */
+  --shadow-lv1: 0 2px 4px 0 rgba(15, 17, 21, .05);
+  --shadow-lv2: 0 4px 12px 0 rgba(15, 17, 21, .05), 0 2px 8px 0 rgba(15, 17, 21, .07);
+  --shadow-lv3: 0 0 1px 0 rgba(15, 17, 21, .2), 0 0 4px 0 rgba(15, 17, 21, .02), 0 12px 32px 0 rgba(15, 17, 21, .10);
+
+  /* ===== 圆角 ===== */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  /* ===== 滚动条 ===== */
+  --scrollbar-width: 8px;
+  --scrollbar-thumb: #b6bcc7;
+  --scrollbar-thumb-hover: #9aa1ae;
+  --scrollbar-track: transparent;
+
+  /* ===== Element Plus 覆盖（浅色）===== */
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--accent) 70%, #fff);
+  --el-color-primary-light-5: color-mix(in srgb, var(--accent) 50%, #fff);
+  --el-color-primary-light-7: color-mix(in srgb, var(--accent) 30%, #fff);
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 20%, #fff);
+  --el-color-primary-light-9: color-mix(in srgb, var(--accent) 12%, #fff);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--accent) 80%, #000);
+  --el-bg-color: var(--bg-layer-1);
+  --el-bg-color-page: var(--bg-base);
+  --el-bg-color-overlay: var(--bg-layer-1);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-placeholder);
+  --el-border-color: var(--border-l2);
+  --el-border-color-light: var(--border-l1);
+  --el-border-color-lighter: var(--border-l1);
+  --el-fill-color: var(--bg-layer-3);
+  --el-fill-color-light: var(--bg-layer-2);
+  --el-fill-color-lighter: var(--bg-layer-2);
+  --el-fill-color-blank: var(--bg-layer-1);
+  --el-fill-color-dark: var(--bg-layer-3);
+  --el-disabled-bg-color: var(--bg-layer-2);
+  --el-mask-color: var(--bg-mask);
+}
+
+/* ===== 深色主题（DSH 同款）===== */
+[data-theme="dark"] {
+  --accent-contrast: #fff;
+
+  /* 分层背景（深色） */
+  --bg-base: #151517;                                 /* DSH bluish-950 */
+  --bg-layer-1: #1b1b1c;                              /* DSH bluish-900 */
+  --bg-layer-2: #232324;                              /* DSH bluish-875 */
+  --bg-layer-3: #2c2c2e;                              /* DSH bluish-850 */
+  --bg-hover: rgba(255, 255, 255, .08);
+  --bg-active: rgba(255, 255, 255, .14);
+  --bg-mask: rgba(0, 0, 0, .55);
+  --bg-scrim: rgba(21, 21, 23, .82);
+
+  /* 导航区（深色） */
+  --bg-nav: color-mix(in srgb, var(--accent) 7%, #262629);
+  --bg-nav-hover: color-mix(in srgb, var(--accent) 11%, #2e2e31);
+
+  /* 边框 */
+  --border-l1: rgba(255, 255, 255, .06);
+  --border-l2: rgba(255, 255, 255, .12);
+  --border-l3: rgba(255, 255, 255, .18);
+
+  /* 文本 */
+  --text-primary: #f9fafb;
+  --text-regular: #e3e6ea;
+  --text-secondary: #cfd3d6;
+  --text-tertiary: #adb2b8;
+  --text-placeholder: #6f747b;
+  --text-caption: #81858c;
+  --text-inverse: #17191d;
+
+  /* 阴影（深色下更淡） */
+  --shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, .3);
+  --shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, .28), 0 2px 8px 0 rgba(0, 0, 0, .3);
+  --shadow-lv3: 0 0 1px 0 rgba(255, 255, 255, .05), 0 12px 32px 0 rgba(0, 0, 0, .45);
+
+  /* 滚动条 */
+  --scrollbar-thumb: #4a4c50;
+  --scrollbar-thumb-hover: #5c5f64;
+
+  /* 语义色浅底（深色：改为深色底） */
+  --state-danger-bg: color-mix(in srgb, var(--state-error) 16%, transparent);
+  --state-success-bg: color-mix(in srgb, var(--state-success) 14%, transparent);
+
+  /* Element Plus 覆盖（深色） */
+  --el-bg-color: var(--bg-layer-1);
+  --el-bg-color-page: var(--bg-base);
+  --el-bg-color-overlay: var(--bg-layer-2);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-placeholder);
+  --el-border-color: var(--border-l2);
+  --el-border-color-light: var(--border-l1);
+  --el-border-color-lighter: var(--border-l1);
+  --el-fill-color: var(--bg-layer-3);
+  --el-fill-color-light: var(--bg-layer-2);
+  --el-fill-color-lighter: var(--bg-layer-2);
+  --el-fill-color-blank: var(--bg-layer-1);
+  --el-fill-color-dark: var(--bg-layer-3);
+  --el-disabled-bg-color: var(--bg-layer-2);
+  --el-mask-color: var(--bg-mask);
+
+  /* ===== Element Plus 语义色深色适配（对齐主前端 2026-08-19 适配）===== */
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--accent) 70%, #000);
+  --el-color-primary-light-5: color-mix(in srgb, var(--accent) 50%, #000);
+  --el-color-primary-light-7: color-mix(in srgb, var(--accent) 30%, #000);
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 20%, #000);
+  --el-color-primary-light-9: color-mix(in srgb, var(--accent) 12%, #000);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--accent) 80%, #fff);
+  --el-color-success: #67c23a;
+  --el-color-success-light-3: #4e8e2f;
+  --el-color-success-light-5: #3e6b27;
+  --el-color-success-light-7: #2d481f;
+  --el-color-success-light-8: #25371c;
+  --el-color-success-light-9: #1c2518;
+  --el-color-success-dark-2: #85ce61;
+  --el-color-warning: #e6a23c;
+  --el-color-warning-light-3: #a77730;
+  --el-color-warning-light-5: #7d5b28;
+  --el-color-warning-light-7: #533f20;
+  --el-color-warning-light-8: #3e301c;
+  --el-color-warning-light-9: #292218;
+  --el-color-warning-dark-2: #ebb563;
+  --el-color-danger: #f56c6c;
+  --el-color-danger-light-3: #b25252;
+  --el-color-danger-light-5: #854040;
+  --el-color-danger-light-7: #582e2e;
+  --el-color-danger-light-8: #412626;
+  --el-color-danger-light-9: #2a1d1d;
+  --el-color-danger-dark-2: #f78989;
+  --el-color-error: #f56c6c;
+  --el-color-error-light-3: #b25252;
+  --el-color-error-light-5: #854040;
+  --el-color-error-light-7: #582e2e;
+  --el-color-error-light-8: #412626;
+  --el-color-error-light-9: #2a1d1d;
+  --el-color-error-dark-2: #f78989;
+  --el-color-info: #909399;
+  --el-color-info-light-3: #6b6d71;
+  --el-color-info-light-5: #525457;
+  --el-color-info-light-7: #393a3c;
+  --el-color-info-light-8: #2d2d2f;
+  --el-color-info-light-9: #202121;
+  --el-color-info-dark-2: #a6a9ad;
+}
+
+/* 颜色过渡平滑（主题切换时） */
+html.theme-transition, html.theme-transition * {
+  transition: background-color .25s var(--dsw-ease), border-color .25s var(--dsw-ease), color .25s var(--dsw-ease) !important;
+}

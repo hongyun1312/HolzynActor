@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="timeline-view">
     <div class="tl-top">
@@ -38,7 +51,7 @@
       <!-- 中纵向时间轴 -->
       <div class="tl-main">
         <div class="tl-header">
-          <span class="page-title">行动时间线</span>
+          <span class="tl-title">行动时间线</span>
           <el-tag v-if="live" size="small" type="success">实时订阅中</el-tag>
         </div>
         <div v-if="timeline.length === 0" class="tl-empty">
@@ -117,7 +130,7 @@
 
 <script setup>
 /**
- * 行动时间线页（P2 阶段二，按桌面布局）。
+ * 行动时间线页。
  * <p>职责：左筛选栏（角色/时间范围/状态/触发类型 + 手动触发行动）；中纵向时间轴
  * （行动决策 / 世界事件 / 执行日志三类节点分色，时间倒序）；底部行动详情面板
  * （类型/目标/参数/决策理由/优先级/状态/耗时，支持重新生成、标记状态、导出单条）；
@@ -129,6 +142,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchCharacters, fetchProjectActionTimeline, triggerAction, updateActionStatus, actionStreamUrl
 } from '@/shared/api'
+import { createSubscription, SSE_EVENTS } from '@/shared/sse/sseClient'
 
 const route = useRoute()
 const projectId = Number(route.params.id)
@@ -279,14 +293,20 @@ function exportNode(node) {
   URL.revokeObjectURL(url)
 }
 
-/** 订阅 SSE 行动事件流：新行动实时刷新 */
+/** 订阅 SSE 行动事件流：新行动实时刷新（统一订阅型客户端——断线自动重连，心跳监听） */
+let actionSub = null
 function subscribeStream() {
   try {
-    const es = new EventSource(actionStreamUrl())
-    es.addEventListener('action', () => { load() })
-    es.onopen = () => { live.value = true }
-    es.onerror = () => { live.value = false }
-    window.__actionEs = es
+    actionSub = createSubscription({
+      url: actionStreamUrl(),
+      events: [SSE_EVENTS.ACTION, SSE_EVENTS.ERROR],
+      heartbeatTimeoutMs: 45000, // 15s 心跳 ×3：超时视为死连自动重连
+      onConnected: () => { live.value = true },
+      onPing: () => { live.value = true },
+      onReconnect: () => { live.value = false },
+      onGiveUp: () => { live.value = false },
+      onEvent: (name) => { if (name === SSE_EVENTS.ACTION) load() }
+    })
   } catch (_) { /* 订阅失败不阻塞页面 */ }
 }
 
@@ -297,18 +317,21 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (window.__actionEs) { window.__actionEs.close(); window.__actionEs = null }
+  if (actionSub) { actionSub.close(); actionSub = null }
 })
 </script>
 
 <style scoped>
-.timeline-view { display: flex; flex-direction: column; gap: 16px; height: calc(100vh - 140px); }
+/* 高度取外壳内容区 100%（替代 calc(100vh - 140px) 魔法值：顶栏/内边距/密度变化自动适应） */
+.timeline-view { display: flex; flex-direction: column; gap: 16px; height: 100%; min-height: 0; }
 .tl-top { display: flex; gap: 16px; flex: 1; min-height: 0; }
-.tl-side { width: 230px; background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 14px; overflow-y: auto; flex-shrink: 0; }
+/* 左栏统一取页内双栏令牌（原 230px 硬编码） */
+.tl-side { width: var(--page-aside-w, 260px); background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 14px; overflow-y: auto; flex-shrink: 0; }
 .tl-side-title { font-weight: 600; color: var(--text-primary); margin-bottom: 10px; }
 .tl-main { flex: 1; background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 16px; display: flex; flex-direction: column; overflow: hidden; }
 .tl-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.page-title { font-size: 1.15rem; font-weight: 700; color: var(--text-primary); }
+/* 面板内小标题（不是页头；页头统一走 PageHeader + 全局 .page-title） */
+.tl-title { font-size: 1.15rem; font-weight: 700; color: var(--text-primary); }
 .tl-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
 .tl-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 6px; }
 .tl-node { display: flex; gap: 12px; padding: 10px 8px; border-left: 3px solid transparent; border-radius: 8px; cursor: pointer; }

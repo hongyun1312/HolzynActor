@@ -99,3 +99,56 @@ img { max-width: 100%; display: block; }
 .markdown-body a:hover { text-decoration: underline; }
 .markdown-body img { border-radius: 8px; }
 .markdown-body strong { font-weight: 600; }
+
+/* ============================================================
+   统一页头 / 页内标签（界面布局重构 V1.0 新增）
+   背景：此前 .page-header / .page-title / .page-desc 在至少 4 个页面里被 scoped 重复定义，
+   且各处字号/间距不一致（1.3rem vs 1.15rem）。提升为全局类后，页面只写内容、不再自定页头样式。
+   用法：<div class="page-header"><div><h2 class="page-title">标题</h2><p class="page-desc">说明</p></div>
+        <div class="page-actions">…按钮…</div></div>
+   ============================================================ */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--page-header-gap, 16px);
+  margin-bottom: var(--space-4, 16px);
+  flex-wrap: wrap;
+}
+.page-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+  margin: 0;
+}
+.page-desc {
+  margin-top: 4px;
+  font-size: var(--density-font-sm, 0.82rem);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.page-actions { display: flex; align-items: center; gap: var(--space-2, 8px); flex-wrap: wrap; }
+/* 嵌入子面板的页头（PageHeader size="sm"）：画廊标签面板 / 工作流面板内使用 */
+.page-header.is-sm { margin-bottom: var(--space-3, 12px); }
+.page-header.is-sm .page-title { font-size: 1.1rem; }
+.page-header.is-sm .page-desc { font-size: var(--density-font-xs, 0.78rem); }
+
+/* 页内主导航标签（PageTabs 组件）：三层导航的中间层，视觉比面板内标签更重。
+   左置形态统一提供 128px 导航列宽、去掉右侧外边距、内容区不裁切
+   （此前由 3 个页面各自 scoped 复制同一段样式）。 */
+.page-tabs.is-top > .el-tabs__header { margin-bottom: var(--space-3, 12px); }
+.page-tabs.is-top > .el-tabs__header .el-tabs__item { font-size: var(--density-font-md, 0.9rem); }
+.page-tabs.is-left { height: 100%; min-height: 0; display: flex; }
+.page-tabs.is-left > .el-tabs__header { flex-shrink: 0; margin: 0; }
+.page-tabs.is-left .el-tabs__nav-wrap { width: var(--page-tabs-nav-w, 128px); }
+.page-tabs.is-left .el-tabs__content { overflow: visible; }
+.page-tabs.is-left > .el-tabs__content { flex: 1; min-width: 0; }
+
+/* 内容区限宽容器：统一替换各页自写的 max-width + margin:0 auto
+   （data-content-mode="wide" 时 --content-max-w 为 none，容器自动铺满） */
+.content-col { width: 100%; max-width: var(--content-max-w, 1440px); margin: 0 auto; }
+
+/* 拖拽中：全局禁用文本选中并统一光标（面板宽度拖拽 / 并置面板分隔条共用） */
+body.is-resizing { user-select: none; cursor: col-resize; }
+body.is-resizing * { cursor: col-resize !important; }

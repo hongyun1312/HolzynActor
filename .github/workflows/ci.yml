@@ -1,0 +1,67 @@
+# HolzynActor 持续集成（CI）
+# 触发：push / PR 到 master 或 main。
+# 并行跑三个独立作业：后端 Maven 测试、主前端构建、调试前端构建。
+# 发布打包（桌面端安装包）走 release.yml（打 v* 标签触发）。
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: Backend · Maven test (Java 21)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Maven test
+        run: mvn -B -ntp -f backend/pom.xml test
+
+  frontend-build:
+    name: Frontend · build (main)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: npm install + build (frontend)
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+
+  debug-frontend-build:
+    name: Frontend · build (debug)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: npm install + build (debug-frontend)
+        working-directory: debug-frontend
+        run: |
+          npm install
+          npm run build

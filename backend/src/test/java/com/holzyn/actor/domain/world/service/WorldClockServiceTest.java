@@ -158,4 +158,32 @@ class WorldClockServiceTest {
         assertEquals(29L * 86400L, WorldClockService.calendarToGameSecond(1, 1, 99, 0, 0, 0), "day>30 夹到 30");
         assertEquals(86400L + 59L, WorldClockService.calendarToGameSecond(1, 1, 2, 0, 0, 60), "second=60 夹到 59");
     }
+
+    // ==================== M1 前端实时时钟便捷字段（世界演化与游戏时间系统，2026-09-03） ====================
+
+    /**
+     * 当日小时内分钟：floor(gameSecond/60)%60，跨小时/跨日自动进位。
+     */
+    @Test
+    void minuteOfHourConverts() {
+        assertEquals(0, WorldClockService.minuteOfHour(0), "0 秒=0 分");
+        assertEquals(0, WorldClockService.minuteOfHour(59), "59 秒=0 分（向下取整）");
+        assertEquals(1, WorldClockService.minuteOfHour(60), "60 秒=1 分");
+        assertEquals(30, WorldClockService.minuteOfHour(3600L * 2 + 30 * 60L), "2 小时 30 分=30 分");
+        assertEquals(0, WorldClockService.minuteOfHour(3600L), "整点=0 分");
+        assertEquals(59, WorldClockService.minuteOfHour(86399), "第 1 日 23:59:59=59 分");
+        assertEquals(0, WorldClockService.minuteOfHour(86400), "跨日后整点=0 分");
+    }
+
+    /**
+     * 当日分钟：floor(gameSecond/60)%1440（0-1439），跨日归零。
+     */
+    @Test
+    void dayMinuteOfConverts() {
+        assertEquals(0, WorldClockService.dayMinuteOf(0), "0 秒=当日 0 分");
+        assertEquals(1, WorldClockService.dayMinuteOf(60), "1 分");
+        assertEquals(1439, WorldClockService.dayMinuteOf(86400L - 1), "第 1 日 23:59=1439 分");
+        assertEquals(0, WorldClockService.dayMinuteOf(86400L), "跨日归零");
+        assertEquals(60, WorldClockService.dayMinuteOf(86400L + 3600L), "第 2 日 01:00=60 分");
+    }
 }

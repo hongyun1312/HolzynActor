@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.common;
 
 import com.holzyn.actor.common.R;
@@ -21,9 +39,8 @@ import org.springframework.web.context.request.async.AsyncRequestNotUsableExcept
 /**
  * 全局异常处理器。
  * <p>职责：捕获控制器抛出的各类异常，统一返回 R 包装的错误响应（含 ErrorResponse 详情）。</p>
- * <p>设计原则（AI-DEVELOPMENT-GUIDELINES P0-04）：所有外部调用必须有全局异常兜底，
+ * <p>设计原则：所有外部调用必须有全局异常兜底，
  * 不向前端暴露堆栈信息。</p>
- * <p>所属模块：controller/common（通用控制器）</p>
  */
 @Slf4j
 @RestControllerAdvice
@@ -33,6 +50,7 @@ public class GlobalExceptionHandler {
      * 参数校验失败（@Valid 注解触发）。
      *
      * @param e 校验异常
+     *
      * @return 400 错误响应，error 中包含校验失败的字段名与提示
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -51,6 +69,7 @@ public class GlobalExceptionHandler {
      * 统一返回 400 而非 500，避免参数类错误刷 ERROR 日志。
      *
      * @param e 类型不匹配异常
+     *
      * @return 400 错误响应
      */
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -93,6 +112,7 @@ public class GlobalExceptionHandler {
      * 非法参数异常。
      *
      * @param e 非法参数异常
+     *
      * @return 400 错误响应
      */
     @ExceptionHandler(IllegalArgumentException.class)
@@ -106,6 +126,7 @@ public class GlobalExceptionHandler {
      * 实体未找到异常。
      *
      * @param e 实体未找到异常
+     *
      * @return 404 错误响应
      */
     @ExceptionHandler(EntityNotFoundException.class)
@@ -121,6 +142,7 @@ public class GlobalExceptionHandler {
      * 业务异常（BizException）：按异常携带的状态码返回（默认 400）。
      *
      * @param e 业务异常
+     *
      * @return 对应状态码的 R 错误响应
      */
     @ExceptionHandler(BizException.class)
@@ -135,6 +157,7 @@ public class GlobalExceptionHandler {
      * AI 调用异常（AiCallException）：返回 400 业务失败（如未配置 API / Key 无效）。
      *
      * @param e AI 调用异常
+     *
      * @return 400 错误响应（中文友好提示）
      */
     @ExceptionHandler(AiCallException.class)
@@ -149,6 +172,7 @@ public class GlobalExceptionHandler {
      * 统一返回 404 而非 500，避免无意义的错误日志噪音。
      *
      * @param e 资源不存在异常
+     *
      * @return 404 错误响应
      */
     @ExceptionHandler(NoResourceFoundException.class)
@@ -160,6 +184,7 @@ public class GlobalExceptionHandler {
      * 运行时异常兜底。
      *
      * @param e 运行时异常
+     *
      * @return 500 错误响应
      */
     @ExceptionHandler(RuntimeException.class)
@@ -173,6 +198,7 @@ public class GlobalExceptionHandler {
      * 全局兜底异常。
      *
      * @param e 未被其他 handler 匹配的异常
+     *
      * @return 500 错误响应
      */
     @ExceptionHandler(Exception.class)

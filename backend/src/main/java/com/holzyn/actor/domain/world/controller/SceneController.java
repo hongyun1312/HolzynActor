@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.controller;
 
 import com.holzyn.actor.domain.account.CurrentUserProvider;
@@ -10,10 +28,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 场景/地点控制器（V2.1 世界演化）。
- * <p>职责：提供项目场景（地点）的增删改查与 AI 自动填充（vP5-7.6），
+ * 场景/地点控制器。
+ * <p>职责：提供项目场景（地点）的增删改查与 AI 自动填充，
  * 供世界演化「选择指定场景（地点）」使用。</p>
- * <p>所属模块：controller/world（世界演化子域）</p>
  */
 @RestController
 @RequestMapping("/api")
@@ -30,6 +47,7 @@ public class SceneController {
      * 项目场景列表。
      *
      * @param projectId 项目 ID
+     *
      * @return 场景视图列表
      */
     @GetMapping("/projects/{projectId}/scenes")
@@ -38,10 +56,12 @@ public class SceneController {
     }
 
     /**
-     * 新增场景。
+     * 场景。
      *
      * @param projectId 项目 ID
-     * @param body      入参：{name 必填, description, location, background}
+     *
+     * @param body 入参：{name 必填, description, location, background}
+     *
      * @return 新增后的场景视图
      */
     @PostMapping("/projects/{projectId}/scenes")
@@ -53,7 +73,9 @@ public class SceneController {
      * AI 自动填充场景：基于「世界观设定 + 角色档案」生成一批场景（含来源依据）。
      *
      * @param projectId 项目 ID
-     * @param body      入参：{count? 生成数量 1~10，默认 3}
+     *
+     * @param body 入参：{count? 生成数量 1~10，默认 3}
+     *
      * @return 本次新增的场景视图列表
      */
     @PostMapping("/projects/{projectId}/scenes/ai-generate")
@@ -65,8 +87,10 @@ public class SceneController {
     /**
      * 编辑场景。
      *
-     * @param id   场景主键
+     * @param id 场景主键
+     *
      * @param body 入参
+     *
      * @return 更新后的场景视图
      */
     @PutMapping("/scenes/{id}")
@@ -78,6 +102,7 @@ public class SceneController {
      * 删除场景。
      *
      * @param id 场景主键
+     *
      * @return 成功响应
      */
     @DeleteMapping("/scenes/{id}")

@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.project.controller;
 
 import com.holzyn.actor.common.BizException;
@@ -16,10 +34,9 @@ import java.net.URLEncoder;
 import java.util.Map;
 
 /**
- * .holzyn 项目包导入/导出控制器（V2.0 设计文档，导入/导出能力）。
+ * .holzyn 项目包导入/导出控制器。
  * <p>职责：提供项目导出为 .holzyn 包（可选敏感数据 / 可选密码加密）与 .holzyn 包导入还原
  * （幂等检测 + id 映射 + 敏感配置可选解密）。</p>
- * <p>所属模块：controller/project（项目导入导出子域）</p>
  */
 @RestController
 @RequestMapping("/api")
@@ -35,9 +52,12 @@ public class ProjectIoController {
     /**
      * 导出项目为 .holzyn 包（下载）。
      *
-     * @param projectId        项目 ID
+     * @param projectId 项目 ID
+     *
      * @param includeSensitive 是否包含 API 等敏感数据（默认 false）
-     * @param password         密码（可选；提供时对敏感文件做密码加密）
+     *
+     * @param password 密码（可选；提供时对敏感文件做密码加密）
+     *
      * @return .holzyn 二进制流
      */
     @PostMapping("/projects/{projectId}/export")
@@ -60,8 +80,10 @@ public class ProjectIoController {
     /**
      * 导入 .holzyn 包（multipart：file + password?）。
      *
-     * @param file     .holzyn 文件
+     * @param file .holzyn 文件
+     *
      * @param password 密码（包为 password-encrypted 时提供）
+     *
      * @return 导入结果（projectId/统计/敏感状态）
      */
     @PostMapping("/projects/import/holzyn")

@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="project-api-settings">
     <!-- 项目级/用户级 API 配置说明（双模式） -->
@@ -14,7 +27,7 @@
 
 <script setup>
 /**
- * 设置-API 配置（前端布局重构 V1.0，设计文档 §3.10.2；后端项目化改造 V2.0；双模式改造 V1.2）。
+ * 设置-API 配置。
  * <p>职责：项目/全局双模式 AI 模型 API 配置页——列表/新增/编辑/删除/设为默认/连通性测试。
  * 项目模式：归属当前项目（projectId），项目级优先、用户级回退，随 .holzyn 包导入导出；
  * 全局模式（首页顶栏「设置」→ API 配置）：projectId=null，即「用户级默认」（所有项目共享回退）。</p>

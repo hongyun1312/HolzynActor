@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.settings.service;
 
 import com.holzyn.actor.domain.settings.dto.ModelApiDTO;
@@ -5,8 +23,8 @@ import com.holzyn.actor.domain.settings.entity.ModelProvider;
 import com.holzyn.actor.domain.settings.vo.ModelApiVO;
 import com.holzyn.actor.domain.settings.repository.ModelProviderRepository;
 import com.holzyn.actor.ai.AiCallException;
-import com.holzyn.actor.ai.OpenAiCompatibleProvider;
 import com.holzyn.actor.ai.ProviderConfig;
+import com.holzyn.actor.ai.spring.ChatModelProbe;
 import com.holzyn.actor.common.AesCipherService;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -18,17 +36,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 用户级/项目级 AI 模型 API 配置服务（后端项目化改造 V2.0）。
+ * 用户级/项目级 AI 模型 API 配置服务。
  * <p>职责：承载 /api/model-apis 全部业务逻辑——按「用户 + 项目」隔离的增删改查、
  * api_key AES 加密入库/解密供调用、列表脱敏、默认 API 互斥维护、连通性测试，
- * 以及向 AiProviderRouter 提供「运行时凭据解析」（解密 Key）。</p>
- * <p>项目化归属（V2.0）：配置支持两级——项目级（project_id 非空，随 .holzyn 包导入导出）
+ * 以及向 AiSpringChatGateway 提供「运行时凭据解析」（解密 Key）。</p>
+ * <p>项目化归属：配置支持两级——项目级（project_id 非空，随 .holzyn 包导入导出）
  * 与用户级（project_id NULL，作为未配置项目级时的回退默认）。运行时解析规则：
  * 「项目级优先、用户级回退」——先查项目级（project_id=当前项目），未命中再查用户级（project_id IS NULL），
  * 保证旧数据（用户级 API）无需迁移即可继续驱动 AI。</p>
  * <p>安全约束：所有按主键的操作均以 id + userId（+projectId）双重条件定位（防越权）；
  * api_key 明文仅存在于服务端内存（解密后立即使用），永不下发前端。</p>
- * <p>所属模块：service/settings（用户设置子域）</p>
  */
 @Slf4j
 @Service
@@ -40,13 +57,16 @@ public class ModelApiService {
 
     private final ModelProviderRepository repository;
     private final AesCipherService aesCipherService;
-    private final OpenAiCompatibleProvider openAiCompatibleProvider;
+    /** AI 供应商连通性探测 */
+    private final ChatModelProbe chatModelProbe;
 
     /**
      * 查询某归属（用户 + 项目，projectId 空=用户级）的全部 API 列表（脱敏后返回）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=用户级）
+     *
      * @return 脱敏后的 API 视图列表
      */
     public List<ModelApiVO> list(Long userId, Long projectId) {
@@ -56,11 +76,14 @@ public class ModelApiService {
     }
 
     /**
-     * 新增 API 配置。
+     * API 配置。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=用户级）
-     * @param dto       请求体（apiKey 必填）
+     *
+     * @param dto 请求体（apiKey 必填）
+     *
      * @return 新增后的视图对象
      */
     @Transactional
@@ -92,10 +115,14 @@ public class ModelApiService {
     /**
      * 编辑 API 配置（apiKey 传空=保持原 Key 不变）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=用户级）
-     * @param id        配置主键
-     * @param dto       请求体
+     *
+     * @param id 配置主键
+     *
+     * @param dto 请求体
+     *
      * @return 更新后的视图对象
      */
     @Transactional
@@ -130,9 +157,11 @@ public class ModelApiService {
     /**
      * 删除 API 配置（归属校验，返回 404 当不存在或无权限）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=用户级）
-     * @param id        配置主键
+     *
+     * @param id 配置主键
      */
     @Transactional
     public void delete(Long userId, Long projectId, Long id) {
@@ -145,9 +174,12 @@ public class ModelApiService {
     /**
      * 设为默认（同归属内互斥：先清空再置位，事务保证原子性）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=用户级）
-     * @param id        配置主键
+     *
+     * @param id 配置主键
+     *
      * @return 置为默认后的视图对象
      */
     @Transactional
@@ -164,8 +196,10 @@ public class ModelApiService {
     /**
      * 查询某归属的默认 API（未设置时返回 null）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=用户级）
+     *
      * @return 默认 API 视图对象或 null
      */
     public ModelApiVO getDefault(Long userId, Long projectId) {
@@ -179,38 +213,48 @@ public class ModelApiService {
      * 未保存前连通性测试（新增表单内测试：使用用户输入的明文 Key，不入库）。
      *
      * @param dto 请求体（含 baseUrl/apiKey/model）
+     *
      * @return 测试结果 Map
      */
     public Map<String, Object> testConnection(ModelApiDTO dto) {
         if (dto.getApiKey() == null || dto.getApiKey().isBlank()) {
             throw new IllegalArgumentException("请先填写 API Key 再测试连接");
         }
-        return openAiCompatibleProvider.testConnection(dto.getBaseUrl(), dto.getApiKey().trim(), dto.getModel());
+        // 未保存配置（id=null）：ChatModelProbe 直接构建模型探测（不进动态工厂缓存）
+        ProviderConfig config = new ProviderConfig(null, dto.getBaseUrl().trim(),
+                dto.getApiKey().trim(), dto.getModel(), false);
+        return chatModelProbe.testConnection(config);
     }
 
     /**
      * 已保存配置连通性测试（使用解密后的真实 Key）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=用户级）
-     * @param id        配置主键
+     *
+     * @param id 配置主键
+     *
      * @return 测试结果 Map
      */
     public Map<String, Object> testConnection(Long userId, Long projectId, Long id) {
         ProviderConfig config = resolveProviderConfig(userId, projectId, id);
-        return openAiCompatibleProvider.testConnection(config.baseUrl(), config.apiKey(), config.model());
+        return chatModelProbe.testConnection(config);
     }
 
     /**
-     * 解析运行时调用凭据（AiProviderRouter 入口，主 AI 场景：对话/角色卡/行动/事件/群聊）。
+     * 解析运行时调用凭据（AiSpringChatGateway 入口，主 AI 场景：对话/角色卡/行动/事件/群聊）。
      * <p>规则：显式指定 providerId 时先按「用户+项目」定位，未命中再按「用户+用户级」定位（项目可显式使用用户级 API）；
      * 未指定时「项目级优先、用户级回退」——从项目级（project_id=projectId）取默认 chat 用途 →
      * 回退用户级（project_id IS NULL）取默认 → 依次取各自优先级最高且启用的 chat 用途；
      * <b>绝不会选中 embedding 专用供应商</b>（分开配置与使用）。</p>
      *
-     * @param userId     归属用户 ID
-     * @param projectId  项目 ID（NULL=仅用户级）
+     * @param userId 归属用户 ID
+     *
+     * @param projectId 项目 ID（NULL=仅用户级）
+     *
      * @param providerId 配置主键（可空）
+     *
      * @return 含解密 Key 的运行时配置
      */
     public ProviderConfig resolveProviderConfig(Long userId, Long projectId, Long providerId) {
@@ -235,13 +279,15 @@ public class ModelApiService {
     }
 
     /**
-     * 解析该用户启用的 embedding 供应商运行时凭据（P3 RAG，向量化专用）。
+     * 解析该用户启用的 embedding 供应商运行时凭据。
      * <p>规则：仅从「向量化用途（embedding/both）且已填 embedding 模型名」的启用的配置中，
      * 按「项目级优先、用户级回退」取优先级最高；<b>绝不会选中仅主 AI（chat）的供应商</b>。
      * 未配置返回 null（调用方降级文本检索 + 提示）。</p>
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=仅用户级）
+     *
      * @return 含解密 Key 的运行时配置（无则 null）
      */
     public ProviderConfig resolveEmbeddingProvider(Long userId, Long projectId) {
@@ -271,8 +317,10 @@ public class ModelApiService {
      * <p>步骤：① 项目级取默认 chat 用途 → ② 项目级取优先级最高且启用的 chat 用途 →
      * ③ 用户级取默认 chat 用途 → ④ 用户级取优先级最高且启用的 chat 用途。</p>
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=仅用户级）
+     *
      * @return 选中的供应商（无则 null）
      */
     private ModelProvider resolveDefaultForChat(Long userId, Long projectId) {
@@ -313,6 +361,7 @@ public class ModelApiService {
      * （embedding_enabled=1 视为 embedding 专用，不可作主 AI）。</p>
      *
      * @param p 供应商实体
+     *
      * @return true 表示可用作主 AI
      */
     static boolean isChatCapable(ModelProvider p) {
@@ -330,6 +379,7 @@ public class ModelApiService {
      * 旧数据（purpose 空）按 embedding_enabled=1 判定。</p>
      *
      * @param p 供应商实体
+     *
      * @return true 表示可用作 embedding
      */
     static boolean isEmbeddingCapable(ModelProvider p) {
@@ -347,6 +397,7 @@ public class ModelApiService {
      * 归一化用途类型（chat/embedding/both，缺省 chat）。
      *
      * @param purpose 原始用途（可空）
+     *
      * @return 归一化后的用途
      */
     private String normalizePurpose(String purpose) {
@@ -364,6 +415,7 @@ public class ModelApiService {
      * 用途是否为向量化相关（embedding/both）。
      *
      * @param purpose 归一化后的用途
+     *
      * @return true 表示含 embedding 能力
      */
     private boolean isEmbeddingPurpose(String purpose) {
@@ -374,9 +426,12 @@ public class ModelApiService {
      * 按 id+userId+projectId 查询归属实体（不存在或越权时抛出 404）。
      * 先按项目级定位，未命中回退用户级（允许对用户级 API 操作）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID（NULL=用户级）
-     * @param id        主键
+     *
+     * @param id 主键
+     *
      * @return 归属实体
      */
     private ModelProvider requireOwned(Long userId, Long projectId, Long id) {
@@ -389,6 +444,7 @@ public class ModelApiService {
      * 实体转视图对象：api_key 解密后取末 4 位脱敏展示（明文不落 VO）。
      *
      * @param entity 实体
+     *
      * @return 视图对象
      */
     private ModelApiVO toVO(ModelProvider entity) {
@@ -417,6 +473,7 @@ public class ModelApiService {
      * 生成 Key 脱敏串（**** 尾 4 位）。
      *
      * @param plain 明文 Key（可为空）
+     *
      * @return 脱敏串或 null
      */
     private String maskKey(String plain) {

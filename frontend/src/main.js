@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
@@ -12,8 +30,8 @@ import HIcon from '@/shared/components/HIcon.vue'
 // 应用入口：注册 Pinia / 路由 / Element Plus（主题由 design tokens 驱动）+ HarmonyOS 图标组件
 // 说明：登录/鉴权已移除，无 /login 路由；首次启动由本地账户 store 引导首次设置向导。
 // 主题：启动前先应用持久化主题（深浅模式 + 主色），避免闪烁。
-// 图标：2026-08-18 全量更换为华为鸿蒙图标（HIcon 全局组件；Element Plus 图标注册已移除，
-// 所有 el-icon 内部统一用 <HIcon name="..."/> 渲染）。
+// 图标： 全量更换为华为鸿蒙图标（HIcon 全局组件；Element Plus 图标注册已移除，
+// 所有 el-icon 内部统一用 <HIcon name="..."/>渲染）。
 initTheme()
 
 const app = createApp(App)

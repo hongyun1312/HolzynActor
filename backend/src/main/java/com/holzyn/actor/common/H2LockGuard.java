@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.common;
 
 import org.slf4j.Logger;
@@ -11,23 +29,22 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 
 /**
- * H2 数据库文件锁启动守卫（2026-08-18 新增）。
+ * H2 数据库文件锁启动守卫。
  * <p>职责：在 Spring 上下文 / Hibernate 初始化之前，探测本地 H2 文件库是否已被另一个
  * HolzynActor 实例独占（H2 单实例文件锁），命中时输出**清晰中文提示**并退出，
  * 避免抛一屏 H2 原始堆栈（"Database may be already in use" / "The file is locked"）
  * 让用户误以为是代码故障。</p>
  * <p>设计：</p>
  * <ul>
- *   <li>监听 {@link ApplicationEnvironmentPreparedEvent}（环境已就绪、数据源 URL 已解析含环境变量），
- *       仅对 {@code jdbc:h2:file:} 路径探测（本地文件库独占锁；内存库/远程 MySQL 不检查）；</li>
- *   <li>探测方式：用同一 URL 建立一次 JDBC 连接，能连上即未被占用（关闭后放行）；
- *       连不上且错误为「already in use / locked / 90020」→ 判定被另一实例占用 → 中文提示 + System.exit(1)；</li>
- *   <li><b>fail-open</b>：任何其他异常（驱动缺失/路径无效等）一律放行，交由启动流程给出更准确的错误，
- *       绝不阻塞正常启动。</li>
+ * <li>监听 {@link ApplicationEnvironmentPreparedEvent}（环境已就绪、数据源 URL 已解析含环境变量），
+ * 仅对 {@code jdbc:h2:file:} 路径探测（本地文件库独占锁；内存库/远程 MySQL 不检查）；</li>
+ * <li>探测方式：用同一 URL 建立一次 JDBC 连接，能连上即未被占用（关闭后放行）；
+ * 连不上且错误为「already in use / locked / 90020」→ 判定被另一实例占用 → 中文提示 + System.exit(1)；</li>
+ * <li><b>fail-open</b>：任何其他异常（驱动缺失/路径无效等）一律放行，交由启动流程给出更准确的错误，
+ * 绝不阻塞正常启动。</li>
  * </ul>
  * <p>背景：本地 H2 文件库被运行进程独占锁定（OS 级文件锁），两个后端实例无法共用同一份数据；
  * 常见误触发场景为「IntelliJ 与 java -jar / run.bat 同时运行」或「遗留的后台 jar 未退出」。</p>
- * <p>所属模块：common（通用组件）</p>
  */
 public class H2LockGuard implements ApplicationListener<ApplicationEnvironmentPreparedEvent> {
 

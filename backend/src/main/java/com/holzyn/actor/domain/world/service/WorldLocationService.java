@@ -1,10 +1,29 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.world.service;
 
 import com.holzyn.actor.ai.AiChatRequest;
 import com.holzyn.actor.ai.AiChatResult;
-import com.holzyn.actor.ai.AiProviderRouter;
+import com.holzyn.actor.ai.spring.AiSpringChatGateway;
 import com.holzyn.actor.common.BizException;
 import com.holzyn.actor.common.JsonUtil;
+import com.holzyn.actor.domain.debug.service.AiCallContext;
 import com.holzyn.actor.domain.usage.service.UsageLogService;
 import com.holzyn.actor.domain.world.dto.WorldLocationDTO;
 import com.holzyn.actor.domain.world.entity.ActorWorldLocation;
@@ -33,7 +52,6 @@ import java.util.function.Consumer;
  * ② AI 地点提取：从世界观「地理设定」文本识别地点并生成名称/类型/简介/重要度
  * （供新建项目解析流程与「地点详情」手动重新提取复用）。</p>
  * <p>数据来源：geography 文本（AI 提取）+ 手动维护；归属项目级（随 .holzyn 导入导出）。</p>
- * <p>所属模块：domain/world（世界域-地点子域）</p>
  */
 @Slf4j
 @Service
@@ -46,7 +64,7 @@ public class WorldLocationService {
     /** 提取失败最大重试次数 */
     private static final int MAX_RETRY = 2;
 
-    /** 单次提取最大地点数（2026-08-17 提升：适配 50K+ 字详细世界观的批量地点） */
+    /** 单次提取最大地点数（提升：适配 50K+ 字详细世界观的批量地点） */
     private static final int MAX_LOCATIONS = 50;
 
     /** 送入 AI 的地理文本最大长度（字符） */
@@ -59,7 +77,7 @@ public class WorldLocationService {
 
     private final WorldLocationRepository repository;
     private final ActorWorldSettingRepository worldSettingRepository;
-    private final AiProviderRouter aiProviderRouter;
+    private final AiSpringChatGateway aiChatGateway;
     private final UsageLogService usageLogService;
     private final ObjectMapper objectMapper;
 
@@ -67,6 +85,7 @@ public class WorldLocationService {
      * 查询某项目全部地点（排序稳定）。
      *
      * @param projectId 项目 ID
+     *
      * @return 地点视图列表
      */
     public List<WorldLocationVO> list(Long projectId) {
@@ -74,10 +93,12 @@ public class WorldLocationService {
     }
 
     /**
-     * 新增地点。
+     * 地点。
      *
      * @param projectId 项目 ID
-     * @param dto       地点数据（名称必填）
+     *
+     * @param dto 地点数据（名称必填）
+     *
      * @return 新增后的视图
      */
     @Transactional
@@ -86,7 +107,7 @@ public class WorldLocationService {
             throw new BizException(400, "地点名称不能为空");
         }
         ActorWorldLocation entity = toEntity(projectId, dto);
-        // 新增默认排到末尾
+        // 默认排到末尾
         int maxSort = repository.findByProjectId(projectId).stream()
                 .mapToInt(l -> l.getSortOrder() == null ? 0 : l.getSortOrder()).max().orElse(0);
         if (entity.getSortOrder() == null) entity.setSortOrder(maxSort + 1);
@@ -94,11 +115,14 @@ public class WorldLocationService {
     }
 
     /**
-     * 修改地点。
+     * 地点。
      *
      * @param projectId 项目 ID
-     * @param id        地点主键
-     * @param dto       地点数据（名称必填）
+     *
+     * @param id 地点主键
+     *
+     * @param dto 地点数据（名称必填）
+     *
      * @return 更新后的视图
      */
     @Transactional
@@ -119,7 +143,8 @@ public class WorldLocationService {
      * 删除地点。
      *
      * @param projectId 项目 ID
-     * @param id        地点主键
+     *
+     * @param id 地点主键
      */
     @Transactional
     public void delete(Long projectId, Long id) {
@@ -132,7 +157,9 @@ public class WorldLocationService {
      * <p>前端「修改」进入编辑后，本地维护增删改，点保存时提交全量列表（排序=数组顺序）。</p>
      *
      * @param projectId 项目 ID
-     * @param items     全量地点列表（含新增/修改/删除后的最终态）
+     *
+     * @param items 全量地点列表（含新增/修改/删除后的最终态）
+     *
      * @return 保存后的全部地点视图
      */
     @Transactional
@@ -155,10 +182,12 @@ public class WorldLocationService {
 
     /**
      * 从地理文本 AI 提取地点（不落库，供解析流程/预览使用）。
-     * <p>2026-08-17 补充日志：任务开始 + 每条地点提取成功各输出一行，便于观察进度与排查。</p>
+     * <p>充日志：任务开始 + 每条地点提取成功各输出一行，便于观察进度与排查。</p>
      *
-     * @param userId    归属用户 ID（AI 用量归属）
+     * @param userId 归属用户 ID（AI 用量归属）
+     *
      * @param geography 世界观「地理设定」文本
+     *
      * @return 地点列表（已清洗：去重/截断/重要度归一）
      */
     public List<WorldLocationDTO> extractFromGeography(Long userId, String geography) {
@@ -174,7 +203,8 @@ public class WorldLocationService {
                 AiChatRequest req = new AiChatRequest(null, List.of(
                         new AiChatRequest.ChatMessage("system", "你只输出严格的 JSON，不输出任何其他文字。"),
                         new AiChatRequest.ChatMessage("user", prompt)), 0.2, EXTRACT_MAX_TOKENS, true);
-                AiChatResult result = aiProviderRouter.chatCompletion(userId, null, null, req);
+                AiChatResult result = AiCallContext.run("location_extract", null, () ->
+                        aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "location_extract",
                         result.promptTokens(), result.completionTokens(),
                         result.cacheHitTokens(), result.cacheMissTokens(),
@@ -209,8 +239,10 @@ public class WorldLocationService {
      * AI 重新提取并合并（世界详情「地点详情」手动提取按钮）：
      * 基于已存地理文本提取新地点，仅追加「名称不存在」的地点，不删除手动维护的数据。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目 ID
+     *
      * @return 合并后的全部地点
      */
     @Transactional
@@ -250,9 +282,11 @@ public class WorldLocationService {
      * 基于已存地理文本，流式调用 AI 并<b>逐条回调</b>每条已提取地点（后端逐条日志 + 前端逐条显示），
      * 完成后与现有地点按名称去重合并入库。
      *
-     * @param userId    归属用户 ID（AI 用量归属）
+     * @param userId 归属用户 ID（AI 用量归属）
+     *
      * @param projectId 项目 ID
-     * @param progress  进度回调（可为 null）：onStart / onLocation(每条) / onDone(新增数, 提取总数)
+     *
+     * @param progress 进度回调（可为 null）：onStart / onLocation(每条) / onDone(新增数, 提取总数)
      */
     public void extractAndMergeStream(Long userId, Long projectId, LocationProgress progress) {
         String geography = worldSettingRepository.findTopByProjectIdOrderByVersionDesc(projectId)
@@ -297,9 +331,12 @@ public class WorldLocationService {
      * 通过 {@link IncrementalJsonArrayParser} 识别<b>完整的地点对象</b>并逐条回调 + 逐条日志，
      * 实现「生成一条就输出一条」；结束后以完整流式文本权威重解析兜底（补全可能遗漏的元素）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param geography 世界观「地理设定」文本
-     * @param progress  进度回调（可为 null）
+     *
+     * @param progress 进度回调（可为 null）
+     *
      * @return 提取的地点列表（已去重）
      */
     public List<WorldLocationDTO> extractStream(Long userId, String geography, LocationProgress progress) {
@@ -338,17 +375,20 @@ public class WorldLocationService {
                         log.warn("[地点提取] 流式元素解析跳过：{}", ex.getMessage());
                     }
                 });
-                aiProviderRouter.chatCompletionStream(userId, null, null, req,
-                        delta -> {
-                            fullText.append(delta);
-                            parser.feed(delta);
-                        },
-                        usage -> {
-                            tokens[0] = usage.promptTokens();
-                            tokens[1] = usage.completionTokens();
-                            tokens[2] = usage.cacheHitTokens();
-                            tokens[3] = usage.cacheMissTokens();
-                        });
+                AiCallContext.run("location_extract", null, () -> {
+                    aiChatGateway.chatCompletionStream(userId, null, null, req,
+                            delta -> {
+                                fullText.append(delta);
+                                parser.feed(delta);
+                            },
+                            usage -> {
+                                tokens[0] = usage.promptTokens();
+                                tokens[1] = usage.completionTokens();
+                                tokens[2] = usage.cacheHitTokens();
+                                tokens[3] = usage.cacheMissTokens();
+                            });
+                    return null;
+                });
                 usageLogService.record(userId, null, null, null, null, "location_extract",
                         tokens[0], tokens[1], tokens[2], tokens[3],
                         (int) (System.currentTimeMillis() - start));
@@ -398,7 +438,8 @@ public class WorldLocationService {
         /**
          * 全部完成。
          *
-         * @param added   本次新增（入库）地点数
+         * @param added 本次新增（入库）地点数
+         *
          * @param extracted 本次提取地点总数
          */
         default void onDone(int added, int extracted) {
@@ -516,6 +557,7 @@ public class WorldLocationService {
      * 解析单个地点对象文本（流式增量元素的容错解析）。
      *
      * @param raw 单个 JSON 对象文本（如 {"name":...,"type":...,"intro":...,"importance":3}）
+     *
      * @return 清洗后的地点 DTO；文本非法或名称缺失时返回 null
      */
     private WorldLocationDTO parseLocationObject(String raw) {
@@ -565,6 +607,7 @@ public class WorldLocationService {
      * 解析 AI 输出为地点列表（增强容错：剥离说明/代码块、清洗尾部逗号、跳过空名、去重）。
      *
      * @param content 模型输出文本
+     *
      * @return 地点列表（≤30）
      */
     private List<WorldLocationDTO> parseLocationText(String content) {

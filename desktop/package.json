@@ -1,0 +1,63 @@
+{
+  "name": "holzynactor-desktop",
+  "productName": "HolzynActor",
+  "version": "1.0.0-beta.1",
+  "description": "HolzynActor 全境众生 · 浮生 —— AI 世界模拟引擎桌面端（Electron 壳 + Spring Boot 后端 sidecar + 内置裁剪 JRE）",
+  "main": "main.js",
+  "author": "HONGYUN",
+  "license": "Apache-2.0",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:backend": "call ..\\build.bat",
+    "pack": "electron-builder --win nsis",
+    "pack:portable": "electron-builder --win portable",
+    "pack:dir": "electron-builder --win dir"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.holzyn.actor",
+    "productName": "HolzynActor",
+    "copyright": "Copyright (c) 2026 HONGYUN",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/target/holzyn-actor-1.0.0-beta.1.jar",
+        "to": "backend/holzyn-actor.jar"
+      },
+      {
+        "from": "../packaging/runtime",
+        "to": "runtime"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HolzynActor",
+      "artifactName": "HolzynActor-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "HolzynActor-Portable-${version}.exe"
+    }
+  }
+}

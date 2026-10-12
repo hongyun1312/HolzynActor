@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.account.service;
 
 import com.holzyn.actor.domain.account.entity.LocalAccount;
@@ -13,7 +31,6 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>职责：本地账户的读取/首次创建/更新/完成向导标记；对外提供 VO 转换与
  * 「NPC 个性化档案渲染文本」（供对话功能域注入 NPC 上下文使用）。</p>
  * <p>设计说明：本地单用户恒 userId=1；所有字段选填；onboarded 标记首次向导完成状态。</p>
- * <p>所属模块：domain/account/service（本地账户功能域-服务层）</p>
  */
 @Slf4j
 @Service
@@ -54,6 +71,7 @@ public class LocalAccountService {
      * 保存/更新本地账户（upsert：不存在则创建，存在则整体覆盖；空字段保留原值或清空由前端决定）。
      *
      * @param vo 本地账户请求内容（userId 字段忽略，恒写 1）
+     *
      * @return 保存后的 VO
      */
     @Transactional
@@ -69,6 +87,23 @@ public class LocalAccountService {
         if (vo.getTaboos() != null) account.setTaboos(vo.getTaboos());
         if (vo.getProfileText() != null) account.setProfileText(vo.getProfileText());
         if (vo.getOnboarded() != null) account.setOnboarded(vo.getOnboarded());
+        // lastProjectId 不随通用保存覆盖（专用端点 setLastProject 维护，避免设置页误清空）
+        return toVO(localAccountRepository.save(account));
+    }
+
+    /**
+     * 记录「上次所在项目」（世界沙盘 S1：应用启动直达上次项目）。
+     * <p>语义：进入项目时写入；只写不清（用户选择「始终回上次项目」）——
+     * 返回画廊不清空，下次启动仍回上次项目（项目已删时由前端回退画廊）。</p>
+     *
+     * @param projectId 项目 ID（null 视为清空——预留，当前只写不清）
+     *
+     * @return 更新后的 VO
+     */
+    @Transactional
+    public LocalAccountVO setLastProject(Long projectId) {
+        LocalAccount account = getOrCreate();
+        account.setLastProjectId(projectId);
         return toVO(localAccountRepository.save(account));
     }
 
@@ -120,6 +155,7 @@ public class LocalAccountService {
      * 实体转 VO。
      *
      * @param account 本地账户实体
+     *
      * @return 视图对象
      */
     public LocalAccountVO toVO(LocalAccount account) {
@@ -136,6 +172,7 @@ public class LocalAccountService {
         vo.setTaboos(account.getTaboos());
         vo.setProfileText(account.getProfileText());
         vo.setOnboarded(account.getOnboarded());
+        vo.setLastProjectId(account.getLastProjectId());
         vo.setCreatedAt(account.getCreatedAt());
         vo.setUpdatedAt(account.getUpdatedAt());
         return vo;

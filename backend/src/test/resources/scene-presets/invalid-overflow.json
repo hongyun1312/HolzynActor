@@ -1,0 +1,5 @@
+{
+  "name": "无效预设-摆放越界",
+  "scene": { "templateCode": "village", "styleCode": "hills", "size": 500 },
+  "placements": [ { "assetId": "building_inn_01", "posX": 600, "posZ": 50 } ]
+}

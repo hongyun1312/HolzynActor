@@ -1,7 +1,26 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.crowd.controller;
 
 import com.holzyn.actor.common.PageResult;
 import com.holzyn.actor.common.R;
+import com.holzyn.actor.common.sse.SseLifecycle;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
 import com.holzyn.actor.domain.crowd.dto.OrdinaryNpcDTO;
 import com.holzyn.actor.domain.crowd.dto.OrdinaryNpcGenerateDTO;
@@ -30,13 +49,18 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 普通型 NPC 控制器（2026-08-19 分类体系重构后的接口全集）。
+ * 普通型 NPC 控制器（分类体系重构后的接口全集）。
  * <p>职责：提供普通型 NPC 的单表 CRUD / 多字段筛选排序分页 / 统计、
  * 标准字段数据（字段字典：AI 依据世界观拟定种族[含次级种族]/归属/职业 + 主次分类字段，预览确认 +
  * 手动增删）、AI 分批生成（SSE 逐条，从字段字典/地点选取）、预览确认批量入库、
  * 两级 AI 调度（项目级按主/次分类字段分组 + 归属下发指令 → 归属级合并执行）/ 程序化调度 /
  * 环境摘要 / 定时调度开关。归属以当前登录用户为准（服务层校验）。</p>
- * <p>所属模块：controller/crowd（普通型人群子域）</p>
+ * <p><b>口径</b>：普通型 NPC = 统一主表 {@code actor_profile} 中 {@code type='common'} 的行
+ * （历史 {@code actor_profile_ordinary} 与角色卡表已物理废弃）。列表/详情响应里的
+ * {@code state}/{@code lastAction} 由服务层从 {@code actor_state}（{@code NpcActivityStateService}）
+ * 批量回填后下发，<b>不是</b>档案列——前端只读展示，不提供直改运行态的入口
+ * （运行态只由状态机/状态模块写入）。归属级 AI 调度的成员输入已升级为 11 维档案分片
+ * （场景 {@code npc_crowd_decision}），无档案时回退扁平字段。</p>
  */
 @Slf4j
 @RestController
@@ -46,26 +70,40 @@ public class CrowdController {
 
     private final OrdinaryNpcService ordinaryNpcService;
     private final CurrentUserProvider currentUserProvider;
+    /** SSE 生命周期统一工具（：统一超时/清理/事件名） */
+    private final com.holzyn.actor.common.sse.SseLifecycle sseLifecycle;
 
     // ==================== 普通型 NPC CRUD / 筛选 ====================
 
     /**
      * 分页查询普通型 NPC（多字段筛选 + 关键词 + 年龄区间 + 排序）。
      *
-     * @param projectId   项目 ID
-     * @param gender      性别（可空）
-     * @param race        种族（可空）
-     * @param subRace     次级种族（可空）
+     * @param projectId 项目 ID
+     *
+     * @param gender 性别（可空）
+     *
+     * @param race 种族（可空）
+     *
+     * @param subRace 次级种族（可空）
+     *
      * @param affiliation 归属（可空）
-     * @param occupation  职业（可空）
-     * @param location    当前所在地（可空）
-     * @param keyword     关键词（可空）
-     * @param ageMin      年龄下限（可空）
-     * @param ageMax      年龄上限（可空）
-     * @param sortBy      排序字段（id/name/age/race/subRace/affiliation/occupation/location）
-     * @param sortDir     asc/desc
-     * @param page        页码（默认 1）
-     * @param size        每页条数（默认 20）
+     *
+     * @param occupation 职业（可空）
+     *
+     * @param location 当前所在地（可空）
+     *
+     * @param keyword 关键词（可空）
+     *
+     * @param ageMin 年龄下限（可空）
+     *
+     * @param ageMax 年龄上限（可空）
+     *
+     * @param sortBy 排序字段（id/name/age/race/subRace/affiliation/occupation/location）
+     *
+     * @param page 页码（默认 1）
+     *
+     * @param size 每页条数（默认 20）
+     *
      * @return 分页结果
      */
     @GetMapping("/projects/{projectId}/ordinary-npcs")
@@ -92,7 +130,9 @@ public class CrowdController {
      * 手动新增单个普通型 NPC。
      *
      * @param projectId 项目 ID
-     * @param dto       档案入参（名称必填）
+     *
+     * @param dto 档案入参（名称必填）
+     *
      * @return 新增后的 VO
      */
     @PostMapping("/projects/{projectId}/ordinary-npcs")
@@ -102,10 +142,12 @@ public class CrowdController {
     }
 
     /**
-     * 修改普通型 NPC。
+     * 普通型 NPC。
      *
-     * @param id  主键
+     * @param id 主键
+     *
      * @param dto 档案入参
+     *
      * @return 更新后的 VO
      */
     @PutMapping("/ordinary-npcs/{id}")
@@ -117,6 +159,7 @@ public class CrowdController {
      * 删除单个普通型 NPC。
      *
      * @param id 主键
+     *
      * @return 删除确认
      */
     @DeleteMapping("/ordinary-npcs/{id}")
@@ -129,7 +172,9 @@ public class CrowdController {
      * 批量删除普通型 NPC。
      *
      * @param projectId 项目 ID
-     * @param body      主键列表 {ids: [...]}
+     *
+     * @param body 主键列表 {ids: [...]}
+     *
      * @return {deleted 实际删除数}
      */
     @PostMapping("/projects/{projectId}/ordinary-npcs/batch-delete")
@@ -144,6 +189,7 @@ public class CrowdController {
      * 统计（总数/主次分类字段分布/归属分布）。
      *
      * @param projectId 项目 ID
+     *
      * @return 统计 Map
      */
     @GetMapping("/projects/{projectId}/ordinary-npcs/stats")
@@ -157,7 +203,6 @@ public class CrowdController {
      * 查询项目字段字典（按字段分组：race/affiliation/occupation，含出处）。
      *
      * @param projectId 项目 ID
-     * @return { race: [...], affiliation: [...], occupation: [...] }
      */
     @GetMapping("/projects/{projectId}/ordinary-npcs/field-dict")
     public R<Map<String, List<FieldDictVO>>> fieldDict(@PathVariable("projectId") Long projectId) {
@@ -168,6 +213,7 @@ public class CrowdController {
      * AI 依据世界观一次性拟定全部字段字典 + 选出主/次分类字段（不落库，供预览确认）。
      *
      * @param projectId 项目 ID
+     *
      * @return 拟定预览（fields + classification）
      */
     @PostMapping("/projects/{projectId}/ordinary-npcs/field-dict/generate")
@@ -179,7 +225,9 @@ public class CrowdController {
      * 保存字段字典（预览确认后整体替换）+ 保存主/次分类字段。
      *
      * @param projectId 项目 ID
-     * @param preview   确认后的预览
+     *
+     * @param preview 确认后的预览
+     *
      * @return 保存后的字段字典分组
      */
     @PostMapping("/projects/{projectId}/ordinary-npcs/field-dict")
@@ -192,7 +240,9 @@ public class CrowdController {
      * 手动新增一条字段字典。
      *
      * @param projectId 项目 ID
-     * @param entry     条目（field/level1/level2/source）
+     *
+     * @param entry 条目（field/level1/level2/source）
+     *
      * @return 新增后的条目
      */
     @PostMapping("/projects/{projectId}/ordinary-npcs/field-dict/entry")
@@ -205,9 +255,13 @@ public class CrowdController {
      * 手动删除一条字段字典（race 二级删除需传 level2；其余字段 level2 传空或 undefined）。
      *
      * @param projectId 项目 ID
-     * @param field     字段名（race/affiliation/occupation，URL 编码）
-     * @param l1        一级值（URL 编码）
-     * @param l2        二级值（可空，URL 编码）
+     *
+     * @param field 字段名（race/affiliation/occupation，URL 编码）
+     *
+     * @param l1 一级值（URL 编码）
+     *
+     * @param l2 二级值（可空，URL 编码）
+     *
      * @return 删除确认
      */
     @DeleteMapping("/projects/{projectId}/ordinary-npcs/field-dict/{field}/{l1}/{l2}")
@@ -228,13 +282,15 @@ public class CrowdController {
      * 生成结果仅作预览，确认后走 batch-save 入库。
      *
      * @param projectId 项目 ID
-     * @param dto       生成入参（count 1~500）
+     *
+     * @param dto 生成入参（count 1~500）
+     *
      * @return SSE 事件流（text/event-stream）
      */
     @PostMapping(value = "/projects/{projectId}/ordinary-npcs/generate/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter generateStream(@PathVariable("projectId") Long projectId,
                                      @RequestBody(required = false) OrdinaryNpcGenerateDTO dto) {
-        SseEmitter emitter = new SseEmitter(0L);
+        SseEmitter emitter = sseLifecycle.create(0L, 0L, null);
         int count = dto == null || dto.count() == null ? 0 : dto.count();
         OrdinaryNpcService.GenerateProgress progress = new OrdinaryNpcService.GenerateProgress() {
             @Override
@@ -250,28 +306,28 @@ public class CrowdController {
             @Override
             public void onDone(int total, int generated, int failedBatches) {
                 send("done", Map.of("total", total, "generated", generated, "failedBatches", failedBatches));
-                emitter.complete();
+                try {
+                    emitter.complete();
+                } catch (Exception ignored) {
+                    // 已完成/断开，忽略
+                }
             }
 
-            /** 发送 SSE 事件（连接已断开时静默） */
+            /** 发送 SSE 事件（统一工具；连接已断开时静默） */
             private void send(String name, Object data) {
-                try {
-                    emitter.send(SseEmitter.event().name(name).data(data));
-                } catch (Exception ignored) {
-                    // 前端已断开时忽略推送失败
-                }
+                sseLifecycle.send(emitter, name, data);
             }
         };
         try {
             ordinaryNpcService.generateStream(projectId, count, progress);
         } catch (Exception e) {
+            sseLifecycle.send(emitter, SseLifecycle.EVENT_ERROR,
+                    Map.of("message", e.getMessage() == null ? "居民生成失败" : e.getMessage()));
             try {
-                emitter.send(SseEmitter.event().name("error")
-                        .data(Map.of("message", e.getMessage() == null ? "居民生成失败" : e.getMessage())));
+                emitter.complete();
             } catch (Exception ignored) {
                 // 连接已断开
             }
-            emitter.complete();
         }
         return emitter;
     }
@@ -280,7 +336,9 @@ public class CrowdController {
      * 批量入库（AI 生成预览确认后保存选中的草稿）。
      *
      * @param projectId 项目 ID
-     * @param items     确认后的居民档案列表
+     *
+     * @param items 确认后的居民档案列表
+     *
      * @return {saved 实际入库数, total 提交条数}
      */
     @PostMapping("/projects/{projectId}/ordinary-npcs/batch-save")
@@ -296,6 +354,7 @@ public class CrowdController {
      * 程序化状态机调度（手动触发，零 AI 成本；定时任务同路径）。
      *
      * @param projectId 项目 ID
+     *
      * @return 调度结果 Map（mode/hour/states/summary）
      */
     @PostMapping("/projects/{projectId}/ordinary-npcs/schedule")
@@ -308,6 +367,7 @@ public class CrowdController {
      * 归属级合并归属指令 + 相关主分类分组指令逐人输出状态/行动；单归属失败降级程序化。
      *
      * @param projectId 项目 ID
+     *
      * @return 调度结果 Map（mode/summary/hour/updated/affiliations/primaryGroups）
      */
     @PostMapping("/projects/{projectId}/ordinary-npcs/schedule-ai")
@@ -319,7 +379,6 @@ public class CrowdController {
      * 环境摘要（对话/行动注入背景板）。
      *
      * @param projectId 项目 ID
-     * @return {projectId, summary, total, hasSnapshot}
      */
     @GetMapping("/projects/{projectId}/ordinary-npcs/env-summary")
     public R<Map<String, Object>> envSummary(@PathVariable("projectId") Long projectId) {
@@ -330,7 +389,6 @@ public class CrowdController {
      * 项目级调度运行时信息（定时开关/主次分类字段/上次调度/环境快照）。
      *
      * @param projectId 项目 ID
-     * @return {enabled, primaryField, secondaryField, lastScheduleAt, latestSummary}
      */
     @GetMapping("/projects/{projectId}/ordinary-npcs/runtime")
     public R<Map<String, Object>> runtime(@PathVariable("projectId") Long projectId) {
@@ -341,7 +399,9 @@ public class CrowdController {
      * 项目级定时调度开关（定时任务每 5 分钟程序化推进启用项目）。
      *
      * @param projectId 项目 ID
-     * @param body      开关 {enabled: true/false}
+     *
+     * @param body 开关 {enabled: true/false}
+     *
      * @return 更新后的运行时信息
      */
     @PutMapping("/projects/{projectId}/ordinary-npcs/schedule-enabled")

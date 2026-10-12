@@ -1,0 +1,988 @@
+# ============================================================
+# HolzynActor 功能业务配置（application-actor.yml）
+# 用途：世界运行功能模块参数 —— 智能体运行时 / 感知 / 记忆 / 世界引擎（含屏障与前瞻预热）/
+#      成长与生命 / Unity 对接 / 行为质量评估 / 世界帧 / 时间季节 / 项目记忆 / 信息扩散 /
+#      宏观演化 / 沙盘 / 学习 / NPC 状态 / 实时决策 / 群聊 / 社交聚集 / 调度 / 世界观生成。
+# 加载：由 application.yml（系统底层主文件）顶部 spring.config.import 引入；键与主文件互斥不重复。
+# ============================================================
+
+holzyn:
+  actor:
+    # ---- 智能体运行时（AgentRuntime 决策循环）----
+    agent:
+      # AgentRuntime 总开关（false=trigger 直接跳过不执行管线）
+      enabled: ${HOLOZYN_ACTOR_AGENT_ENABLED:true}
+      # 每决策循环 AI 预算缺省值（与 WorldEngine max-ai-calls 同源）
+      budget-per-tick: ${HOLOZYN_ACTOR_AGENT_BUDGET_PER_TICK:5}
+      # 决策防重入粒度：true=按「项目|角色」隔离（同角色不并发、不同角色可并发）；
+      # false=全局单标志（一个角色的 AI 调用会挡住其余角色，仅回退用）
+      reentrancy-per-character: ${HOLOZYN_ACTOR_AGENT_REENTRANCY_PER_CHARACTER:true}
+      # 世界事件总线：事件发布总开关（false=行动/人群/注入不再写 actor_event；演化归档/手动事件仍直写）
+      events-enabled: ${HOLOZYN_ACTOR_AGENT_EVENTS_ENABLED:true}
+      # 事件滚动保护：每项目最多保留的事件条数（防无人值守逐时事件膨胀 H2；0=不限制）
+      events-max-per-project: ${HOLOZYN_ACTOR_AGENT_EVENTS_MAX_PER_PROJECT:5000}
+    # 感知上下文：对话/决策注入【当前所见】感知段
+    perception:
+      enabled: ${HOLOZYN_ACTOR_PERCEPTION_ENABLED:true}
+      # 感知注入【当前目标】/【今日计划】段
+      goals-enabled: ${HOLOZYN_ACTOR_PERCEPTION_GOALS_ENABLED:true}
+      # 感知附带情境知识片段（决策不违反世界规则；检索消耗 scene=embedding 用量）
+      knowledge-enabled: ${HOLOZYN_ACTOR_PERCEPTION_KNOWLEDGE_ENABLED:true}
+    # 对话/事件后自动评估行动总开关（成本控制；false 仅手动 + scheduled 触发）
+    action:
+      auto-evaluate: ${HOLOZYN_ACTOR_ACTION_AUTO_EVALUATE:true}
+    # 知识库 RAG 总开关（true=对话自动检索注入知识片段 + 人群环境摘要）
+    rag:
+      enabled: ${HOLOZYN_ACTOR_RAG_ENABLED:true}
+    # 知识库检索结果缓存（角色没换地点/活动时 query 逐游戏小时重复，缓存避免重复向量化+检索；
+    # 只读检索非决策；知识文档写入/删除时显式失效）
+    knowledge:
+      # 检索结果缓存开关
+      query-cache-enabled: ${HOLOZYN_ACTOR_KNOWLEDGE_QUERY_CACHE_ENABLED:true}
+      # 缓存容量上限（超限整体清空——条目极小、重建便宜）
+      query-cache-max: ${HOLOZYN_ACTOR_KNOWLEDGE_QUERY_CACHE_MAX:2000}
+      # 缓存有效期（毫秒；知识写入/删除另有显式失效，此处只兜底漏失效）
+      query-cache-ttl-ms: ${HOLOZYN_ACTOR_KNOWLEDGE_QUERY_CACHE_TTL_MS:300000}
+    # ---- 记忆系统（长期记忆 L2 / 工作记忆 L1 / 核心记忆 L3 / 归档 / 注入 / 巩固 / 模糊 / 蒸馏 / 向量 / 路由）----
+    memory:
+      # 长期记忆总开关（true=每轮回复后 AI 抽取关键事实/摘要写入并注入）
+      enabled: ${HOLOZYN_ACTOR_MEMORY_ENABLED:true}
+      # 记忆注入 top-K：每轮注入的角色级事实记忆条数（重要度 desc + 较新优先）
+      top-k: ${HOLOZYN_ACTOR_MEMORY_TOP_K:8}
+      # 记忆注入 top-K：每轮注入的项目级记忆条数（世界大事记，所有角色可见）
+      project-top-k: ${HOLOZYN_ACTOR_MEMORY_PROJECT_TOP_K:4}
+      # 记忆预算：每角色/项目记忆条数上限，超限按「重要度×新旧」滚动淘汰低价值记忆
+      budget: ${HOLOZYN_ACTOR_MEMORY_BUDGET:50}
+      # 会话摘要生成间隔：每 N 轮生成一条 summary 记忆（上下文压缩承接）
+      summary-interval: ${HOLOZYN_ACTOR_MEMORY_SUMMARY_INTERVAL:10}
+      # 去重阈值：新事实与已有记忆文本重叠度高于该值则判定重复丢弃
+      dedup-threshold: ${HOLOZYN_ACTOR_MEMORY_DEDUP_THRESHOLD:0.6}
+      # 记忆门控：寒暄/无实质信息的轮次跳过提取（连 AI 都不调用，省 token）
+      gate:
+        # 门控总开关
+        enabled: ${HOLOZYN_ACTOR_MEMORY_GATE_ENABLED:true}
+        # 单聊寒暄最大字符数：最新用户消息含寒暄词且长度 ≤ 该值 → 视为寒暄跳过
+        greeting-max-len: ${HOLOZYN_ACTOR_MEMORY_GATE_GREETING_MAX_LEN:20}
+        # 群聊寒暄最大字符数（群聊更容易产生实质信息，阈值更宽松）
+        group-greeting-max-len: ${HOLOZYN_ACTOR_MEMORY_GATE_GROUP_GREETING_MAX_LEN:8}
+        # AI 复核开关（启发式通过后再让 AI 判断一次是否有值得记住的事实）
+        ai-review: ${HOLOZYN_ACTOR_MEMORY_GATE_AI_REVIEW:false}
+      # 会话结束懒检查阈值（真实分钟）：距上条消息超过该值视为上次会话已结束，
+      # 下次对话开始前异步补提一次完整记忆
+      session-timeout-minutes: ${HOLOZYN_ACTOR_MEMORY_SESSION_TIMEOUT_MINUTES:30}
+      # 事件→记忆沉淀（事件带当事人写经历记忆 + 重大世界事件写项目级大事记）
+      record-events: ${HOLOZYN_ACTOR_MEMORY_RECORD_EVENTS:true}
+      # 行动记忆沉淀阈值（行动重要度=决策 urgency 1-5，≥ 该值写 observation 经历记忆）
+      action-importance-threshold: ${HOLOZYN_ACTOR_MEMORY_ACTION_IMPORTANCE_THRESHOLD:4}
+      # 事件经历记忆写入阈值（事件重要度≥该值才为在场当事人写经历）
+      event-importance-threshold: ${HOLOZYN_ACTOR_MEMORY_EVENT_IMPORTANCE_THRESHOLD:2}
+      # 项目级大事记写入阈值（重大世界事件重要度≥该值才写【世界大事记】）
+      project-event-importance-threshold: ${HOLOZYN_ACTOR_MEMORY_PROJECT_EVENT_IMPORTANCE_THRESHOLD:4}
+      # 检索默认 top-K（AgentMemoryService.retrieve 未显式传参时使用）
+      retrieval-top-k: ${HOLOZYN_ACTOR_MEMORY_RETRIEVAL_TOP_K:8}
+      # recency 指数衰减半程（小时：N 小时前的记忆衰减到 e^-1≈0.37）
+      recency-decay-hours: ${HOLOZYN_ACTOR_MEMORY_RECENCY_DECAY_HOURS:24}
+      # 记忆 staleness：高重要事实标记「可能过时」（重要度阈值 + 超期游戏日判定）
+      stale-importance-threshold: ${HOLOZYN_ACTOR_MEMORY_STALE_IMPORTANCE_THRESHOLD:3}
+      stale-after-game-days: ${HOLOZYN_ACTOR_MEMORY_STALE_AFTER_GAME_DAYS:3}
+      # 工作记忆（L1：draft/task/context/perception 写入 + 会话热缓冲注入 + 结束双缓冲巩固进 L2 + TTL 清理）
+      working:
+        # L1 工作记忆总开关（false=不写/不注入/不巩固/不清理 L1，行为回到直写 L2）
+        enabled: ${HOLOZYN_ACTOR_MEMORY_WORKING_ENABLED:true}
+        # 工作项 TTL（小时；远大于会话超时，保证会话结束巩固前不提前过期）
+        ttl-hours: ${HOLOZYN_ACTOR_MEMORY_WORKING_TTL_HOURS:48}
+        # 会话热缓冲注入条数上限
+        hot-top-k: ${HOLOZYN_ACTOR_MEMORY_WORKING_HOT_TOP_K:5}
+        # task/context/perception 提升进 L2 的重要度阈值（低于该值直接过期）
+        promote-importance-threshold: ${HOLOZYN_ACTOR_MEMORY_WORKING_PROMOTE_IMPORTANCE_THRESHOLD:3}
+        # 每角色 active task 上限（超限淘汰最旧 task，工作项有界防膨胀）
+        max-task-active: ${HOLOZYN_ACTOR_MEMORY_WORKING_MAX_TASK_ACTIVE:3}
+        # 感知快照/情境知识上下文工作项写入开关（false=感知不写 L1，仅注入已有工作项）
+        perception-enabled: ${HOLOZYN_ACTOR_MEMORY_WORKING_PERCEPTION_ENABLED:true}
+        # 定时维护开关（TTL 清理 + 巩固扫描）
+        maintenance-enabled: ${HOLOZYN_ACTOR_MEMORY_WORKING_MAINTENANCE_ENABLED:true}
+        # 定时维护间隔（毫秒）
+        maintenance-interval-ms: ${HOLOZYN_ACTOR_MEMORY_WORKING_MAINTENANCE_INTERVAL_MS:1800000}
+        # 巩固扫描超龄阈值（真实分钟：active 超该值未巩固即由扫描提升/过期）
+        sweep-min-age-minutes: ${HOLOZYN_ACTOR_MEMORY_WORKING_SWEEP_MIN_AGE_MINUTES:120}
+        # 已终结（consolidated/expired）工作项物理清理保留期（天）
+        retain-days: ${HOLOZYN_ACTOR_MEMORY_WORKING_RETAIN_DAYS:7}
+        # 去重阈值（与记忆 dedup-threshold 同口径，Dice 二元组）
+        dedup-threshold: ${HOLOZYN_ACTOR_MEMORY_WORKING_DEDUP_THRESHOLD:0.6}
+      # 核心记忆（L3：静态基线组合渲染 + 核心块 CRUD + core_memory_update 自编辑 + 恒在上下文注入）
+      core:
+        # L3 核心记忆总开关
+        enabled: ${HOLOZYN_ACTOR_MEMORY_CORE_ENABLED:true}
+        # 每角色核心块上限
+        max-blocks-per-character: ${HOLOZYN_ACTOR_MEMORY_CORE_MAX_BLOCKS_PER_CHARACTER:8}
+        # 每块内容上限（字）
+        max-chars-per-block: ${HOLOZYN_ACTOR_MEMORY_CORE_MAX_CHARS_PER_BLOCK:400}
+        # 恒在注入块数上限
+        inject-top-k: ${HOLOZYN_ACTOR_MEMORY_CORE_INJECT_TOP_K:8}
+        # 恒在注入字符预算
+        inject-token-budget: ${HOLOZYN_ACTOR_MEMORY_CORE_INJECT_TOKEN_BUDGET:800}
+        # agent 自编辑总开关（对话/反思挂钩；false=仅用户手动 CRUD）
+        self-edit-enabled: ${HOLOZYN_ACTOR_MEMORY_CORE_SELF_EDIT_ENABLED:true}
+        # 自编辑 AI 最大输出 token
+        self-edit-max-tokens: ${HOLOZYN_ACTOR_MEMORY_CORE_SELF_EDIT_MAX_TOKENS:1024}
+        # 基线渲染：active 目标 top-N
+        baseline-goal-top-n: ${HOLOZYN_ACTOR_MEMORY_CORE_BASELINE_GOAL_TOP_N:3}
+        # 基线渲染：关键关系 top-N
+        baseline-relation-top-n: ${HOLOZYN_ACTOR_MEMORY_CORE_BASELINE_RELATION_TOP_N:5}
+        # 普通 NPC（crowd）轻量基线开关（false=普通 NPC 不渲染基线）
+        baseline-crowd-enabled: ${HOLOZYN_ACTOR_MEMORY_CORE_BASELINE_CROWD_ENABLED:true}
+      # 归档（触发[age/superseded/downgraded/evicted/manual] + 版本链 + 还原 + 保留策略；归档不参与日常注入）
+      archive:
+        # 归档服务总开关
+        enabled: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_ENABLED:true}
+        # 每项目归档保留上限（超限按「重要度低+旧」滚动软删；0=不限制）
+        max-per-project: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_MAX_PER_PROJECT:5000}
+        # 归档内软删（deleted=1）条目物理二次清理保留期（天）
+        retain-days: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_RETAIN_DAYS:90}
+        # 定时维护总开关（超龄扫描 + 保留滚动 + 二次清理）
+        maintenance-enabled: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_MAINTENANCE_ENABLED:true}
+        # 定时维护间隔（毫秒）
+        maintenance-interval-ms: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_MAINTENANCE_INTERVAL_MS:21600000}
+        # 超龄扫描开关（false=不自动超龄归档，仍可手动 API 触发）
+        age-scan-enabled: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_AGE_SCAN_ENABLED:true}
+        # 超龄判定：长期无访问阈值（access_count ≤ 该值视为长期无访问）
+        low-access-count: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_LOW_ACCESS_COUNT:1}
+        # 超龄判定重要度阈值（与记忆 stale-importance-threshold 同口径）
+        stale-importance-threshold: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_STALE_IMPORTANCE_THRESHOLD:3}
+        # 超龄判定超期游戏日阈值（与记忆 stale-after-game-days 同口径）
+        stale-after-game-days: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_STALE_AFTER_GAME_DAYS:3}
+        # 预算淘汰归档开关（false=淘汰仍走软删，开启才额外写归档 evicted）
+        evict-enabled: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_EVICT_ENABLED:false}
+        # 反思降级归档开关（反思后低重要度证据降级归档）
+        downgrade-enabled: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_DOWNGRADE_ENABLED:true}
+        # 反思降级重要度阈值（证据记忆重要度 ≤ 该值才降级归档；高重要证据留 L2）
+        downgrade-importance-threshold: ${HOLOZYN_ACTOR_MEMORY_ARCHIVE_DOWNGRADE_IMPORTANCE_THRESHOLD:3}
+      # 分场景注入（对话/决策/感知/反思统一：分层权重 + token 预算 + 条数上限）
+      inject:
+        # 分场景注入总开关（false=回退旧 rankForInjection 路径）
+        enabled: ${HOLOZYN_ACTOR_MEMORY_INJECT_ENABLED:true}
+        # 上下文预算（token，超预算从低分丢起）
+        budget-core-tokens: ${HOLOZYN_ACTOR_MEMORY_INJECT_BUDGET_CORE_TOKENS:800}
+        budget-working-tokens: ${HOLOZYN_ACTOR_MEMORY_INJECT_BUDGET_WORKING_TOKENS:400}
+        budget-l2-tokens: ${HOLOZYN_ACTOR_MEMORY_INJECT_BUDGET_L2_TOKENS:1200}
+        # L2 角色级注入条数上限
+        l2-top-k: ${HOLOZYN_ACTOR_MEMORY_INJECT_L2_TOP_K:8}
+        # L2 项目级（世界大事记）注入条数上限
+        project-top-k: ${HOLOZYN_ACTOR_MEMORY_INJECT_PROJECT_TOP_K:4}
+        # L1 热缓冲注入条数上限
+        working-top-k: ${HOLOZYN_ACTOR_MEMORY_INJECT_WORKING_TOP_K:5}
+        # 分层权重（重要度/recency/relevance；episodic 侧重近因、semantic 侧重匹配、reflection 侧重权威）
+        weight-episodic-imp: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_EPISODIC_IMP:2}
+        weight-episodic-rec: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_EPISODIC_REC:3.5}
+        weight-episodic-rel: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_EPISODIC_REL:1.5}
+        weight-semantic-imp: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_SEMANTIC_IMP:2}
+        weight-semantic-rec: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_SEMANTIC_REC:2}
+        weight-semantic-rel: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_SEMANTIC_REL:3}
+        weight-reflection-imp: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_REFLECTION_IMP:3}
+        weight-reflection-rec: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_REFLECTION_REC:2}
+        weight-reflection-rel: ${HOLOZYN_ACTOR_MEMORY_INJECT_WEIGHT_REFLECTION_REL:1}
+      # 后台巩固编排（MemoryConsolidationService 统一编排层：L1 草稿批量提升/事实合并/编年史补漏+归档）
+      consolidation:
+        # 统一编排总开关（false=本编排跳过；各服务独立调度仍按其自身开关运行）
+        enabled: ${HOLOZYN_ACTOR_MEMORY_CONSOLIDATION_ENABLED:true}
+        # 统一维护开关（手动/调试触发用）
+        maintenance-enabled: ${HOLOZYN_ACTOR_MEMORY_CONSOLIDATION_MAINTENANCE_ENABLED:true}
+        # 统一维护间隔（毫秒）
+        maintenance-interval-ms: ${HOLOZYN_ACTOR_MEMORY_CONSOLIDATION_MAINTENANCE_INTERVAL_MS:1800000}
+        # 批量巩固 cron 兜底开关（false=仅游戏日边界[世界引擎记忆周期钩子]触发）
+        batch-cron-enabled: ${HOLOZYN_ACTOR_MEMORY_CONSOLIDATION_BATCH_CRON_ENABLED:true}
+        # 批量巩固 cron 兜底间隔（毫秒；覆盖引擎长暂停/低负载场景）
+        batch-interval-ms: ${HOLOZYN_ACTOR_MEMORY_CONSOLIDATION_BATCH_INTERVAL_MS:21600000}
+        # 事实合并 Dice 阈值（同角色同主题强重复才合并为一条 semantic + supersedes 链）
+        merge-threshold: ${HOLOZYN_ACTOR_MEMORY_CONSOLIDATION_MERGE_THRESHOLD:0.85}
+      # 抽取三重机制门槛（「什么值得记」准则 + 重要度分级 + 操作判定）
+      extract-gate:
+        # importance≤该值直接丢弃（无长期价值）
+        drop-below: ${HOLOZYN_ACTOR_MEMORY_EXTRACT_GATE_DROP_BELOW:1}
+        # importance<该值进 L1 草稿待巩固复核
+        draft-below: ${HOLOZYN_ACTOR_MEMORY_EXTRACT_GATE_DRAFT_BELOW:3}
+        # 按需 AI 复核阈值（候选重要度≥该值或带 update/invalidate 操作才走复核）
+        review-threshold: ${HOLOZYN_ACTOR_MEMORY_EXTRACT_GATE_REVIEW_THRESHOLD:3}
+        # 按需 AI 复核总开关（false=候选直接按初判执行零复核调用）
+        review-enabled: ${HOLOZYN_ACTOR_MEMORY_EXTRACT_GATE_REVIEW_ENABLED:true}
+      # update/invalidate 旧条匹配阈值（Dice 二元组；无匹配退化为 add/丢弃）
+      supersede-match-threshold: ${HOLOZYN_ACTOR_MEMORY_SUPERSEDE_MATCH_THRESHOLD:0.4}
+      # L1 模糊化（艾宾浩斯遗忘曲线 + 睡眠清洗 + 琐事合并 + 超清醒兜底）
+      fuzz:
+        # 模糊系统总开关（false=写路径直落 L2）
+        enabled: ${HOLOZYN_ACTOR_MEMORY_FUZZ_ENABLED:true}
+        # 经历类记忆先写 L1 短期缓冲（false=直落 L2）
+        write-short-term-first: ${HOLOZYN_ACTOR_MEMORY_FUZZ_WRITE_SHORT_TERM_FIRST:true}
+        # 艾宾浩斯初始复查间隔（游戏秒）
+        initial-interval-seconds: ${HOLOZYN_ACTOR_MEMORY_FUZZ_INITIAL_INTERVAL_SECONDS:1800}
+        # 间隔增长因子（1.8^n 次方衰减）
+        growth-factor: ${HOLOZYN_ACTOR_MEMORY_FUZZ_GROWTH_FACTOR:1.8}
+        # 最大复查间隔（游戏秒）
+        max-interval-seconds: ${HOLOZYN_ACTOR_MEMORY_FUZZ_MAX_INTERVAL_SECONDS:86400}
+        # 基础遗忘率（每次复查默认遗忘率）
+        base-rate: ${HOLOZYN_ACTOR_MEMORY_FUZZ_BASE_RATE:0.15}
+        # 滞回阻尼系数（遗忘率 = 上轮×0.7 + 本轮×0.3）
+        dampening-factor: ${HOLOZYN_ACTOR_MEMORY_FUZZ_DAMPENING_FACTOR:0.7}
+        # 遗忘率下限（强记忆不会彻底归零遗忘）
+        rate-floor: ${HOLOZYN_ACTOR_MEMORY_FUZZ_RATE_FLOOR:0.02}
+        # 嵌入噪声上限（模糊程度越高噪声越大）
+        max-noise: ${HOLOZYN_ACTOR_MEMORY_FUZZ_MAX_NOISE:0.12}
+        # 睡眠清洗（隔夜清洗：琐事合并 / 临睡模糊跳升 / 高重要·高频进 L2）
+        sleep-cleanup:
+          # 睡眠清洗开关（false=不清洗，仅清醒期渐进模糊）
+          enabled: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_ENABLED:true}
+          # 大睡关键词（命中才触发隔夜清洗；小憩类词排除在外）
+          big-sleep-keywords: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_BIG_SLEEP_KEYWORDS:睡觉,就寝,卧床,歇息,眠,睡}
+          # 睡眠清洗冷却（游戏秒：同一"夜"只洗一次）
+          min-interval-game-seconds: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_MIN_INTERVAL_GAME_SECONDS:43200}
+          # 超清醒兜底阈值（游戏秒：超时无睡眠动作强制清洗）
+          awake-max-game-seconds: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_AWAKE_MAX_GAME_SECONDS:86400}
+          # 临睡前窗口（游戏秒：窗口内写入的记忆计入"临睡前"）
+          pre-sleep-window-seconds: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_PRE_SLEEP_WINDOW_SECONDS:10800}
+          # 睡眠模糊跳升量
+          fuzz-jump: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_FUZZ_JUMP:0.3}
+          # 睡眠模糊跳升封顶
+          fuzz-jump-cap: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_FUZZ_JUMP_CAP:0.7}
+          # 琐事判定阈值（重要度 ≤ 该值=琐事，琐事合并压缩重存 L1，不删除）
+          trivial-importance: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_TRIVIAL_IMPORTANCE:2}
+          # 睡眠清洗蒸馏触发：重要度阈值（1~5）
+          distill-importance: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_DISTILL_IMPORTANCE:4}
+          # 睡眠清洗蒸馏触发：检索次数阈值（反复被检索=重要，强化保留）
+          distill-retrieval: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_DISTILL_RETRIEVAL:3}
+          # 琐事合并行起点模糊度（概括记忆"记不太清"观感）
+          merged-fuzz-start: ${HOLOZYN_ACTOR_MEMORY_FUZZ_SLEEP_CLEANUP_MERGED_FUZZ_START:0.5}
+        # 维护调度开关
+        maintenance-enabled: ${HOLOZYN_ACTOR_MEMORY_FUZZ_MAINTENANCE_ENABLED:true}
+        # 维护调度间隔（毫秒）
+        maintenance-interval-ms: ${HOLOZYN_ACTOR_MEMORY_FUZZ_MAINTENANCE_INTERVAL_MS:1800000}
+      # 跨层蒸馏（L1→L2→L3 巩固）
+      distill:
+        # 蒸馏总开关
+        enabled: ${HOLOZYN_ACTOR_MEMORY_DISTILL_ENABLED:true}
+        # 模糊度阈值：fuzz_level ≥ 该值且达检索阈值才蒸馏进 L2
+        fuzz-threshold: ${HOLOZYN_ACTOR_MEMORY_DISTILL_FUZZ_THRESHOLD:0.6}
+        # 检索次数阈值：retrieval_count ≥ 该值才蒸馏
+        retrieval-threshold: ${HOLOZYN_ACTOR_MEMORY_DISTILL_RETRIEVAL_THRESHOLD:3}
+        # 重要度阈值：importance ≥ 该值且检索达阈值也进 L2
+        importance-threshold: ${HOLOZYN_ACTOR_MEMORY_DISTILL_IMPORTANCE_THRESHOLD:0.7}
+        # 最小压缩比（蒸馏后体量至少压缩 20%，否则不蒸馏）
+        min-reduction-ratio: ${HOLOZYN_ACTOR_MEMORY_DISTILL_MIN_REDUCTION_RATIO:0.2}
+        # L3 巩固：7 日内检索次数阈值
+        l3-retrieval-7d: ${HOLOZYN_ACTOR_MEMORY_DISTILL_L3_RETRIEVAL_7D:5}
+        # L3 巩固：计划相关性阈值
+        l3-plan-relevance-threshold: ${HOLOZYN_ACTOR_MEMORY_DISTILL_L3_PLAN_RELEVANCE_THRESHOLD:0.5}
+        # L3 巩固：单条正文上限字符
+        l3-max-chars: ${HOLOZYN_ACTOR_MEMORY_DISTILL_L3_MAX_CHARS:400}
+        # 模板版本（升级模板时递增使 AI 输出解析兼容）
+        prompt-version: ${HOLOZYN_ACTOR_MEMORY_DISTILL_PROMPT_VERSION:v1}
+      # 记忆向量化（混合检索：向量相似 + BM25/关键词）
+      vector:
+        # 混合检索向量权重（总分 = 该值×向量相似 + (1-该值)×BM25/关键词）
+        hybrid-vec-weight: ${HOLOZYN_ACTOR_MEMORY_VECTOR_HYBRID_VEC_WEIGHT:0.6}
+        # 同文本向量复用（嵌入是幂等只读计算，按「供应商|模型|文本」复用；false=每次重新调用）
+        text-cache-enabled: ${HOLOZYN_ACTOR_MEMORY_VECTOR_TEXT_CACHE_ENABLED:true}
+        # 复用缓存容量上限（超限整体清空，防无界增长）
+        text-cache-max: ${HOLOZYN_ACTOR_MEMORY_VECTOR_TEXT_CACHE_MAX:5000}
+      # 路由注入（tier 判定 + 预算 + 优先级截断 + trace）
+      router:
+        # 路由注入总开关（false=回退旧 buildLegacy 路径）
+        enabled: ${HOLOZYN_ACTOR_MEMORY_ROUTER_ENABLED:true}
+        # L1 清晰度阈值：fuzz_level ≤ 该值视为清晰
+        fuzz-clear-threshold: ${HOLOZYN_ACTOR_MEMORY_ROUTER_FUZZ_CLEAR_THRESHOLD:0.3}
+        # 预算档位（token）：LOW/MID/HIGH
+        budget-low-tokens: ${HOLOZYN_ACTOR_MEMORY_ROUTER_BUDGET_LOW_TOKENS:300}
+        budget-mid-tokens: ${HOLOZYN_ACTOR_MEMORY_ROUTER_BUDGET_MID_TOKENS:800}
+        budget-high-tokens: ${HOLOZYN_ACTOR_MEMORY_ROUTER_BUDGET_HIGH_TOKENS:2000}
+        # LOW 档 L1 清晰条数上限
+        low-l1-top-k: ${HOLOZYN_ACTOR_MEMORY_ROUTER_LOW_L1_TOP_K:3}
+        # MID 档 L2 条数上限
+        mid-l2-top-k: ${HOLOZYN_ACTOR_MEMORY_ROUTER_MID_L2_TOP_K:3}
+        # HIGH 档 L2 条数上限
+        high-l2-top-k: ${HOLOZYN_ACTOR_MEMORY_ROUTER_HIGH_L2_TOP_K:5}
+        # HIGH 档模糊 L1 条数上限
+        high-fuzzy-l1-top-k: ${HOLOZYN_ACTOR_MEMORY_ROUTER_HIGH_FUZZY_L1_TOP_K:3}
+        # trace 环形缓冲上限
+        trace-max-entries: ${HOLOZYN_ACTOR_MEMORY_ROUTER_TRACE_MAX_ENTRIES:200}
+    # ---- 世界引擎（推进/时钟/屏障/前瞻预热）----
+    world:
+      # 世界持续模拟总开关（true=定时推进活跃项目的角色/人群/世界事件）
+      sim-enabled: ${HOLOZYN_ACTOR_WORLD_SIM_ENABLED:true}
+      # 世界时钟速率：每真实小时推进的游戏小时数（每项目可单独覆盖；推荐 rate=4=1 游戏天 6 现实小时）
+      time-rate: ${HOLOZYN_ACTOR_WORLD_TIME_RATE:24}
+      # 模拟扫描周期（毫秒：引擎多久扫描推进一次；⚠️ rate×扫描周期必须 ≥ tick 游戏秒，否则引擎每轮 idle）
+      scan-interval-ms: ${HOLOZYN_ACTOR_WORLD_SCAN_INTERVAL_MS:12500}
+      # 感知周期 tick 粒度（游戏分钟：每 tick 推进 N 游戏分钟；小时级钩子仍按游戏小时边界触发）
+      tick-game-minutes: ${HOLOZYN_ACTOR_WORLD_TICK_GAME_MINUTES:5}
+      # 单次补算封顶（游戏秒：防长时间离线后雪崩）
+      max-catch-up-seconds: ${HOLOZYN_ACTOR_WORLD_MAX_CATCH_UP_SECONDS:86400}
+      # 每 tick AI 预算缺省值（角色行动 + 世界事件润色；用尽程序化不冻结；每项目可单独覆盖）
+      max-ai-calls: ${HOLOZYN_ACTOR_WORLD_MAX_AI_CALLS:5}
+      # 跨日世界事件「AI 润色」通道开关（false=仅机制生成草稿零 AI 成本）
+      ai-polish-enabled: ${HOLOZYN_ACTOR_WORLD_AI_POLISH_ENABLED:true}
+      # 世界运行时门控：重启后是否自动恢复上次「手动常开」的运行状态（false=启动时所有世界一律静止；
+      # 记忆蒸馏/批量巩固/中观/宏观/决策/反思/规划/L3 核心自编辑等全部不运行）
+      runtime:
+        auto-resume: ${HOLOZYN_ACTOR_WORLD_RUNTIME_AUTO_RESUME:false}
+      # tick 屏障：每 tick 等在途写回链排空（窄屏障=只等会写 actor_state/行动结果的决策链；
+      # 屏障已过之后到达的刺激排队到下一 tick；等待超时即放行，世界永不被慢依赖冻结）
+      barrier:
+        # 总开关（false=完全退回自由并发模型——不等待/不排队/小时级决策串行，快速回退用）
+        enabled: ${HOLOZYN_ACTOR_WORLD_BARRIER_ENABLED:true}
+        # 单 tick 等待在途任务的上限（毫秒；到点放行 + WARN 计数，不冻结世界）
+        max-wait-ms: ${HOLOZYN_ACTOR_WORLD_BARRIER_MAX_WAIT_MS:30000}
+        # 等待轮询间隔（毫秒）
+        poll-ms: ${HOLOZYN_ACTOR_WORLD_BARRIER_POLL_MS:20}
+        # 等待超过该时长才打 INFO（毫秒，避免正常 tick 刷屏）
+        slow-wait-log-ms: ${HOLOZYN_ACTOR_WORLD_BARRIER_SLOW_WAIT_LOG_MS:500}
+        # 连续超时多少次后自愈清零在途计数（防漏 complete 的 bug 让每 tick 都白等满上限）
+        self-heal-after-timeouts: ${HOLOZYN_ACTOR_WORLD_BARRIER_SELF_HEAL_AFTER_TIMEOUTS:3}
+        # 单次扫描最多推进的 tick 数（长离线/拨钟巨量回补宁可走慢，也不快进雪崩；剩余自然追平）
+        max-catch-up-ticks: ${HOLOZYN_ACTOR_WORLD_BARRIER_MAX_CATCH_UP_TICKS:24}
+        # 小时级角色决策的派发并行度（有界并发让 tick 耗时从 Σ 变 max；1=串行。
+        # ⚠️ 该值与模型服务并发能力、H2 连接池上限一起决定真实吞吐，调整时三处对齐）
+        parallel-dispatch: ${HOLOZYN_ACTOR_WORLD_BARRIER_PARALLEL_DISPATCH:4}
+      # 小时级决策扇出的等待总预算（秒）。⚠️ 前瞻预热（lookahead）落地后同步等待已被
+      # 「预热+异步补发」取代，本键不再被使用（字段保留兼容，供回退旧行为与配置解析测试）
+      dispatch-wait-seconds: ${HOLOZYN_ACTOR_WORLD_DISPATCH_WAIT_SECONDS:1100}
+      # 前瞻预热/异步缓冲：小时边界零停顿的核心（整点前 N 游戏分钟预热触发下一小时全员决策，
+      # 边界对未预热角色异步补发不等待；预热决策的感知与行动时间戳=预热触发 tick 时刻）
+      lookahead:
+        # 总开关（false=退回「小时边界同步扇出等待」旧行为，仅供快速回退）
+        enabled: ${HOLOZYN_ACTOR_WORLD_LOOKAHEAD_ENABLED:true}
+        # 预热提前量（游戏分钟；rate=4 时 15 游戏分钟 = 3.75 真实分钟，远大于扇出 p95 88s）
+        game-minutes: ${HOLOZYN_ACTOR_WORLD_LOOKAHEAD_GAMEMINUTES:15}
+      # 世界常识摘要（V2.0 段 1A 稳定世界观注入源）：worldgen 落库/手动保存世界观后依最新
+      # 设定 AI 生成/更新 300-500 字精炼常识；本段为定期兜底扫描（有世界观但常识缺失/
+      # 世界观已更新的项目补生成；0=禁用扫描）
+      common-knowledge:
+        # 定期扫描间隔（毫秒；默认 6 小时，对齐知识生命周期维护周期）
+        scan-interval-ms: ${HOLOZYN_ACTOR_WORLD_COMMON_KNOWLEDGE_SCAN_INTERVAL_MS:21600000}
+    # ---- 角色生命与人格系统（成长/注意力/婚育/婴儿/身后事）----
+    growth:
+      # 认知注意力与高频微决策（每 tick 全 NPC 批量注意力 + 微决策 + 群聊参与度 + 相机聚焦）
+      # ⚠️ env 松弛绑定：连字符直接删除（如 participation-window-game-hours →
+      #   HOLOZYN_ACTOR_GROWTH_ATTENTION_PARTICIPATIONWINDOWGAMEHOURS）
+      attention:
+        # 高频微决策总开关
+        enabled: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_ENABLED:true}
+        # 批量周期（tick 数，2≈10 游戏分钟）
+        period-ticks: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_PERIODTICKS:2}
+        # 微决策打断概率
+        interrupt-probability: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_INTERRUPTPROBABILITY:0.05}
+        # 微决策记忆轨迹写入概率
+        memory-write-probability: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_MEMORYWRITEPROBABILITY:0.3}
+        # 事件相关度升档档位 / 记忆写入档位
+        event-relevance-promote-level: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_EVENTRELEVANCEPROMOTELEVEL:3}
+        event-relevance-memory-level: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_EVENTRELEVANCEMEMORYLEVEL:2}
+        # 单 state 情境文本上限（字符）
+        state-text-max-chars: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_STATETEXTMAXCHARS:160}
+        # ① 群聊参与度统计与双向联动
+        participation-enabled: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_PARTICIPATIONENABLED:true}
+        participation-window-game-hours: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_PARTICIPATIONWINDOWGAMEHOURS:6}
+        participation-level-step: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_PARTICIPATIONLEVELSTEP:2}
+        participation-boost-enabled: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_PARTICIPATIONBOOSTENABLED:true}
+        desire-boost-enabled: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_DESIREBOOSTENABLED:true}
+        participation-recording-enabled: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_PARTICIPATIONRECORDINGENABLED:true}
+        # ② 记忆检索注意力加权（层间优先级修正 + 档位数量配额，全量注入路径）
+        memory-weight-enabled: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_MEMORYWEIGHTENABLED:true}
+        memory-tier-adjust-enabled: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_MEMORYTIERADJUSTENABLED:true}
+        # 各注意力档位 L1 清晰段条数上限（focus/ambient/dormant）
+        memory-l1-cap-by-tier: { focus: 5, ambient: 4, dormant: 2 }
+        # 各注意力档位 L2 条数上限（focus/ambient/dormant）
+        memory-l2-top-k-by-tier: { focus: 4, ambient: 3, dormant: 2 }
+        # 空间生成记忆条数按注意力档位（focus/ambient/dormant）
+        space-memory-top-k-by-tier: { focus: 3, ambient: 2, dormant: 1 }
+        # ③ 相机注意力聚焦（程序化连续映射；Web 无相机自动跳过零副作用）
+        camera-focus-enabled: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_CAMERAFOCUSENABLED:true}
+        camera-mid-meters: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_CAMERAMIDMETERS:50}
+        camera-far-meters: ${HOLOZYN_ACTOR_GROWTH_ATTENTION_CAMERAFARMETERS:100}
+      # 角色档案建档
+      persona:
+        # AI 建档幂等跳过（非 force 路径在「该段维度已全覆盖」时复用既有 11 维档案、零 AI 调用；
+        # 编辑器「重新生成」与「AI 补全缺失维」不受影响；false=一律重跑，调试重建用）
+        bootstrap-idempotent: ${HOLOZYN_ACTOR_GROWTH_PERSONA_BOOTSTRAP_IDEMPOTENT:true}
+      # 遗传婚育谱系（心动/求婚/生育/孕期/谱系）
+      reproduction:
+        # 婚育总开关（false=心动/求婚/生育全部跳过，谱系只读）
+        enabled: ${HOLOZYN_ACTOR_GROWTH_REPRODUCTION_ENABLED:true}
+        # 遗传度系数 h（h²≈0.49 对齐双生子研究人格遗传度）
+        heritability: ${HOLOZYN_ACTOR_GROWTH_HERITABILITY:0.7}
+        # 表现型高斯噪声 σ（环境/表达噪声）
+        gaussian-noise-sigma: ${HOLOZYN_ACTOR_GROWTH_GAUSSIAN_NOISE_SIGMA:0.05}
+        # 从头突变率区间（孟德尔 0.1%~0.5%）
+        mutation-rate-min: ${HOLOZYN_ACTOR_GROWTH_MUTATION_RATE_MIN:0.001}
+        mutation-rate-max: ${HOLOZYN_ACTOR_GROWTH_MUTATION_RATE_MAX:0.005}
+        # 表观修饰窗口（孕前游戏日；双源：L3 核心记忆 + 世界事件）
+        epigenetics-window-game-days: ${HOLOZYN_ACTOR_GROWTH_EPIGENETICS_WINDOW_GAME_DAYS:90}
+        # 婚恋适龄（18~60 岁 = YOUTH~MIDDLE）
+        marriage-min-age: ${HOLOZYN_ACTOR_GROWTH_MARRIAGE_MIN_AGE:18}
+        marriage-max-age: ${HOLOZYN_ACTOR_GROWTH_MARRIAGE_MAX_AGE:60}
+        # 心动好感门槛 + 心动判定冷却（游戏日/对）
+        romance-affinity-threshold: ${HOLOZYN_ACTOR_GROWTH_ROMANCE_AFFINITY_THRESHOLD:60}
+        attraction-cooldown-game-days: ${HOLOZYN_ACTOR_GROWTH_ATTRACTION_COOLDOWN_GAME_DAYS:7}
+        # 恋爱期最短时长（游戏日）与求婚检查周期（游戏日）
+        romance-duration-game-days: ${HOLOZYN_ACTOR_GROWTH_ROMANCE_DURATION_GAME_DAYS:30}
+        proposal-check-game-days: ${HOLOZYN_ACTOR_GROWTH_PROPOSAL_CHECK_GAME_DAYS:15}
+        # 孕期（游戏日，人类真实孕期）与生育冷却（游戏日）
+        pregnancy-game-days: ${HOLOZYN_ACTOR_GROWTH_PREGNANCY_GAME_DAYS:280}
+        cooldown-game-days: ${HOLOZYN_ACTOR_GROWTH_COOLDOWN_GAME_DAYS:180}
+        # 人口上限与生育意愿检查周期（游戏日）
+        population-cap: ${HOLOZYN_ACTOR_GROWTH_POPULATION_CAP:50}
+        fertility-check-game-days: ${HOLOZYN_ACTOR_GROWTH_FERTILITY_CHECK_GAME_DAYS:30}
+        # 谱系追溯代数（血亲禁婚判定）
+        pedigree-generations: ${HOLOZYN_ACTOR_GROWTH_PEDIGREE_GENERATIONS:3}
+        # AI 软判定失败程序化兜底开关
+        programmatic-fallback: ${HOLOZYN_ACTOR_GROWTH_PROGRAMMATIC_FALLBACK:true}
+      # 婴儿行为状态机（零 AI 状态机 + 啼哭刺激父母 + 位置跟随母亲）
+      infant:
+        enabled: ${HOLOZYN_ACTOR_GROWTH_INFANT_ENABLED:true}
+        # 啼哭阈值（hunger/bladder 跌破即啼哭）与衰减速率
+        cry-hunger-threshold: ${HOLOZYN_ACTOR_GROWTH_CRY_HUNGER_THRESHOLD:35}
+        cry-bladder-threshold: ${HOLOZYN_ACTOR_GROWTH_CRY_BLADDER_THRESHOLD:35}
+        hunger-decay-per-hour: ${HOLOZYN_ACTOR_GROWTH_INFANT_HUNGER_DECAY_PER_HOUR:2.5}
+        bladder-decay-per-hour: ${HOLOZYN_ACTOR_GROWTH_INFANT_BLADDER_DECAY_PER_HOUR:2.0}
+        cry-stimulus-interval-game-hours: ${HOLOZYN_ACTOR_GROWTH_CRY_STIMULUS_INTERVAL_GAME_HOURS:1}
+        feeding-restore: ${HOLOZYN_ACTOR_GROWTH_INFANT_FEEDING_RESTORE:35}
+      # 身后事（遗产文本级转移 + DECEASED 谱系标记；死亡开关本身默认关）
+      legacy:
+        enabled: ${HOLOZYN_ACTOR_GROWTH_LEGACY_ENABLED:true}
+    # ---- Unity 对接层（Unity 主导实时世界，HA 退居纯 AI 大脑服务）----
+    unity:
+      # Unity 对接总开关（false=WS 端点不注册/上报不生效）
+      enabled: ${HOLOZYN_ACTOR_UNITY_ENABLED:true}
+      # WebSocket 端点前缀（完整路径 = ws-path + "/{projectId}"）
+      ws-path: ${HOLOZYN_ACTOR_UNITY_WS_PATH:/ws/unity}
+      # 时钟：Unity 上报驱动（外部时钟权威，连接时生效）/ internal 内部自走
+      clock:
+        source: ${HOLOZYN_ACTOR_UNITY_CLOCK_SOURCE:unity}
+        # 建议倍率（1 真实秒 = N 游戏秒；demo 建议 60=1 真实秒 1 游戏分钟）
+        rate: ${HOLOZYN_ACTOR_UNITY_CLOCK_RATE:60}
+        # 单次上报推进封顶（游戏秒：防 Unity 端异常大跳/重连补报雪崩）
+        max-catch-up-game-seconds: ${HOLOZYN_ACTOR_UNITY_CLOCK_MAX_CATCH_UP_GAME_SECONDS:86400}
+      # 坐标换算（1 HA 格 = N Unity 米 + 原点偏移）
+      coordinate:
+        meter-per-cell: ${HOLOZYN_ACTOR_UNITY_COORDINATE_METER_PER_CELL:0.2}
+        origin-offset-x: ${HOLOZYN_ACTOR_UNITY_COORDINATE_ORIGIN_OFFSET_X:0}
+        origin-offset-z: ${HOLOZYN_ACTOR_UNITY_COORDINATE_ORIGIN_OFFSET_Z:0}
+      # 重连容忍（窗口内重连=接续推进；超时未连=世界静止）
+      reconnect:
+        max-window-seconds: ${HOLOZYN_ACTOR_UNITY_RECONNECT_MAX_WINDOW_SECONDS:60}
+      # 感知上报→即时决策
+      perception:
+        enabled: ${HOLOZYN_ACTOR_UNITY_PERCEPTION_ENABLED:true}
+        # 目标导向冷却（游戏分钟）与广播级冷却（游戏分钟）
+        cooldown-game-minutes: ${HOLOZYN_ACTOR_UNITY_PERCEPTION_COOLDOWN_GAME_MINUTES:10}
+        broadcast-cooldown-game-minutes: ${HOLOZYN_ACTOR_UNITY_PERCEPTION_BROADCAST_COOLDOWN_GAME_MINUTES:60}
+        # 广播单次目标数上限（超限截断，防视野广播 AI 雪崩）
+        broadcast-max-targets: ${HOLOZYN_ACTOR_UNITY_PERCEPTION_BROADCAST_MAX_TARGETS:20}
+      # WS 心跳看门狗（下行心跳 + 失联踢出）
+      heartbeat:
+        interval-seconds: ${HOLOZYN_ACTOR_UNITY_HEARTBEAT_INTERVAL_SECONDS:15}
+        timeout-seconds: ${HOLOZYN_ACTOR_UNITY_HEARTBEAT_TIMEOUT_SECONDS:45}
+    # ---- 行为质量评估（决策样本评分报告 + 专门测试接口）----
+    evaluation:
+      # 专门测试接口总开关（false=全部测试接口 403「测试接口未启用」；长跑/评测时经环境变量开启——
+      # 含危险操作[拨时钟快进]与评估批跑）
+      test-enabled: ${HOLOZYN_ACTOR_EVALUATION_TEST_ENABLED:false}
+      # LLM-as-Judge：独立云端模型（与生成模型不同家族，规避 self-preference 偏见）
+      judge:
+        base-url: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_BASE_URL:https://ark.cn-beijing.volces.com/api/coding/v3}
+        # ⚠️ 开源发布版不内置真实 key；请通过环境变量 HOLOZYN_ACTOR_EVALUATION_JUDGE_API_KEY 配置你自己的密钥
+        api-key: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_API_KEY:}
+        model: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_MODEL:deepseek-v4-flash}
+        provider-label: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_PROVIDER_LABEL:ark-coding-v3}
+        # 超时（秒，与 AI 层同口径；2026-10-02 随 AI 层调大——同一自托管网关重活生成可达 200s+）
+        timeout-read-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_READ_SECONDS:300}
+        timeout-connect-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_CONNECT_SECONDS:30}
+        timeout-request-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_REQUEST_SECONDS:320}
+        # 批跑并发（路）
+        concurrency: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_CONCURRENCY:4}
+        # 样本输入长度上限（字符，超长截断防 verbosity 偏见）
+        max-input-chars: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_MAX_INPUT_CHARS:4000}
+        # 输出上限（token）与温度（0.0 保证评分稳定可复现）
+        max-output-tokens: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS:1024}
+        temperature: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TEMPERATURE:0.0}
+      # 决策样本采样
+      sampling:
+        # 批跑默认样本数
+        default-sample-count: ${HOLOZYN_ACTOR_EVALUATION_SAMPLING_DEFAULT_SAMPLE_COUNT:20}
+        # 批跑默认游戏时间窗（分钟，经 rate 折算真实分钟查询）
+        default-window-game-minutes: ${HOLOZYN_ACTOR_EVALUATION_SAMPLING_DEFAULT_WINDOW_GAME_MINUTES:1440}
+        # 决策类 scene 集合（DB 采样/JSONL 导入的过滤白名单；同时要求 step_type=ai_call 且 prompt/response 非空）
+        scenes: ${HOLOZYN_ACTOR_EVALUATION_SAMPLING_SCENES:action,dialog,interrupt_resume,negotiate}
+      # 评分 rubric 版本（升级时递增，报告与历史批次可区分）
+      rubric:
+        version: ${HOLOZYN_ACTOR_EVALUATION_RUBRIC_VERSION:v1}
+    # 长跑测试设施：AI 调用用量明细（每游戏日 token 聚合与逐条复核；测试设施，非领域概念）
+    # 只记 token 不记金额；写入走独立虚拟线程 + 独立开关，失败仅 WARN 绝不阻断 AI
+    test-usage:
+      # 总开关（默认 false：日常运行零写入；长跑时置 true）
+      enabled: ${HOLOZYN_ACTOR_TESTUSAGE_ENABLED:false}
+      # 轮次标签（报告按标签过滤，避免跨轮混算；空=UNLABELED）
+      run-label: ${HOLOZYN_ACTOR_TESTUSAGE_RUNLABEL:}
+    # ---- 世界帧（每日 00:00 结构化世界状态：天气/宏观事件/信息包/环境变化）----
+    world-frame:
+      # AI 主通道开关（false=每日帧直接走机制兜底，零 AI 成本）
+      ai-enabled: ${HOLOZYN_ACTOR_WORLD_FRAME_AI_ENABLED:true}
+      # AI 生成温度（低温度保证 JSON 结构与世界观连续性稳定）
+      temperature: ${HOLOZYN_ACTOR_WORLD_FRAME_TEMPERATURE:0.3}
+      # AI 最大输出 token
+      max-tokens: ${HOLOZYN_ACTOR_WORLD_FRAME_MAX_TOKENS:4096}
+      # 每帧信息包上限（超出丢弃多余包，防注入膨胀/刷屏）
+      max-packets-per-frame: ${HOLOZYN_ACTOR_WORLD_FRAME_MAX_PACKETS_PER_FRAME:5}
+      # 紧急更新限频（次/游戏日；内存计数器，重启丢失可接受）
+      max-emergency-per-day: ${HOLOZYN_ACTOR_WORLD_FRAME_MAX_EMERGENCY_PER_DAY:1}
+      # 紧急更新自动触发的事件重要度阈值（world_frame 自身事件不触发防环）
+      emergency-importance-threshold: ${HOLOZYN_ACTOR_WORLD_FRAME_EMERGENCY_IMPORTANCE:4}
+      # 世界观越界关键词（默认空=不校验；命中则帧校验失败回退机制兜底）
+      banned-keywords: ${HOLOZYN_ACTOR_WORLD_FRAME_BANNED_KEYWORDS:}
+    # ---- 时间季节系统（季节按游戏月固定绑定 + 统一环境服务）----
+    climate:
+      # 季节系统总开关（false=帧不加季节上下文/不发布季节更替事件/天气切换不季节修正；
+      # 环境上下文服务仍可独立计算）
+      enabled: ${HOLOZYN_ACTOR_CLIMATE_ENABLED:true}
+    # 环境上下文服务（日出日落季节查表 + 每日波动 + 体感气温 + 环境文本 + AI 润色异步预生成）
+    environment:
+      # 感知/决策【当前环境】段注入开关
+      inject-perception: ${HOLOZYN_ACTOR_ENVIRONMENT_INJECT_PERCEPTION:true}
+      # 对话【当前环境】段注入开关
+      inject-dialogue: ${HOLOZYN_ACTOR_ENVIRONMENT_INJECT_DIALOGUE:true}
+      # 决策情境注入开关（时间+环境段/极值约束/性格加权）
+      inject-decision: ${HOLOZYN_ACTOR_ENVIRONMENT_INJECT_DECISION:true}
+      # 环境描述 AI 润色开关（每日帧/天气切换后异步预生成当日各时段描写；false=仅确定性模板零 AI 成本）
+      ai-polish: ${HOLOZYN_ACTOR_ENVIRONMENT_AI_POLISH:true}
+      # AI 润色每日预算（次/游戏日/项目；耗尽回退模板）
+      polish-daily-cap: ${HOLOZYN_ACTOR_ENVIRONMENT_POLISH_DAILY_CAP:8}
+      # AI 润色结果缓存上限（条；超限清空防内存膨胀）
+      polish-cache-max-entries: ${HOLOZYN_ACTOR_ENVIRONMENT_POLISH_CACHE_MAX_ENTRIES:2000}
+      # 极值高权重：暴雪/暴雨「天气恶劣」判定体感阈值（℃）
+      storm-travel-feelslike: ${HOLOZYN_ACTOR_ENVIRONMENT_STORM_TRAVEL_FEELSLIKE:5}
+      # 极值高权重：深夜起点小时
+      deep-night-hour: ${HOLOZYN_ACTOR_ENVIRONMENT_DEEP_NIGHT_HOUR:22}
+      # 极值高权重：深夜+疲劳能量阈值（强制回家倾向）
+      deep-night-fatigue-energy: ${HOLOZYN_ACTOR_ENVIRONMENT_DEEP_NIGHT_FATIGUE_ENERGY:30}
+      # 极值高权重：极端低温体感阈值（℃）
+      extreme-cold-c: ${HOLOZYN_ACTOR_ENVIRONMENT_EXTREME_COLD_C:-15}
+    # ---- 项目记忆（世界视角公共编年史与实体状态，双系统并列）----
+    world-memory:
+      # 项目记忆总开关（false=不路由/不提炼/不查询/不注入）
+      enabled: ${HOLOZYN_ACTOR_WORLD_MEMORY_ENABLED:true}
+      # 编年史保留游戏年数（超龄→归档）
+      chronicle-retention-years: ${HOLOZYN_ACTOR_WORLD_MEMORY_CHRONICLE_RETENTION_YEARS:3}
+      # 事件即时提炼重要度阈值（world_frame 自身事件除外防环）
+      instant-importance-threshold: ${HOLOZYN_ACTOR_WORLD_MEMORY_INSTANT_IMPORTANCE_THRESHOLD:4}
+      # 每日批量提炼时刻（游戏日小时；与每日帧生成 00:00 错峰）
+      daily-distill-hour: ${HOLOZYN_ACTOR_WORLD_MEMORY_DAILY_DISTILL_HOUR:1}
+      # 项目记忆独立每日 AI 预算（即时提炼+每日提炼+实体更新判定合计；耗尽转批量）
+      daily-ai-cap: ${HOLOZYN_ACTOR_WORLD_MEMORY_DAILY_AI_CAP:20}
+      # 每日提炼 AI 主通道开关（false=直接走机制兜底，零 AI 成本）
+      distill-ai-enabled: ${HOLOZYN_ACTOR_WORLD_MEMORY_DISTILL_AI_ENABLED:true}
+      # 实体状态更新判定开关
+      entity-update-enabled: ${HOLOZYN_ACTOR_WORLD_MEMORY_ENTITY_UPDATE_ENABLED:true}
+      # 对话抽取路由开关（对话提及世界信息不路由）
+      route-from-dialog-enabled: ${HOLOZYN_ACTOR_WORLD_MEMORY_ROUTE_FROM_DIALOG_ENABLED:true}
+      # 【世界近闻】注入条数（按游戏日降序）
+      inject-recent-count: ${HOLOZYN_ACTOR_WORLD_MEMORY_INJECT_RECENT_COUNT:3}
+      # 实体注入范围（nearby=按所在地/关系过滤；all=全量注入）
+      entity-inject-scope: ${HOLOZYN_ACTOR_WORLD_MEMORY_ENTITY_INJECT_SCOPE:nearby}
+      # 【世界动态】注入条数
+      entity-inject-count: ${HOLOZYN_ACTOR_WORLD_MEMORY_ENTITY_INJECT_COUNT:3}
+    # ---- 信息扩散与三层过滤（扩散引擎 + 感知空间→社会→认知过滤 + AI 失真改写）----
+    world-info:
+      # 扩散总开关（false=不物化扩散行，感知空间层退化为「origin 在场即知晓」）
+      diffusion-enabled: ${HOLOZYN_ACTOR_WORLD_INFO_DIFFUSION_ENABLED:true}
+      # 【世界动态】段注入开关
+      inject-enabled: ${HOLOZYN_ACTOR_WORLD_INFO_INJECT_ENABLED:true}
+      # 注入条数上限（三层过滤后可见信息包 ≤N 条注入）
+      inject-max-packets: ${HOLOZYN_ACTOR_WORLD_INFO_INJECT_MAX_PACKETS:3}
+      # 注入总预算（字符，超出截断/丢弃多余条，防撑爆 Prompt）
+      inject-budget-tokens: ${HOLOZYN_ACTOR_WORLD_INFO_INJECT_BUDGET:300}
+      # 单条注入文本长度上限（字符）
+      max-inject-text-length: ${HOLOZYN_ACTOR_WORLD_INFO_MAX_INJECT_TEXT_LENGTH:60}
+      # AI 失真改写开关（false=认知失真走规则模板[按可信度/距离/渠道加传闻前缀]）
+      distortion-ai-enabled: ${HOLOZYN_ACTOR_WORLD_INFO_DISTORTION_AI_ENABLED:true}
+      # AI 失真改写温度与最大输出 token（单条消息改写）
+      distortion-temperature: ${HOLOZYN_ACTOR_WORLD_INFO_DISTORTION_TEMPERATURE:0.7}
+      distortion-max-tokens: ${HOLOZYN_ACTOR_WORLD_INFO_DISTORTION_MAX_TOKENS:2048}
+      # 失真改写结果缓存上限（条，超限清空防内存膨胀）
+      distortion-cache-max-entries: ${HOLOZYN_ACTOR_WORLD_INFO_DISTORTION_CACHE_MAX_ENTRIES:20000}
+      # 无坐标时回退的名义距离（公里，距离模型兜底档）
+      distance-fallback-km: ${HOLOZYN_ACTOR_WORLD_INFO_DISTANCE_FALLBACK_KM:1.0}
+      # 扩散到达事件开关（每包每区域首达发布低重要度事件，内容=区域传闻版）
+      arrival-event-enabled: ${HOLOZYN_ACTOR_WORLD_INFO_ARRIVAL_EVENT_ENABLED:true}
+      # 到达事件发布并行度（AI 在事务外异步发布、tick 不等待；调高需同步观察 429/超时）
+      arrival-publish-parallelism: ${HOLOZYN_ACTOR_WORLD_INFO_ARRIVAL_PUBLISH_PARALLELISM:4}
+    # ---- 宏观社会演化系统（人口/经济/势力/文化/科技五子系统）----
+    macro:
+      # 宏观层总开关（false=引擎不推进宏观 tick，入账/回灌零影响）
+      enabled: ${HOLOZYN_ACTOR_MACRO_ENABLED:true}
+      # 独立每日 AI 预算（重大行动判定 + 阈值叙事共用；耗尽转规则兜底零阻断）
+      daily-ai-cap: ${HOLOZYN_ACTOR_MACRO_DAILY_AI_CAP:8}
+      # AI 温度（叙事/判定共用）
+      temperature: ${HOLOZYN_ACTOR_MACRO_TEMPERATURE:0.7}
+      # 初始参数（可配）
+      initial:
+        population: ${HOLOZYN_ACTOR_MACRO_INITIAL_POPULATION:300}
+        grain-price-base: ${HOLOZYN_ACTOR_MACRO_INITIAL_GRAIN_PRICE_BASE:100}
+        grain-stock: ${HOLOZYN_ACTOR_MACRO_INITIAL_GRAIN_STOCK:800}
+        grain-production-base: ${HOLOZYN_ACTOR_MACRO_INITIAL_GRAIN_PRODUCTION_BASE:2.7}
+        market-activity: ${HOLOZYN_ACTOR_MACRO_INITIAL_MARKET_ACTIVITY:50}
+        bank-deposit: ${HOLOZYN_ACTOR_MACRO_INITIAL_BANK_DEPOSIT:5000}
+        currency-supply: ${HOLOZYN_ACTOR_MACRO_INITIAL_CURRENCY_SUPPLY:20000}
+        per-capita-consumption: ${HOLOZYN_ACTOR_MACRO_INITIAL_PER_CAPITA_CONSUMPTION:0.0082}
+        tax-per-capita: ${HOLOZYN_ACTOR_MACRO_INITIAL_TAX_PER_CAPITA:0.6}
+        birth-rate: ${HOLOZYN_ACTOR_MACRO_INITIAL_BIRTH_RATE:0.0005}
+        death-rate: ${HOLOZYN_ACTOR_MACRO_INITIAL_DEATH_RATE:0.0003}
+        migration-rate: ${HOLOZYN_ACTOR_MACRO_INITIAL_MIGRATION_RATE:0.0002}
+      # 阈值（重大变化触发 AI 叙事/概率事件）
+      thresholds:
+        price-change: ${HOLOZYN_ACTOR_MACRO_THRESHOLD_PRICE_CHANGE:0.20}
+        faction-shift: ${HOLOZYN_ACTOR_MACRO_THRESHOLD_FACTION_SHIFT:0.30}
+        famine-price-factor: ${HOLOZYN_ACTOR_MACRO_THRESHOLD_FAMINE_PRICE_FACTOR:1.5}
+        stock-shortage-days: ${HOLOZYN_ACTOR_MACRO_THRESHOLD_STOCK_SHORTAGE_DAYS:30}
+        caravan-chance: ${HOLOZYN_ACTOR_MACRO_THRESHOLD_CARAVAN_CHANCE:0.015}
+        plague-chance: ${HOLOZYN_ACTOR_MACRO_THRESHOLD_PLAGUE_CHANCE:0.004}
+      # 调度时间槽（人口/经济 00:05、势力/舆论 00:10、文化/科技 00:15，与帧生成/编年史错峰）
+      schedule:
+        daily-hour: ${HOLOZYN_ACTOR_MACRO_SCHEDULE_DAILY_HOUR:0}
+        daily-minute: ${HOLOZYN_ACTOR_MACRO_SCHEDULE_DAILY_MINUTE:5}
+        faction-minute: ${HOLOZYN_ACTOR_MACRO_SCHEDULE_FACTION_MINUTE:10}
+        monthly-minute: ${HOLOZYN_ACTOR_MACRO_SCHEDULE_MONTHLY_MINUTE:15}
+        days-per-xun: ${HOLOZYN_ACTOR_MACRO_SCHEDULE_DAYS_PER_XUN:10}
+        days-per-month: ${HOLOZYN_ACTOR_MACRO_SCHEDULE_DAYS_PER_MONTH:30}
+      # 每项目快照行数上限（超出删最旧行）
+      snapshot-max-per-project: ${HOLOZYN_ACTOR_MACRO_SNAPSHOT_MAX_PER_PROJECT:1000}
+      # 生计压力段注入开关（特殊 NPC 决策/对话感知【生计压力】段）
+      livelihood-inject: ${HOLOZYN_ACTOR_MACRO_LIVELIHOOD_INJECT:true}
+    # 重大世界帧事件触发演绎（world_frame 事件重要度 ≥ 阈值时自动创建演化会话「演绎」该事件）
+    evolution-dramatize:
+      # 自动演绎总开关（false=不注册订阅者零成本）
+      enabled: ${HOLOZYN_ACTOR_EVOLUTION_DRAMATIZE_ENABLED:false}
+      # 触发重要度阈值（world_frame 事件 importance ≥ 该值才演绎；扩散到达事件 importance=1 天然排除）
+      importance-threshold: ${HOLOZYN_ACTOR_EVOLUTION_DRAMATIZE_IMPORTANCE_THRESHOLD:4}
+      # 每项目每游戏日触发上限（内存计数器，超限跳过不报错）
+      max-per-day: ${HOLOZYN_ACTOR_EVOLUTION_DRAMATIZE_MAX_PER_DAY:1}
+    # ---- 世界沙盘（SSE 实时通道 / 天气切换）----
+    sandbox:
+      # 沙盘 SSE 实时通道总开关（false=subscribe 仍返回发射器但不广播事件，读接口不受影响）
+      sse-enabled: ${HOLOZYN_ACTOR_SANDBOX_SSE_ENABLED:true}
+      # 天气切换总开关（false=POST /sandbox/weather 返回 400，世界帧天气不被外部改动）
+      weather-switch-enabled: ${HOLOZYN_ACTOR_SANDBOX_WEATHER_SWITCH_ENABLED:true}
+    # ---- 示例世界（首次建库自动注入，开箱即用）----
+    demo-world:
+      # 自动注入开关（默认开）：应用启动时若项目表为空（全新数据库），把内置示例世界
+      # （classpath:demo-world/qinghe-village.holzyn，青禾村成品 .holzyn 包）经既有导入服务
+      # 注入数据库。项目表非空=非首次建库，跳过（幂等）；关闭后用户需手动导入或自行造世界。
+      seed-enabled: ${HOLOZYN_ACTOR_DEMO_WORLD_SEED_ENABLED:true}
+      # 内置示例世界资源路径（classpath，可覆盖）
+      resource: ${HOLOZYN_ACTOR_DEMO_WORLD_RESOURCE:demo-world/qinghe-village.holzyn}
+    # ---- 位置移动与地图生成系统（世界地图生成 / 住所 / 连续移动 / 途中交互）----
+    world-map:
+      # 地图生成/查询总开关（false=生成走机制兜底、查询照常；零 AI）
+      enabled: ${HOLOZYN_ACTOR_WORLD_MAP_ENABLED:true}
+      # 步行速度（米/游戏秒，M2 移动换算；默认≈1.4m/s 现实换算@rate=24——文档 §4.4）
+      walk-speed-game-meters-per-second: ${HOLOZYN_ACTOR_WORLD_MAP_WALK_SPEED_GAME_MPS:0.05}
+      # 有路走路、无路直线（M2；预留）
+      road-follow-enabled: ${HOLOZYN_ACTOR_WORLD_MAP_ROAD_FOLLOW_ENABLED:true}
+      # 途中可遇可交互（M3；预留）
+      encounter-enabled: ${HOLOZYN_ACTOR_WORLD_MAP_ENCOUNTER_ENABLED:true}
+      # 途中交互冷却（游戏小时，M3；预留）
+      encounter-cooldown-game-hours: ${HOLOZYN_ACTOR_WORLD_MAP_ENCOUNTER_COOLDOWN_GAME_HOURS:1}
+      # AI 生成最大重试次数
+      generate-ai-retries: ${HOLOZYN_ACTOR_WORLD_MAP_GENERATE_AI_RETRIES:2}
+      # 地图坐标边缘留白（格=米；区域/住所中心离边界的最近距离）
+      margin: ${HOLOZYN_ACTOR_WORLD_MAP_MARGIN:40}
+      # 区域最小半径（格=米）
+      min-region-radius: ${HOLOZYN_ACTOR_WORLD_MAP_MIN_REGION_RADIUS:8}
+      # 区域最大半径（格=米）
+      max-region-radius: ${HOLOZYN_ACTOR_WORLD_MAP_MAX_REGION_RADIUS:90}
+      # 住所与住所最小间距（格=米）
+      home-min-distance: ${HOLOZYN_ACTOR_WORLD_MAP_HOME_MIN_DISTANCE:12}
+      # 区域重叠最小间距余量（格=米）
+      region-gap: ${HOLOZYN_ACTOR_WORLD_MAP_REGION_GAP:4}
+    # ---- 学习系统（动态关系 / 反思）----
+    learning:
+      # 动态关系/好感（互动实时增减好感/信任并发布 relation 事件；启发式为主 + 可选 AI 精修）
+      relations:
+        enabled: ${HOLOZYN_ACTOR_LEARNING_RELATIONS_ENABLED:true}
+        # 群聊一轮互动的好感增量（0=对话不增减）
+        dialog-delta: ${HOLOZYN_ACTOR_LEARNING_RELATIONS_DIALOG_DELTA:1}
+        # 世界事件共同参与的好感增量（0=事件不增减）
+        event-delta: ${HOLOZYN_ACTOR_LEARNING_RELATIONS_EVENT_DELTA:1}
+        # 事件参与建模的重要度阈值（事件重要度 ≥ 该值才增减好感；低重要度琐事不扰动关系）
+        event-importance-threshold: ${HOLOZYN_ACTOR_LEARNING_RELATIONS_EVENT_IMPORTANCE_THRESHOLD:2}
+      # 反思（近期重要记忆 → AI 提炼洞察/更新目标/自省）
+      reflection:
+        # 反思节奏上限：每角色每游戏日最多反思次数（防自强化叙事失控）
+        max-per-game-day: ${HOLOZYN_ACTOR_LEARNING_REFLECTION_MAX_PER_GAME_DAY:2}
+        # 反思触发阈值：近期记忆重要度之和 ≥ 该值才触发
+        importance-threshold: ${HOLOZYN_ACTOR_LEARNING_REFLECTION_IMPORTANCE_THRESHOLD:10}
+        # 反思输入最近记忆条数（top-N 证据）
+        recent-memories: ${HOLOZYN_ACTOR_LEARNING_REFLECTION_RECENT_MEMORIES:10}
+        # 反思周期预算（2026-09-29 P0-2 遗留根治②：反思预算独立命名空间——与引擎 tick 共享
+        # budget_per_tick 会被 24 角色决策链饿死，见次对接文档_20260928_03 §5 冒烟发现）。
+        # 0（默认）=自动浮动：特殊 NPC 数 × max-per-game-day（预算=本周期理论上限，正常永不饿死，
+        #   世界人数多时自动放大）；>0 = 固定覆盖（运维逃生门）。
+        # ⚠️ env 正确形态（连字符删除）：HOLOZYN_ACTOR_LEARNING_REFLECTION_BUDGET_PER_CYCLE
+        budget-per-cycle: ${HOLOZYN_ACTOR_LEARNING_REFLECTION_BUDGET_PER_CYCLE:0}
+    # 普通 NPC（crowd）当日计划 + 事件感知
+    crowd:
+      # 事件感知打断阈值：本游戏小时内事件重要度 ≥ 该值视为「重大事件」，普通 NPC 当日计划该小时
+      # 被事件打断一次（行动变更为应对事件/议论）
+      event-disrupt-importance-threshold: ${HOLOZYN_ACTOR_CROWD_EVENT_DISRUPT_IMPORTANCE_THRESHOLD:3}
+    # ---- NPC 内部状态（生理需求/情绪/历史曲线；决策侧状态权威）----
+    npc-state:
+      # 总开关（程序化零成本）
+      enabled: ${HOLOZYN_ACTOR_NPC_STATE_ENABLED:true}
+      # 衰减率（每游戏小时）
+      decay:
+        hunger-per-hour: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_HUNGER_PER_HOUR:1.2}
+        thirst-per-hour: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_THIRST_PER_HOUR:2.0}
+        energy-per-hour: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_ENERGY_PER_HOUR:1.0}
+        bladder-per-hour: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_BLADDER_PER_HOUR:1.5}
+        hygiene-per-hour: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_HYGIENE_PER_HOUR:0.3}
+        social-per-hour: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_SOCIAL_PER_HOUR:0.4}
+        fun-per-hour: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_FUN_PER_HOUR:0.5}
+        sleep-restore-per-hour: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_SLEEP_RESTORE_PER_HOUR:10.0}
+        # 低需求渐衰（低于阈值后衰减放缓，防「饿到 0 仍按满速掉」）
+        taper: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_TAPER:false}
+        taper-threshold: ${HOLOZYN_ACTOR_NPC_STATE_DECAY_TAPER_THRESHOLD:20.0}
+      # 人群衰减整体缩放（crowd 轻量列 × 此系数）
+      crowd-decay-scale: ${HOLOZYN_ACTOR_NPC_STATE_CROWD_DECAY_SCALE:1.0}
+      # 夜间睡眠参考时段（精力恢复 + 膀胱不下降）
+      sleep-start-hour: ${HOLOZYN_ACTOR_NPC_STATE_SLEEP_START_HOUR:22}
+      sleep-end-hour: ${HOLOZYN_ACTOR_NPC_STATE_SLEEP_END_HOUR:6}
+      # urgency 阈值（0 无 / 1 轻度 / 2 强烈 / 3 健康告急）
+      urgency:
+        threshold-strong: ${HOLOZYN_ACTOR_NPC_STATE_URGENCY_THRESHOLD_STRONG:15.0}
+        threshold-mild: ${HOLOZYN_ACTOR_NPC_STATE_URGENCY_THRESHOLD_MILD:30.0}
+        health-alert: ${HOLOZYN_ACTOR_NPC_STATE_URGENCY_HEALTH_ALERT:25.0}
+      # 健康联动（生理四需长期低于阈值侵蚀 / 全部高于回升阈值回升）
+      health:
+        corrosion-rate: ${HOLOZYN_ACTOR_NPC_STATE_HEALTH_CORROSION_RATE:0.5}
+        recover-rate: ${HOLOZYN_ACTOR_NPC_STATE_HEALTH_RECOVER_RATE:0.2}
+        corrosion-threshold: ${HOLOZYN_ACTOR_NPC_STATE_HEALTH_CORROSION_THRESHOLD:20.0}
+        recover-threshold: ${HOLOZYN_ACTOR_NPC_STATE_HEALTH_RECOVER_THRESHOLD:70.0}
+      # 行动恢复量（行动类型 → 需求恢复映射；封顶 100 下限 0）
+      recovery:
+        eat-hunger: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_EAT_HUNGER:40}
+        drink-thirst: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_DRINK_THIRST:35}
+        sleep-energy: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_SLEEP_ENERGY:45}
+        toilet-bladder: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_TOILET_BLADDER:55}
+        wash-hygiene: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_WASH_HYGIENE:50}
+        chat-social: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_CHAT_SOCIAL:25}
+        play-fun: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_PLAY_FUN:25}
+        treat-health: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_TREAT_HEALTH:30}
+        sleep-health: ${HOLOZYN_ACTOR_NPC_STATE_RECOVERY_SLEEP_HEALTH:5}
+      # 情绪模型（PAD 锚点 + 程序化规则 + AI 评估写回 + OCC + 衰减 + mood 积分）
+      emotion:
+        # AI 评估写回开关（关=纯程序化）
+        ai-eval-enabled: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_AI_EVAL_ENABLED:true}
+        # AI 评估冷却（每 NPC 每游戏小时最多评估 1 次；对话/行动/事件共用）
+        ai-eval-cooldown-hours: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_AI_EVAL_COOLDOWN_HOURS:1.0}
+        # 世界事件触发 AI 评估的重要度阈值
+        eval-event-importance: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_EVAL_EVENT_IMPORTANCE:3}
+        # 情绪衰减半衰期（游戏小时，指数衰减回平静锚点）
+        decay-half-life-hours: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_DECAY_HALF_LIFE_HOURS:6.0}
+        # OCC 显式三维评价增强开关（按合意性/称赞性/喜好性规则映射到 PAD 位移）
+        occ-enabled: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_OCC_ENABLED:false}
+        # OCC 合意性 → P 轴权重 / 称赞性 → D 轴权重 / 喜好性 → P/D 双轴权重
+        occ-desirability-weight: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_OCC_DESIRABILITY_WEIGHT:0.5}
+        occ-praiseworthiness-weight: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_OCC_PRAISEWORTHINESS_WEIGHT:0.3}
+        occ-liking-weight: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_OCC_LIKING_WEIGHT:0.5}
+        # mood 情绪积分权重（mood = 需求mood×(1-w) + 情绪分×w + env）
+        mood-weight: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_MOOD_WEIGHT:0.3}
+        # 心情协同阈值（mood 低于此值 → 负面情绪衰减放慢）
+        mood-synergy-threshold: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_MOOD_SYNERGY_THRESHOLD:50.0}
+        # 心情协同衰减系数（mood 低于阈值且 P<0 时，衰减量 × 此系数放慢）
+        mood-synergy-factor: ${HOLOZYN_ACTOR_NPC_STATE_EMOTION_MOOD_SYNERGY_FACTOR:0.5}
+      # 人群 AI 决策阈值（场景人数 ≤ 此值 → 人群也走 AI 自主决策/情绪 AI 评估）
+      ai-crowd-threshold: ${HOLOZYN_ACTOR_NPC_STATE_AI_CROWD_THRESHOLD:20}
+      # 【当前状态】段注入 + 分层驱动
+      inject:
+        # 状态段注入 token 预算（超预算丢低优先级描述）
+        state-budget: ${HOLOZYN_ACTOR_NPC_STATE_INJECT_STATE_BUDGET:300}
+        # 决策注入开关（false=决策不注入【当前状态】段）
+        inject-ai-decision: ${HOLOZYN_ACTOR_NPC_STATE_INJECT_AI_DECISION:true}
+        # 对话注入开关（false=对话不注入【当前状态】段）
+        inject-dialog: ${HOLOZYN_ACTOR_NPC_STATE_INJECT_DIALOG:true}
+      # 分层驱动（人群概率化驱动：Sims 概率模型 + 需求-地点/对象评分）
+      drive:
+        # 人群概率化驱动开关（场景人数>阈值时生效）
+        crowd-probabilistic-enabled: ${HOLOZYN_ACTOR_NPC_STATE_DRIVE_CROWD_PROBABILISTIC_ENABLED:true}
+        # 概率化触发阈值（需求值低于此值才纳入概率化候选）
+        probabilistic-threshold: ${HOLOZYN_ACTOR_NPC_STATE_DRIVE_PROBABILISTIC_THRESHOLD:60.0}
+        # 概率化动作是否移动至目标地点（false=仅更新动作文本不迁移位置）
+        move-to-target: ${HOLOZYN_ACTOR_NPC_STATE_DRIVE_MOVE_TO_TARGET:true}
+      # 历史快照曲线（actor_state_history 数据源）
+      history:
+        # 历史快照采样开关（false=引擎推进时不采样，曲线无新数据）
+        enabled: ${HOLOZYN_ACTOR_NPC_STATE_HISTORY_ENABLED:true}
+        # 采样粒度（游戏分钟，默认 60=每小时；可切 5=细粒度演示；切小时数小时自动放大保留上限）
+        sample-minutes: ${HOLOZYN_ACTOR_NPC_STATE_HISTORY_SAMPLE_MINUTES:60}
+        # 每项目每 NPC 保留快照条数上限（超出滚动删除最旧）
+        max-per-npc: ${HOLOZYN_ACTOR_NPC_STATE_HISTORY_MAX_PER_NPC:168}
+    # ---- 实时行为决策系统（刺激驱动即时决策 + 打断恢复 + 链式反应 + 前瞻/协调）----
+    realtime-decision:
+      # 即时决策总开关（false=RealTimeDecisionService 全部入口直接跳过）
+      enabled: ${HOLOZYN_ACTOR_REALTIME_DECISION_ENABLED:true}
+      # 实时决策激活闸门：后端启动默认不自动运行——项目级激活 = 手动常开 ∪ 沙盘页打开 ∪ 演化会话进行
+      # （前端经 PUT /api/projects/{id}/realtime-decision 驱动）；未激活时世界引擎跳过该项目（不耗 AI）
+      # 事件重要度阈值（事件重要度 ≥ 此值才触发在场/相关角色即时决策）
+      event-importance-threshold: ${HOLOZYN_ACTOR_REALTIME_EVENT_IMPORTANCE:3}
+      # 每角色即时决策冷却（游戏分钟；紧急状态 urgency≥2 可突破；世界暂停时冷却自然冻结）
+      cooldown-game-minutes: ${HOLOZYN_ACTOR_REALTIME_COOLDOWN_GAME_MINUTES:10}
+      # 打断与恢复：被打断任务记录 + AI 恢复决策（resume/adjust/abandon）三态执行
+      interrupt-enabled: ${HOLOZYN_ACTOR_REALTIME_INTERRUPT_ENABLED:true}
+      # 打断记录恢复过期窗口（游戏分钟：超过未恢复即放弃）
+      interrupt-expire-game-minutes: ${HOLOZYN_ACTOR_REALTIME_INTERRUPT_EXPIRE_GAME_MINUTES:60}
+      # 即时决策防重入重试（多角色并发刺激被拦截时自动重试，保证每个刺激完成「决策→行动→恢复」闭环）
+      stimulus-retry-max-attempts: ${HOLOZYN_ACTOR_REALTIME_STIMULUS_RETRY_MAX_ATTEMPTS:20}
+      stimulus-retry-wait-ms: ${HOLOZYN_ACTOR_REALTIME_STIMULUS_RETRY_WAIT_MS:3000}
+      # 个性注入：【角色个性】段（persona+L3+brainProfile+关系摘要+时间感）注入即时决策情境
+      personality-inject-enabled: ${HOLOZYN_ACTOR_REALTIME_PERSONALITY_INJECT_ENABLED:true}
+      # 个性段总长上限（字符；超限按段边界省略并在日志 WARN 列出段名，不无声截断）
+      personality-max-length: ${HOLOZYN_ACTOR_REALTIME_PERSONALITY_MAX_LENGTH:3000}
+      # 打断前 AI 探针总开关（false=全部刺激走确定性打断，不探针）
+      interrupt-probe-enabled: ${HOLOZYN_ACTOR_REALTIME_INTERRUPT_PROBE_ENABLED:true}
+      # 强制打断事件重要度阈值（事件重要度 ≥ 此值=重大/安全威胁 → 跳过探针强制打断）
+      probe-force-importance-threshold: ${HOLOZYN_ACTOR_REALTIME_PROBE_FORCE_IMPORTANCE:4}
+      # 链式反应：特殊 NPC 行动执行后触发同地点其他特殊 NPC + 关系密切异地人物的即时决策（一跳防环）
+      chain-reaction-enabled: ${HOLOZYN_ACTOR_REALTIME_CHAIN_ENABLED:true}
+      # 关系网扩散阈值（好感或信任 ≥ 此值视为「关系密切」）
+      chain-related-threshold: ${HOLOZYN_ACTOR_REALTIME_CHAIN_RELATED_THRESHOLD:60}
+      # 每行动异地相关人物触发上限（成本护栏防风暴）
+      chain-related-max: ${HOLOZYN_ACTOR_REALTIME_CHAIN_RELATED_MAX:3}
+      # 人群围观行动重要度阈值（决策 urgency ≥ 此值的重大行动 → 同地点人群程序化围观/议论/躲开，零 AI）
+      chain-crowd-importance: ${HOLOZYN_ACTOR_REALTIME_CHAIN_CROWD_IMPORTANCE:4}
+      # 围观人群 NPC 数量上限
+      chain-crowd-max: ${HOLOZYN_ACTOR_REALTIME_CHAIN_CROWD_MAX:3}
+      # 独处上下文注入开关（同地点无其他特殊 NPC 且无人群 NPC 时注入【独处】段）
+      solitude-enabled: ${HOLOZYN_ACTOR_REALTIME_SOLITUDE_ENABLED:true}
+      # 时间感行动：AI 决策输出 wait_minutes → 等待类计划排期 → 到点重新 AI 决策
+      time-sense-action-enabled: ${HOLOZYN_ACTOR_REALTIME_TIME_SENSE_ACTION_ENABLED:true}
+      # 等待时长上限（游戏分钟；AI 的 wait_minutes 超过此值钳制）
+      wait-max-game-minutes: ${HOLOZYN_ACTOR_REALTIME_WAIT_MAX_GAME_MINUTES:720}
+      # 连续等待上限（同一角色连续两次等待后，下次到期直接执行原动作不再重新决策，防死循环）
+      wait-max-consecutive: ${HOLOZYN_ACTOR_REALTIME_WAIT_MAX_CONSECUTIVE:2}
+      # 生理小动作（状态写回时按状态程序化生成小动作文本[零 AI]，落 thought_text + SSE）
+      micro-motion-enabled: ${HOLOZYN_ACTOR_REALTIME_MICRO_MOTION_ENABLED:true}
+      # 小动作生成冷却（游戏分钟，防 SSE 刷屏）
+      micro-motion-cooldown-game-minutes: ${HOLOZYN_ACTOR_REALTIME_MICRO_MOTION_COOLDOWN_GAME_MINUTES:30}
+      # 小动作随机点缀概率（无状态触发时小概率随机一个小动作）
+      micro-motion-random-probability: ${HOLOZYN_ACTOR_REALTIME_MICRO_MOTION_RANDOM_PROBABILITY:0.10}
+      # 环境刺激：消费世界帧产出（帧 diff 天气/环境变化）+ 信息包扩散到达 → 即时决策 + 人群轻量 AI
+      environment-enabled: ${HOLOZYN_ACTOR_REALTIME_ENVIRONMENT_ENABLED:true}
+      # 环境刺激独立冷却（游戏分钟；与普通刺激冷却键独立，防天气骤变/扩散高频刷屏）
+      environment-cooldown-game-minutes: ${HOLOZYN_ACTOR_REALTIME_ENVIRONMENT_COOLDOWN_GAME_MINUTES:30}
+      # 单帧 diff 刺激条数上限（一次帧变化最多产生 N 条环境刺激，防风暴）
+      environment-max-diff-per-frame: ${HOLOZYN_ACTOR_REALTIME_ENVIRONMENT_MAX_DIFF_PER_FRAME:5}
+      # 每日环境刺激 AI 预算（每项目每游戏日合计上限，超限跳过；0=不设限）
+      environment-daily-max: ${HOLOZYN_ACTOR_REALTIME_ENVIRONMENT_DAILY_MAX:30}
+      # 单次环境刺激人群轻量 AI 上限（防大场景风暴）
+      environment-crowd-max: ${HOLOZYN_ACTOR_REALTIME_ENVIRONMENT_CROWD_MAX:5}
+      # 空闲降频：有进行中行动且无新刺激时，本游戏小时周期决策跳过（延续行动零 AI）
+      idle-reduction-enabled: ${HOLOZYN_ACTOR_REALTIME_IDLE_REDUCTION_ENABLED:true}
+      # 空闲降频窗口（游戏分钟：距上次决策 < 该时长 → 本次周期决策跳过）
+      idle-decision-window-game-minutes: ${HOLOZYN_ACTOR_REALTIME_IDLE_DECISION_WINDOW_GAME_MINUTES:120}
+      # 轻量前瞻推演：触发判定=事件重要度≥阈值 ∪ urgency≥阈值 ∪ 刺激命中场景关键词；同调用插段零新增 AI 调用
+      foresight:
+        # 前瞻总开关
+        enabled: ${HOLOZYN_ACTOR_REALTIME_FORESIGHT_ENABLED:true}
+        # 事件重要度触发阈值
+        importance-threshold: ${HOLOZYN_ACTOR_REALTIME_FORESIGHT_IMPORTANCE_THRESHOLD:4}
+        # 紧急度触发阈值
+        urgency-threshold: ${HOLOZYN_ACTOR_REALTIME_FORESIGHT_URGENCY_THRESHOLD:2}
+        # 候选行动数上限（提示 AI 输出 ≤N 个候选）
+        max-candidates: ${HOLOZYN_ACTOR_REALTIME_FORESIGHT_MAX_CANDIDATES:3}
+        # 宏观输入注入开关（前瞻段注入宏观快照摘要[粮价/库存/民怨/议题/势力]）
+        macro-inject-enabled: ${HOLOZYN_ACTOR_REALTIME_FORESIGHT_MACRO_INJECT_ENABLED:true}
+        # 前瞻段最大长度（字符，超长截断）
+        section-max-length: ${HOLOZYN_ACTOR_REALTIME_FORESIGHT_SECTION_MAX_LENGTH:400}
+      # 决策 state delta：决策执行后落显式状态变更（幂等键=actor_plan.id）；打断恢复校验数据源
+      state-delta:
+        # delta 落库总开关
+        enabled: ${HOLOZYN_ACTOR_REALTIME_STATE_DELTA_ENABLED:true}
+        # delta 有效窗口（游戏分钟：超过视为「计划已过时效」；<=0 不设时效）
+        expire-game-minutes: ${HOLOZYN_ACTOR_REALTIME_STATE_DELTA_EXPIRE_GAME_MINUTES:120}
+      # 意图冲突检测 + 协商 + 资源占用 + ToM
+      coordination:
+        # 冲突检测总开关（C 层确定性检测[目标地点/目标角色正忙 + 资源登记表]；高者先执行）
+        conflict-detect-enabled: ${HOLOZYN_ACTOR_REALTIME_COORDINATION_CONFLICT_ENABLED:true}
+        # 冲突二次协商 AI 开关（预算内 LLM 协商；false/预算不足/失败→确定性兜底）
+        negotiate-ai-enabled: ${HOLOZYN_ACTOR_REALTIME_COORDINATION_NEGOTIATE_AI_ENABLED:true}
+        # 协商最大输出 token
+        negotiate-max-tokens: ${HOLOZYN_ACTOR_REALTIME_COORDINATION_NEGOTIATE_MAX_TOKENS:200}
+        # 协商重试次数
+        negotiate-max-retry: ${HOLOZYN_ACTOR_REALTIME_COORDINATION_NEGOTIATE_MAX_RETRY:1}
+        # 资源占用登记开关（目标命中地点性资源时登记占用[到期自动失效/换目标自动释放]）
+        occupancy-enabled: ${HOLOZYN_ACTOR_REALTIME_COORDINATION_OCCUPANCY_ENABLED:true}
+        # 资源占用时长上限（游戏分钟：封顶防长期占位）
+        occupancy-max-game-minutes: ${HOLOZYN_ACTOR_REALTIME_COORDINATION_OCCUPANCY_MAX_GAME_MINUTES:120}
+        # 确定性兜底等待时长（游戏分钟：协商不可用时 loser 原地等待后重试）
+        fallback-wait-game-minutes: ${HOLOZYN_ACTOR_REALTIME_COORDINATION_FALLBACK_WAIT_GAME_MINUTES:20}
+        # ToM 深度参数注入总开关（按 OCEAN 宜人性×神经质注入）
+        tom-inject-enabled: ${HOLOZYN_ACTOR_REALTIME_COORDINATION_TOM_INJECT_ENABLED:true}
+    # ---- 角色扮演/无玩家群聊（NPC 间自主对话 + 说话意愿）----
+    roleplay:
+      # 群聊发言欲望阈值（1~5 量表，低于该值视为「此刻不想接话」→ 本轮收束；开场轮不受拦阻）
+      group-desire-threshold: ${HOLOZYN_ACTOR_ROLEPLAY_GROUP_DESIRE_THRESHOLD:3}
+      # 无玩家群聊（同地点 NPC 自发对话）
+      autonomous-chat:
+        # 无玩家群聊轮总开关（世界事件后触发回应轮 + 平时概率闲聊）
+        enabled: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_ENABLED:true}
+        # 概率闲聊触发概率（每游戏小时每地点）
+        probability: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_PROBABILITY:0.35}
+        # 概率闲聊每日每地点上限（轮）
+        daily-cap-per-location: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_DAILY_CAP_PER_LOCATION:3}
+        # 单轮最大节拍数（超限自然收尾）
+        max-beats: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_MAX_BEATS:20}
+        # AI 退场/收尾编排的节拍间隔（AI 预算不足时用规则性离场兜底）
+        orchestrate-interval: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_ORCHESTRATE_INTERVAL:3}
+        # 世界事件后触发回应轮（事件所在地点 NPC 内群触发一轮回应；统一由事件总线订阅者接线）
+        event-response-enabled: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_EVENT_RESPONSE_ENABLED:true}
+        # 事件回应轮最小事件重要度（低重要度琐事不扰动村民议论）
+        event-importance-threshold: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_EVENT_IMPORTANCE_THRESHOLD:2}
+        # 事件回应轮每日上限（全村每日「有人议论」场数封顶——成本护栏）
+        event-response-daily-cap: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_EVENT_RESPONSE_DAILY_CAP:40}
+        # 事件回应轮同地点最小间隔（游戏小时：把「事件→议论」摊平到全天；0=关闭间隔限制）
+        event-response-min-gap-game-hours: ${HOLOZYN_ACTOR_ROLEPLAY_AUTONOMOUS_CHAT_EVENT_RESPONSE_MIN_GAP_GAME_HOURS:1}
+    # 社交聚集行为：NPC 从独处地点自发流向社交中心，形成「聚集 → 闲聊 → 关系/信息扩散」正反馈
+    social-gathering:
+      # 社交聚集候选注入总开关
+      enabled: ${HOLOZYN_ACTOR_SOCIAL_GATHERING_ENABLED:true}
+      # 社交中心地点关键词（地点名或地点类型命中任一即视为社交中心；通用世界观语义）
+      center-keywords: ${HOLOZYN_ACTOR_SOCIAL_GATHERING_CENTER_KEYWORDS:茶馆,茶楼,茶铺,集市,市集,村口,客栈,酒楼,酒馆,饭馆,饭店,广场,戏台,祠堂,凉亭,亭子,庙}
+      # 深夜窗口（深夜居民入睡不再四处串门）
+      deep-night-start: ${HOLOZYN_ACTOR_SOCIAL_GATHERING_DEEP_NIGHT_START:23}
+      deep-night-end: ${HOLOZYN_ACTOR_SOCIAL_GATHERING_DEEP_NIGHT_END:6}
+      # 每次决策注入的社交候选上限（社交项优先于常规空间行动占用槽位）
+      max-candidates: ${HOLOZYN_ACTOR_SOCIAL_GATHERING_MAX_CANDIDATES:2}
+      # 社交候选倾向权重（作为「（倾向 x%）」情境描述供判定分布参考）
+      weight: ${HOLOZYN_ACTOR_SOCIAL_GATHERING_WEIGHT:0.3}
+    # ---- 统一调度壳（世界推进扫描 + 计划行动到期执行）----
+    scheduler:
+      # 世界推进扫描开关（false=停用定时扫描，仅手动 advance）
+      world-scan-enabled: ${HOLOZYN_ACTOR_SCHEDULER_WORLD_SCAN_ENABLED:true}
+      # 计划行动到期执行开关（false=停用定时执行，行动计划留待手动触发）
+      action-execute-enabled: ${HOLOZYN_ACTOR_SCHEDULER_ACTION_EXECUTE_ENABLED:true}
+    # ---- 工作流世界观生成（定义解析 + 任务执行 + SSE）----
+    worldgen:
+      # 世界生成工作流总开关（false=真实执行器回退桩占位输出，链仍可空跑）
+      enabled: ${HOLOZYN_ACTOR_WORLDGEN_ENABLED:true}
+      # 真实 AI 执行开关（false=Agent/脚本节点全部桩占位输出，供离线/无 AI 冒烟环境）
+      ai-enabled: ${HOLOZYN_ACTOR_WORLDGEN_AI_ENABLED:true}
+      # 每维度 AI 输出最大 token（2026-09-29_05 适配：4096→8192 对齐 routing tool 档位，防复杂维度截断）
+      max-tokens: ${HOLOZYN_ACTOR_WORLDGEN_MAX_TOKENS:8192}
+      # Schema 校验失败定向重试次数（总尝试=首次+N 次修复重试）
+      schema-retry: ${HOLOZYN_ACTOR_WORLDGEN_SCHEMA_RETRY:2}
+      # 维度 Agent 采样温度
+      temperature: ${HOLOZYN_ACTOR_WORLDGEN_TEMPERATURE:0.7}
+      # 检查点文件落盘开关（Agent 产物写 data/worldgen/<project>/<task>/world/*.json）
+      checkpoint-enabled: ${HOLOZYN_ACTOR_WORLDGEN_CHECKPOINT_ENABLED:true}
+      # 并行维度生成并发上限（M5③ 前 3 维并行；0=串行回退）
+      parallelism: ${HOLOZYN_ACTOR_WORLDGEN_PARALLELISM:3}
+      # character 工作流角色阵容上限（M4 AI 阵容截断；冒烟可调小如 4~6 缩短链路）
+      roster-limit: ${HOLOZYN_ACTOR_WORLDGEN_ROSTER_LIMIT:20}
+      # story-plan 工作流角色摘要注入上限（M4 story-plan；按重要度排序截断防提示词膨胀）
+      story-character-limit: ${HOLOZYN_ACTOR_WORLDGEN_STORY_CHARACTER_LIMIT:12}

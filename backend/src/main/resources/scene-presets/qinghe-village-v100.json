@@ -1,0 +1,143 @@
+{
+  "name": "青禾村·仙侠村落紧凑布局 v100",
+  "description": "青禾村 100m 测试版预设：按现实村落结构手绘紧凑布局（用户要求：建筑沿街聚集而非散落）——村南石牌坊为口、青石主街贯穿南北、村中老井广场（祠堂/凉亭/石狮环绕）、沿街商铺（汤面摊/茶摊/糕点铺/茶馆/客栈）、铁匠铺与医馆对街、村塾与民居聚落；村西梯田农舍、村北后山竹林山神庙、村东灵溪河渡口石桥。坐标 0..100，y=0，rotY 弧度。",
+  "scene": {
+    "templateCode": "village",
+    "styleCode": "hills",
+    "size": 100,
+    "seed": 20260914
+  },
+  "rivers": [
+    {
+      "name": "灵溪河",
+      "width": 8,
+      "path": [
+        [82, 10],
+        [80, 25],
+        [79, 40],
+        [78, 55],
+        [79, 70],
+        [81, 85],
+        [83, 95]
+      ]
+    }
+  ],
+  "roads": [
+    {
+      "name": "青石主街",
+      "width": 5,
+      "path": [
+        [45, 92],
+        [45, 84],
+        [45, 74],
+        [45, 64],
+        [45, 55],
+        [45, 47],
+        [45, 40]
+      ]
+    },
+    {
+      "name": "东街（集市→渡口）",
+      "width": 4,
+      "path": [
+        [45, 58],
+        [52, 57],
+        [60, 55],
+        [68, 54],
+        [74, 55]
+      ]
+    },
+    {
+      "name": "西街（集市→农田）",
+      "width": 3,
+      "path": [
+        [45, 58],
+        [38, 58],
+        [30, 58],
+        [24, 60],
+        [20, 63]
+      ]
+    },
+    {
+      "name": "山道（主街→山神庙）",
+      "width": 3,
+      "path": [
+        [45, 40],
+        [45, 32],
+        [43, 24],
+        [42, 16],
+        [44, 10]
+      ]
+    }
+  ],
+  "placements": [
+    { "assetId": "building_gate_01", "name": "村口石牌坊", "posX": 45, "posZ": 90, "rotY": 1.5708 },
+    { "assetId": "decoration_stele_01", "name": "村碑", "posX": 38, "posZ": 94 },
+    { "assetId": "decoration_stone_lamp_01", "name": "石灯", "posX": 45, "posZ": 86 },
+    { "assetId": "decoration_stone_lamp_01", "name": "石灯", "posX": 48, "posZ": 64 },
+    { "assetId": "prop_lantern_post_01", "name": "灯笼杆", "posX": 41, "posZ": 78 },
+    { "assetId": "prop_lantern_post_01", "name": "灯笼杆", "posX": 49, "posZ": 78 },
+    { "assetId": "prop_well_01", "name": "老井", "posX": 41, "posZ": 59 },
+    { "assetId": "decoration_flagpole_01", "name": "旗杆", "posX": 49, "posZ": 62 },
+    { "assetId": "building_pavilion_01", "name": "凉亭", "posX": 52, "posZ": 58 },
+    { "assetId": "prop_stone_bench_01", "name": "石凳", "posX": 50, "posZ": 53 },
+    { "assetId": "building_soup_stall_01", "name": "汤面摊", "posX": 38, "posZ": 72 },
+    { "assetId": "building_tea_stall_01", "name": "茶摊", "posX": 52, "posZ": 74 },
+    { "assetId": "building_snack_shop_01", "name": "糕点铺", "posX": 38, "posZ": 66 },
+    { "assetId": "building_tea_house_01", "name": "青禾茶馆", "posX": 34, "posZ": 76 },
+    { "assetId": "building_inn_01", "name": "青禾客栈", "posX": 56, "posZ": 76 },
+    { "assetId": "building_smithy_01", "name": "铁匠铺", "posX": 36, "posZ": 50 },
+    { "assetId": "building_pharmacy_01", "name": "青禾医馆", "posX": 54, "posZ": 50 },
+    { "assetId": "building_ancestral_hall_01", "name": "沈家祠堂", "posX": 45, "posZ": 46 },
+    { "assetId": "decoration_stone_lion_01", "name": "石狮", "posX": 41, "posZ": 48 },
+    { "assetId": "decoration_stone_lion_01", "name": "石狮", "posX": 49, "posZ": 48 },
+    { "assetId": "building_sutra_pavilion_01", "name": "村塾", "posX": 34, "posZ": 44 },
+    { "assetId": "building_residence_01", "name": "民居", "posX": 56, "posZ": 44 },
+    { "assetId": "building_residence_01", "name": "民居", "posX": 39, "posZ": 34 },
+    { "assetId": "building_residence_01", "name": "民居", "posX": 52, "posZ": 32 },
+    { "assetId": "building_residence_01", "name": "民居", "posX": 46, "posZ": 26 },
+    { "assetId": "plant_peach_01", "name": "桃树", "posX": 36, "posZ": 28 },
+    { "assetId": "plant_plum_01", "name": "梅树", "posX": 58, "posZ": 30 },
+    { "assetId": "plant_osmanthus_01", "name": "桂树", "posX": 44, "posZ": 22 },
+    { "assetId": "building_farmhouse_01", "name": "农舍", "posX": 28, "posZ": 38 },
+    { "assetId": "terrain_terraced_field_01", "name": "梯田", "posX": 20, "posZ": 52 },
+    { "assetId": "terrain_terraced_field_01", "name": "梯田", "posX": 18, "posZ": 62 },
+    { "assetId": "terrain_terraced_field_01", "name": "梯田", "posX": 22, "posZ": 70 },
+    { "assetId": "prop_waterwheel_01", "name": "水车", "posX": 26, "posZ": 56 },
+    { "assetId": "prop_millstone_01", "name": "石磨", "posX": 24, "posZ": 66 },
+    { "assetId": "decoration_wood_fence_01", "name": "篱笆", "posX": 16, "posZ": 56 },
+    { "assetId": "decoration_wood_fence_01", "name": "篱笆", "posX": 16, "posZ": 66 },
+    { "assetId": "plant_wutong_01", "name": "梧桐", "posX": 30, "posZ": 78 },
+    { "assetId": "building_temple_01", "name": "山神庙", "posX": 45, "posZ": 10 },
+    { "assetId": "prop_incense_burner_01", "name": "香炉", "posX": 45, "posZ": 14 },
+    { "assetId": "decoration_rune_stele_01", "name": "符石碑", "posX": 50, "posZ": 13 },
+    { "assetId": "plant_cypress_01", "name": "柏树", "posX": 41, "posZ": 6 },
+    { "assetId": "plant_cypress_01", "name": "柏树", "posX": 49, "posZ": 6 },
+    { "assetId": "building_altar_01", "name": "灵脉祭坛", "posX": 37, "posZ": 12 },
+    { "assetId": "building_daoguan_01", "name": "灵脉道观", "posX": 53, "posZ": 12 },
+    { "assetId": "prop_spirit_well_01", "name": "灵泉", "posX": 56, "posZ": 17 },
+    { "assetId": "building_cliff_house_01", "name": "崖居", "posX": 66, "posZ": 8 },
+    { "assetId": "terrain_boulder_01", "name": "山石", "posX": 62, "posZ": 5 },
+    { "assetId": "plant_pine_01", "name": "苍松", "posX": 64, "posZ": 16 },
+    { "assetId": "building_thatched_hut_01", "name": "猎户屋", "posX": 70, "posZ": 24 },
+    { "assetId": "plant_elm_01", "name": "榆树", "posX": 68, "posZ": 20 },
+    { "assetId": "plant_maple_01", "name": "枫树", "posX": 72, "posZ": 18 },
+    { "assetId": "building_residence_02", "name": "竹林茅舍", "posX": 30, "posZ": 16 },
+    { "assetId": "plant_bamboo_01", "name": "翠竹", "posX": 26, "posZ": 12 },
+    { "assetId": "plant_bamboo_01", "name": "翠竹", "posX": 32, "posZ": 8 },
+    { "assetId": "plant_bamboo_01", "name": "翠竹", "posX": 24, "posZ": 20 },
+    { "assetId": "plant_bamboo_01", "name": "翠竹", "posX": 34, "posZ": 20 },
+    { "assetId": "plant_bamboo_01", "name": "翠竹", "posX": 28, "posZ": 24 },
+    { "assetId": "building_bridge_01", "name": "石拱桥", "posX": 78, "posZ": 50, "rotY": 1.5708 },
+    { "assetId": "building_wharf_01", "name": "灵溪渡口", "posX": 74, "posZ": 90 },
+    { "assetId": "prop_river_boat_01", "name": "渡船", "posX": 79, "posZ": 88 },
+    { "assetId": "plant_willow_01", "name": "垂柳", "posX": 73, "posZ": 42 },
+    { "assetId": "plant_willow_01", "name": "垂柳", "posX": 71, "posZ": 62 },
+    { "assetId": "plant_willow_01", "name": "垂柳", "posX": 74, "posZ": 78 },
+    { "assetId": "plant_lotus_01", "name": "莲花", "posX": 81, "posZ": 60 },
+    { "assetId": "decoration_river_lantern_01", "name": "河灯", "posX": 75, "posZ": 70 },
+    { "assetId": "decoration_water_basin_01", "name": "浣衣石盆", "posX": 72, "posZ": 58 },
+    { "assetId": "building_herb_hut_01", "name": "药庐", "posX": 66, "posZ": 42 },
+    { "assetId": "plant_elm_01", "name": "榆树", "posX": 70, "posZ": 46 }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "code": "worldgen_story_plan_v1",
+  "name": "故事规划生成（三层力学引擎 + 风格档案）",
+  "version": 1,
+  "nodes": [
+    {
+      "id": "agent_story_engine",
+      "label": "故事宏观规划（三层力学引擎）",
+      "nodeType": "agent",
+      "agentType": "novel-story-planner",
+      "firstMessage": "【世界设定】\n{{worldSetting}}\n\n【角色档案】\n{{characterSummaries}}\n\n【题材类型】\n{{genre}}\n\n请为这个世界构建三层故事力学引擎。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_story_engine_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "story/story_plan.json",
+      "nodeParams": {
+        "temperature": 0.6,
+        "max_tokens": 8192,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "script_persist_story_engine",
+      "label": "故事引擎落库（actor_story_plan）",
+      "nodeType": "script",
+      "scriptName": "persist_story_engine",
+      "scriptArgs": "",
+      "nodeParams": {
+        "timeout": 60
+      }
+    },
+    {
+      "id": "agent_style_profile",
+      "label": "风格档案生成（世界风格宪法）",
+      "nodeType": "agent",
+      "agentType": "novel-style-profiler",
+      "firstMessage": "【故事引擎】\n{{agent_story_engine_output}}\n\n请基于故事引擎的 tone_reference 与题材类型，生成这个世界（而非一本书）的风格档案。\n\n输出语言：{{language}}。你的所有产出内容——包括 JSON 字段值——都必须使用 {{language}}。",
+      "outputVariable": "agent_style_profile_output",
+      "saveOutputToFile": true,
+      "outputFilePath": "story/style_profile.json",
+      "nodeParams": {
+        "temperature": 0.6,
+        "max_tokens": 4096,
+        "max_turns": 60,
+        "json_mode": true
+      }
+    },
+    {
+      "id": "script_persist_style_profile",
+      "label": "风格档案落库 + 世界氛围提取",
+      "nodeType": "script",
+      "scriptName": "persist_style_profile",
+      "scriptArgs": "",
+      "nodeParams": {
+        "timeout": 60
+      }
+    }
+  ],
+  "edges": [
+    { "source": "__start__", "target": "agent_story_engine" },
+    { "source": "agent_story_engine", "target": "script_persist_story_engine" },
+    { "source": "script_persist_story_engine", "target": "agent_style_profile" },
+    { "source": "agent_style_profile", "target": "script_persist_style_profile" },
+    { "source": "script_persist_style_profile", "target": "__end__" }
+  ],
+  "variables": [
+    {
+      "key": "worldSetting",
+      "name": "世界设定",
+      "type": "textarea",
+      "defaultValue": "",
+      "required": false,
+      "description": "世界观设定摘要（创建任务时自动从项目注入；也可手动提供）"
+    },
+    {
+      "key": "characterSummaries",
+      "name": "角色档案摘要",
+      "type": "textarea",
+      "defaultValue": "",
+      "required": false,
+      "description": "核心角色结构化摘要（创建任务时自动从项目注入，按重要度限流；也可手动提供）"
+    },
+    {
+      "key": "genre",
+      "name": "题材类型",
+      "type": "text",
+      "defaultValue": "",
+      "required": false,
+      "description": "题材类型（可选；创建任务时自动从项目注入）"
+    },
+    {
+      "key": "language",
+      "name": "输出语言",
+      "type": "text",
+      "defaultValue": "中文",
+      "required": true,
+      "description": "所有 agent 的产出语言。中文 / English"
+    }
+  ]
+}

@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.usage.entity;
 
 import jakarta.persistence.*;
@@ -8,9 +26,8 @@ import java.time.LocalDateTime;
 /**
  * AI 调用用量日志实体，对应表 actor_usage_log。
  * <p>职责：记录每次 AI 调用的用量与成本（用户/项目/角色/供应商/模型/场景/token/耗时），
- * 供 P2 管理后台「AI 用量统计」聚合与 P4 世界模拟成本控制使用。
+ * 供 管理后台「AI 用量统计」聚合与 世界模拟成本控制使用。
  * scene 取值：card_gen 角色卡生成 / dialog 对话 / action 行动 / crowd 人群。</p>
- * <p>所属模块：model/entity（实体层-用量子域）</p>
  */
 @Data
 @Entity
@@ -42,8 +59,22 @@ public class ActorUsageLog {
     @Column(length = 100)
     private String model;
 
-    /** 场景：card_gen / dialog / action / crowd */
-    @Column(length = 20, nullable = false)
+    /**
+     * 场景码（card_gen / dialog / action / crowd / persona_bootstrap_fill_a …）。
+     * <p><b>阶段④ 修复</b>：原 {@code length = 20} 装不下 新增的
+     * 两段式建档场景码 {@code persona_bootstrap_fill_a} / {@code persona_bootstrap_fill_b}（各 <b>24</b>字符，
+     * 见 {@code PersonaBootstrapService.SCENE_FILL_A/B}），DB 侧实际报
+     * 该失败导致两段式建档在真库上 100% 不可用（AI 已产出内容却全部作废）。</p>
+     * <p>放宽到 <b>48</b>，与同源的 {@code actor_ai_call_log.scene}（{@code ActorAiCallLog} 亦为 48）一致。
+     * 依据 = 全仓库最长**场景码** 33 字符，
+     * 留 15 字符余量给后续场景码。</p>
+     * <p>⚠️ 口径澄清：{@code crowd_schedule_affiliation}（26 字符）是
+     * {@code PromptTemplateService.CODE_CROWD_SCHEDULE_AFFILIATION} —— 它是 <b>Prompt 模板编码</b>，
+     * 经 {@code PromptTemplateService.render(userId, projectId, code, ph)} 的 {@code code} 形参传入，
+     * 不是经本列的 scene（该路径的 scene 是 {@code crowd_ai}）。因此它<b>不</b>是本列宽度的依据；
+     * 本列只需容纳场景码。</p>
+     */
+    @Column(length = 48, nullable = false)
     private String scene;
 
     /** 输入 token 数 */
@@ -66,7 +97,7 @@ public class ActorUsageLog {
     @Column(name = "duration_ms")
     private Integer durationMs = 0;
 
-    /** 成本（可按模型单价折算，P2 先留空） */
+    /** 成本 */
     @Column(precision = 10, scale = 4)
     private BigDecimal cost;
 

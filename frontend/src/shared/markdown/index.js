@@ -1,6 +1,24 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // HolzynActor · Markdown 渲染（对话 AI 气泡等）
 // 对齐 DeepSeek Harness 排版：正文 16px/28px、代码块高亮、链接识别
-// 优化：highlight.js 按需注册常用语言（避免全量引入导致对话页包过大）
+// highlight.js 按需注册常用语言（避免全量引入导致对话页包过大）
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -57,7 +75,9 @@ const md = new MarkdownIt({
 
 /**
  * 渲染 Markdown 文本为安全 HTML。
+ *
  * @param {string} src 原始 Markdown
+ *
  * @returns {string} HTML（配合 .markdown-body 样式使用）
  */
 export function renderMarkdown(src) {

@@ -2,11 +2,12 @@
 rem ============================================================
 rem  HolzynActor backend launcher (mvn spring-boot:run)
 rem
-rem  - data & upload dirs are canonicalized to the repo root
-rem    (<backend>\..\data and ..\uploads), shared by every run method.
-rem  - Clean start: H2 database is auto-created at <repo>\data.
+rem  IMPORTANT: data & upload dirs are canonicalized to the repo
+rem  root (<backend>\..\data and ..\uploads), so EVERY run method
+rem  (run.bat / run-mvn.bat / java -jar) shares the SAME local
+rem  H2 database "data/holzyn-actor.mv.db" (auto-created on first run).
 rem
-rem  Requires: JDK 21 (JAVA_HOME or on PATH) + Maven
+rem  Requires: JDK 21 (JAVA_HOME) + Maven
 rem  Optional: backend\.env for environment overrides
 rem ============================================================
 setlocal
@@ -18,14 +19,12 @@ rem ---- 2. locate JDK 21 ----
 if defined JAVA_HOME (
     if exist "%JAVA_HOME%\bin\java.exe" goto :find_maven
 )
-where java >nul 2>nul
-if %errorlevel%==0 (
-    for /f "delims=" %%i in ('where java') do set "JAVA_HOME=%%~dpi.."
-    goto :find_maven
+rem (public release) no hardcoded JDK path: install JDK 21 and set JAVA_HOME, or put java on PATH
+if not exist "%JAVA_HOME%\bin\java.exe" (
+    echo [ERROR] JDK 21 not found. Install JDK 21 or set JAVA_HOME.
+    pause
+    exit /b 1
 )
-echo [ERROR] JDK 21 not found. Install JDK 21 or set JAVA_HOME.
-pause
-exit /b 1
 
 :find_maven
 set "PATH=%JAVA_HOME%\bin;%PATH%"
@@ -39,7 +38,5 @@ where mvn >nul 2>nul
 if %errorlevel%==0 (
     mvn -f "%~dp0pom.xml" spring-boot:run > "%~dp0run.log" 2>&1
 ) else (
-    echo [ERROR] Maven not found in PATH. Install Maven or add it to PATH.
-    pause
-    exit /b 1
+    echo [ERROR] Maven not found. Install Maven and put mvn on PATH. & pause & exit /b 1
 )

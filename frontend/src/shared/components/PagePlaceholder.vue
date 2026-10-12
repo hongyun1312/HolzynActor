@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="placeholder-page tech-card">
     <div class="ph-title">{{ title }}</div>
@@ -11,7 +24,7 @@
  * 项目内页面通用占位组件。
  * <p>职责：布局重构过渡期使用——尚未实现的项目内页面渲染一个占位卡片，
  * 标题取路由 meta 的 placeholderTitle（缺省用 meta.title），描述取 placeholderDesc。
- * 各页面在 vP5-2/vP5-3 里程碑中被完整实现替换。</p>
+ * 各页面在 / 里程碑中被完整实现替换。</p>
  */
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'

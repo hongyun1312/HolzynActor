@@ -260,7 +260,7 @@ cd backend
 run-mvn.bat          # 内部已定位 JDK21 与 Maven
 # 方式 B：打包后运行
 mvn -Dmaven.test.skip=true package
-java -jar target/holzyn-actor-1.0.0-SNAPSHOT.jar
+java -jar target/holzyn-actor-1.0.0-beta.1.jar
 # 远程 MySQL（预留）：java -jar ... --spring.profiles.active=remote
 ```
 

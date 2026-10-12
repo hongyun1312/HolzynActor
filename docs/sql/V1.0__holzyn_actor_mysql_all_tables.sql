@@ -1,7 +1,7 @@
 -- ============================================================
 -- HolzynActor（NPC 角色 AI 驱动模块）优化版建表脚本 · MySQL
 -- 目标库：holzyn（actor_ 前缀表，utf8mb4）
--- 依据：远程库 mysql.mbfsr.com:23306/holzyn 实测表结构（2026-08-17 采集）
+-- 依据：远程库 mysql.example.com:3306/holzyn 实测表结构（2026-08-17 采集）
 --       + 历史 V1.0~V2.4 迁移脚本语义
 -- 优化点：
 --   1) 统一字段类型与默认值（TINYINT→INT 归一、DATETIME 精度统一、JSON 列明确）；

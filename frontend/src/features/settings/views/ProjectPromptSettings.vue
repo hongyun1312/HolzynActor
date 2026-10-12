@@ -1,5 +1,26 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="project-prompt-settings">
+    <!-- 统一页头（内嵌设置弹窗时由弹窗标题与 Tab 标签承担） -->
+    <PageHeader
+      v-if="!embedded"
+      title="Prompt 模板"
+      :desc="projectId
+        ? '项目级模板覆盖：解析顺序为项目覆盖 > 用户覆盖 > 内置，「恢复默认」删除项目覆盖回退低一级。'
+        : '用户级模板覆盖（全局）：所有项目在无项目覆盖时回退使用此处保存的覆盖。'"
+    />
     <!-- 项目级/用户级 Prompt 模板说明（双模式；内嵌设置弹窗时由弹窗顶部说明承担） -->
     <el-alert v-if="!embedded && projectId" type="success" :closable="false" show-icon class="pt-alert"
       title="Prompt 模板为项目级独立（随 .holzyn 包导入导出）。"
@@ -60,7 +81,7 @@
 
 <script setup>
 /**
- * 设置-Prompt 模板（前端布局重构 V1.0，设计文档 §3.10.3；后端项目化改造 V2.0；双模式改造 V1.2）。
+ * 设置-Prompt 模板。
  * <p>职责：项目/全局双模式 Prompt 模板管理——模板列表（编码/名称/版本/来源[项目覆盖/用户覆盖/内置]）+
  * 编辑视图（大文本域 + 占位符说明面板）+ 恢复默认（删除覆盖回退低一级）。
  * 项目模式：查询/保存/重置均带 projectId（项目级覆盖，随 .holzyn 包导入导出）；
@@ -71,6 +92,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchPromptTemplates, savePromptTemplate, resetPromptTemplate } from '@/shared/api'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const route = useRoute()
 // 当前项目 ID：项目空间内存在；全局设置（首页 /settings）为 null（= 用户级覆盖）

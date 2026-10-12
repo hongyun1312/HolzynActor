@@ -1,7 +1,7 @@
 package com.holzyn.actor.domain.crowd.service;
 
 import com.holzyn.actor.common.BizException;
-import com.holzyn.actor.domain.crowd.entity.ActorOrdinaryNpc;
+import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
 import com.holzyn.actor.domain.crowd.vo.FieldDictPreviewVO;
 import com.holzyn.actor.domain.crowd.vo.FieldDictVO;
 import com.holzyn.actor.domain.crowd.vo.OrdinaryNpcDraftVO;
@@ -205,9 +205,9 @@ class OrdinaryNpcServiceTest {
     // ==================== 多字段筛选匹配（match） ====================
 
     /** 构造带基本档案的 NPC（包私有静态方法级辅助） */
-    private static ActorOrdinaryNpc npc(String name, String gender, String race, String subRace, Integer age,
+    private static ActorCharacter npc(String name, String gender, String race, String subRace, Integer age,
                                         String affiliation, String occupation, String location, String detail) {
-        ActorOrdinaryNpc n = new ActorOrdinaryNpc();
+        ActorCharacter n = new ActorCharacter();
         n.setName(name);
         n.setGender(gender);
         n.setRace(race);
@@ -225,7 +225,7 @@ class OrdinaryNpcServiceTest {
      */
     @Test
     void matchFiltersByAllFields() {
-        ActorOrdinaryNpc n = npc("阿福", "男", "人族", "汉族", 28, "临江渔村", "渔夫", "临江码头", "世代打渔");
+        ActorCharacter n = npc("阿福", "男", "人族", "汉族", 28, "临江渔村", "渔夫", "临江码头", "世代打渔");
         assertTrue(OrdinaryNpcService.match(n, q("gender", "男")));
         assertTrue(OrdinaryNpcService.match(n, q("race", "人族")));
         assertTrue(OrdinaryNpcService.match(n, q("subRace", "汉族")));
@@ -241,7 +241,7 @@ class OrdinaryNpcServiceTest {
      */
     @Test
     void matchFiltersByAgeRangeAndKeyword() {
-        ActorOrdinaryNpc n = npc("阿福", "男", "人族", "汉族", 28, "临江渔村", "渔夫", "临江码头", "世代打渔");
+        ActorCharacter n = npc("阿福", "男", "人族", "汉族", 28, "临江渔村", "渔夫", "临江码头", "世代打渔");
         assertTrue(OrdinaryNpcService.match(n, q("ageMin", 28, "ageMax", 30)));
         assertTrue(OrdinaryNpcService.match(n, q("ageMin", 28, "ageMax", 28)));
         assertFalse(OrdinaryNpcService.match(n, q("ageMin", 29, "ageMax", 30)));
@@ -257,7 +257,7 @@ class OrdinaryNpcServiceTest {
      */
     @Test
     void matchHandlesNullQueryAndBlankFilters() {
-        ActorOrdinaryNpc n = npc("阿福", null, "人族", null, null, null, null, null, null);
+        ActorCharacter n = npc("阿福", null, "人族", null, null, null, null, null, null);
         assertTrue(OrdinaryNpcService.match(n, null));
         assertTrue(OrdinaryNpcService.match(n, new OrdinaryNpcService.NpcQuery(null, null, null, null, null,
                 null, "", null, null, null, null)));
@@ -275,54 +275,54 @@ class OrdinaryNpcServiceTest {
      */
     @Test
     void sorterSortsByWhitelistedFieldAndDirection() {
-        ActorOrdinaryNpc a = npc("阿福", "男", "人族", "汉族", 28, "临江渔村", "渔夫", "临江码头", "");
-        ActorOrdinaryNpc b = npc("翠娘", "女", "妖精", "猫妖", 35, "会馆", "商贩", "集市", "");
-        ActorOrdinaryNpc c = npc("铁柱", "男", "人族", "汉族", null, "临江渔村", "铁匠", "铁匠铺", "");
+        ActorCharacter a = npc("阿福", "男", "人族", "汉族", 28, "临江渔村", "渔夫", "临江码头", "");
+        ActorCharacter b = npc("翠娘", "女", "妖精", "猫妖", 35, "会馆", "商贩", "集市", "");
+        ActorCharacter c = npc("铁柱", "男", "人族", "汉族", null, "临江渔村", "铁匠", "铁匠铺", "");
 
         // 按年龄 asc：28、35、null（null 排最后）
-        List<ActorOrdinaryNpc> l1 = new ArrayList<>(List.of(b, a, c));
+        List<ActorCharacter> l1 = new ArrayList<>(List.of(b, a, c));
         l1.sort(OrdinaryNpcService.sorter(q("sortBy", "age", "sortDir", "asc")));
         assertEquals("阿福", l1.get(0).getName());
         assertEquals("翠娘", l1.get(1).getName());
         assertEquals("铁柱", l1.get(2).getName());
 
         // 按年龄 desc：35、28、null（null 仍排最后）
-        List<ActorOrdinaryNpc> l2 = new ArrayList<>(List.of(a, b, c));
+        List<ActorCharacter> l2 = new ArrayList<>(List.of(a, b, c));
         l2.sort(OrdinaryNpcService.sorter(q("sortBy", "age", "sortDir", "desc")));
         assertEquals("翠娘", l2.get(0).getName());
         assertEquals("阿福", l2.get(1).getName());
         assertEquals("铁柱", l2.get(2).getName());
 
         // 按名称 asc（Java String.compareTo 按 UTF-16 码点：翠 U+7FE0 < 铁 U+94C1 < 阿 U+963F）
-        List<ActorOrdinaryNpc> l3 = new ArrayList<>(List.of(a, b, c));
+        List<ActorCharacter> l3 = new ArrayList<>(List.of(a, b, c));
         l3.sort(OrdinaryNpcService.sorter(q("sortBy", "name", "sortDir", "asc")));
         assertEquals("翠娘", l3.get(0).getName());
         assertEquals("铁柱", l3.get(1).getName());
         assertEquals("阿福", l3.get(2).getName());
 
         // 按归属 asc（临江渔村 U+4E34 < 会馆 U+4F1A；同值稳定：阿福、铁柱均在翠娘前）
-        List<ActorOrdinaryNpc> l4 = new ArrayList<>(List.of(b, a, c));
+        List<ActorCharacter> l4 = new ArrayList<>(List.of(b, a, c));
         l4.sort(OrdinaryNpcService.sorter(q("sortBy", "affiliation")));
         assertEquals("阿福", l4.get(0).getName());
         assertEquals("铁柱", l4.get(1).getName());
         assertEquals("翠娘", l4.get(2).getName());
 
         // 按种族 desc（妖 U+5996 > 人 U+4EBA → 妖精在前；同值稳定：阿福、铁柱人族）
-        List<ActorOrdinaryNpc> l5 = new ArrayList<>(List.of(a, b, c));
+        List<ActorCharacter> l5 = new ArrayList<>(List.of(a, b, c));
         l5.sort(OrdinaryNpcService.sorter(q("sortBy", "race", "sortDir", "desc")));
         assertEquals("翠娘", l5.get(0).getName());
         assertEquals("阿福", l5.get(1).getName());
         assertEquals("铁柱", l5.get(2).getName());
 
         // 默认按 id asc（null 查询 / 非法字段）
-        ActorOrdinaryNpc x = new ActorOrdinaryNpc();
+        ActorCharacter x = new ActorCharacter();
         x.setId(5L);
         x.setName("x");
-        ActorOrdinaryNpc y = new ActorOrdinaryNpc();
+        ActorCharacter y = new ActorCharacter();
         y.setId(2L);
         y.setName("y");
-        List<ActorOrdinaryNpc> ids = List.of(x, y);
-        List<ActorOrdinaryNpc> sorted = ids.stream().sorted(OrdinaryNpcService.sorter(null)).toList();
+        List<ActorCharacter> ids = List.of(x, y);
+        List<ActorCharacter> sorted = ids.stream().sorted(OrdinaryNpcService.sorter(null)).toList();
         assertEquals(2L, sorted.get(0).getId());
         assertEquals(5L, sorted.get(1).getId());
     }
@@ -334,7 +334,7 @@ class OrdinaryNpcServiceTest {
      */
     @Test
     void fieldValueNormalizesByField() {
-        ActorOrdinaryNpc n = npc("阿福", null, " 人族 ", null, null, " 临江渔村 ", null, null, null);
+        ActorCharacter n = npc("阿福", null, " 人族 ", null, null, " 临江渔村 ", null, null, null);
         assertEquals("人族", OrdinaryNpcService.fieldValue(n, OrdinaryNpcService.FIELD_RACE));
         assertEquals("临江渔村", OrdinaryNpcService.fieldValue(n, OrdinaryNpcService.FIELD_AFFILIATION));
         assertEquals("未知职业", OrdinaryNpcService.fieldValue(n, OrdinaryNpcService.FIELD_OCCUPATION));
@@ -346,9 +346,9 @@ class OrdinaryNpcServiceTest {
      */
     @Test
     void fieldGroupOverviewGroupsByField() {
-        ActorOrdinaryNpc a = npc("阿福", null, "人族", "汉族", null, "临江渔村", "渔夫", null, null);
-        ActorOrdinaryNpc b = npc("阿贵", null, "人族", "回族", null, "临江渔村", "农夫", null, null);
-        ActorOrdinaryNpc c = npc("猫娘", null, "妖精", "猫妖", null, "会馆", "侍女", null, null);
+        ActorCharacter a = npc("阿福", null, "人族", "汉族", null, "临江渔村", "渔夫", null, null);
+        ActorCharacter b = npc("阿贵", null, "人族", "回族", null, "临江渔村", "农夫", null, null);
+        ActorCharacter c = npc("猫娘", null, "妖精", "猫妖", null, "会馆", "侍女", null, null);
         String ov = OrdinaryNpcService.fieldGroupOverview(List.of(a, b, c), OrdinaryNpcService.FIELD_RACE);
         assertTrue(ov.contains("人族"));
         assertTrue(ov.contains("共 2 人"));

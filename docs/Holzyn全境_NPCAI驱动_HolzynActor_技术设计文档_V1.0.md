@@ -783,7 +783,7 @@ HolzynWeb（CT109，holzyn.com）                  Casdoor                  acto
 ### 14.3 OIDC 落地状态（2026-08-12）
 
 - **真实 OIDC 已启用**：`holzyn.actor.casdoor.enabled` 默认 `true`（演示模式默认关闭）；`SecurityConfig` / `CurrentUserProvider` 默认值一致化，任意启动方式均进入真实 SSO。
-- **复用 web 客户端**：client-id=`holzyn-web`、issuer `https://casdoor.mbfsr.com:14443`（公网统一端口 14443，运营商封锁 443）。
+- **复用 web 客户端**：client-id=`holzyn-web`、issuer `https://casdoor.example.com:14443`（公网统一端口 14443，运营商封锁 443）。
 - **回调白名单**：已在 Casdoor `holzyn-web` 应用 redirect-uris 追加 actor 3 条（本地 `http://localhost:8081/login/oauth2/code/casdoor`、内网 CT110、公网 `https://actor.holzyn.com:14443/login/oauth2/code/casdoor`）；**新增域名/端口时需同步追加**，否则真实 SSO 回调会被拒绝。
 - **时钟偏移兜底**：`holzyn.actor.casdoor.clock-skew-seconds=600`（CT108 系统时钟比本地快约 5 分钟，id_token `iat` 位于未来被默认 60s 校验拒绝；放大容忍后保留 iss/aud 严格校验；CT108 NTP 校准后可收紧）。
 - **登录回跳**：`holzyn.actor.frontend-url`（默认 `http://localhost:5174`，登录/登出成功回跳前端 SPA；生产改公网 `https://actor.holzyn.com`）。
@@ -799,8 +799,8 @@ HolzynWeb（CT109，holzyn.com）                  Casdoor                  acto
 ```
 用户浏览器 ──https://actor.holzyn.com:14443──> Nginx（X-Forwarded-*）
                                               └──> holzyn-actor 单 JAR（Tomcat，Spring Boot）
-                                                      ├── MySQL（mysql.mbfsr.com:23306 / holzyn 库，actor_ 表）
-                                                      └── Casdoor（https://casdoor.mbfsr.com，OIDC，组织 holzyn）
+                                                      ├── MySQL（mysql.example.com:3306 / holzyn 库，actor_ 表）
+                                                      └── Casdoor（https://casdoor.example.com，OIDC，组织 holzyn）
 跳转来源：HolzynWeb 控制台（CT109）──SSO 跳转──> actor.holzyn.com
 ```
 

@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.settings.dto;
 
 import jakarta.validation.constraints.NotBlank;
@@ -8,7 +26,6 @@ import lombok.Data;
  * AI 模型 API 新增/编辑请求 DTO。
  * <p>用途：承载「新增 API」与「编辑 API」两种场景的请求体（同一 DTO 复用）。
  * 创建时 apiKey 必填；编辑时 apiKey 传空表示「保持原 Key 不变」。</p>
- * <p>所属模块：model/dto（数据传输层-用户 AI API 子域）</p>
  */
 @Data
 public class ModelApiDTO {
@@ -41,7 +58,7 @@ public class ModelApiDTO {
     /** 是否支持流式（缺省 true，供后续 SSE 对话链路选择） */
     private Boolean supportsStream;
 
-    /** 是否启用该供应商的 embedding 能力（P3 RAG；开启后复用 baseUrl/apiKey 调 /embeddings） */
+    /** 是否启用该供应商的 embedding 能力 */
     private Boolean embeddingEnabled;
 
     /** embedding 模型名（开启 embedding 时必填，如 doubao-embedding / bge-m3 / text-embedding-3-small） */

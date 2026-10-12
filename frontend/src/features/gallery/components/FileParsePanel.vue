@@ -1,20 +1,33 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="file-parse-panel">
     <!-- 顶部：选择文件 + 解析按钮 -->
-    <div class="page-header">
-      <div>
-        <div class="page-title">文件解析</div>
-        <div class="page-desc">上传世界观 txt / md 文件，AI 自动分段（地理/势力/规则/文化/历史/补充/角色）→ 扩写 → 建项目落库 → 角色分离入库，下方控制台实时输出后端解析日志（工作流进度）。</div>
-      </div>
-      <div class="header-ops">
+    <PageHeader
+      size="sm"
+      title="文件解析"
+      desc="上传世界观 txt / md 文件，AI 自动分段（地理/势力/规则/文化/历史/补充/角色）→ 扩写 → 建项目落库 → 角色分离入库，下方控制台实时输出后端解析日志（工作流进度）。"
+    >
+      <template #actions>
         <el-button type="primary" plain @click="fileInputRef?.click()">
           <el-icon><HIcon name="UploadFilled" /></el-icon>&nbsp;选择文件
         </el-button>
         <el-button type="success" :loading="parsing" :disabled="files.length === 0" @click="doParse">
           <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;解析
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 扩写开关：不足 1500 字的分段是否自动 AI 扩写（默认关闭，由用户决定） -->
     <div class="expand-bar tech-card">
@@ -61,7 +74,7 @@
 
 <script setup>
 /**
- * 文件解析面板（2026-08-19 新建项目页重构）。
+ * 文件解析面板（新建项目页重构）。
  * <p>职责：上传 txt/md 文件 → 调用「文件解析工作流」SSE 端点（分段→扩写→建项目落表→知识库存储→角色分离入库），
  * 下方控制台实时输出后端解析日志（工作流进度）；完成后弹窗询问是否进行默认世界初始化。</p>
  */
@@ -70,6 +83,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchModelApis, parseWorkflowStream } from '@/shared/api'
 import WorkflowConsole from './WorkflowConsole.vue'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const router = useRouter()
 
@@ -184,7 +198,7 @@ function askInit(projectId, projectName) {
     router.replace(`/project/${projectId}/init`)
   }).catch((action) => {
     if (action === 'cancel') {
-      router.replace(`/project/${projectId}/dashboard`)
+      router.replace(`/project/${projectId}/sandbox`)
     }
     // close（点 X）留在本页
   })
@@ -203,10 +217,7 @@ watch(() => files.value.length, () => { if (apiReady.value === null) checkApiRea
 
 <style scoped>
 .file-parse-panel { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; }
-.page-title { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); }
-.page-desc { font-size: 0.82rem; color: var(--text-secondary); margin-top: 4px; line-height: 1.6; }
-.header-ops { display: flex; gap: 8px; flex-shrink: 0; }
+/* 页头（size="sm"）样式由全局类提供 */
 /* 扩写开关条 */
 .expand-bar { display: flex; align-items: center; gap: 10px; padding: 12px 18px; }
 .expand-label { font-size: 0.85rem; color: var(--text-primary); font-weight: 600; }

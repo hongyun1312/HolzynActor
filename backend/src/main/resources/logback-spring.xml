@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  HolzynActor Logback 配置（2026-08-20 引入自定义 Appender 支持调试前端实时日志）。
+  - 控制台：沿用 Spring Boot 默认控制台 Appender（CONSOLE），pattern 由 application.yml
+    logging.pattern.console 覆盖（默认 "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"）。
+  - 调试缓冲：DEBUG_BUFFER Appender（com.holzyn.actor.domain.debug.log.DebugLogAppender）
+    把每条日志推入内存环形缓冲（容量 holzyn.actor.debug.log-buffer-size，默认 2000），
+    由 SSE /api/debug/logs/stream 实时推送；开关 holzyn.actor.debug.log-append.enabled
+    （默认 true）由 Spring 配置 Bean（DebugLogBuffer 构造）同步到全局静态开关。
+  - 级别：与 application.yml logging.level 对齐（com.holzyn.actor INFO / hibernate 降噪）。
+  - 文件：FILE_ASYNC Appender（2026-09-21 世界运行证据链抓修）——把全部日志（含
+    com.holzyn.actor.ai 的 DEBUG 全量 AI 输入/输出）落盘到 holzyn.actor.log.file
+    （默认 logs/holzyn-actor.log，可用 HOLOZYN_ACTOR_LOG_FILE 覆盖绝对路径）。
+    背景：本轮世界运行测试反复出现「日志比实际调用少得多」的假象，根因有二——
+    ① 调试前端用的 com.holzyn.actor.ai logger 是 additivity=false，事件只进内存环形缓冲
+    （DEBUG_BUFFER），永远不冒泡到 root/CONSOLE → AI 接入层的 INFO/DEBUG 日志（含语义缓存
+    命中、向量化调用）在控制台/管道里根本不存在；② 控制台输出经 PowerShell 管道（Tee-Object）
+    转发本身有丢失。故证据采集改由应用自己写文件，控制台保持 INFO 不刷屏。
+-->
+<configuration>
+    <!-- Spring Boot 默认值（CONSOLE_LOG_PATTERN 等，供控制台 Appender 使用） -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <!-- Spring Boot 控制台 Appender（CONSOLE），pattern 自动应用 application.yml 配置 -->
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <!-- 文件路径来自 Spring 环境（holzyn.actor.log.file；缺省 logs/holzyn-actor.log） -->
+    <springProperty scope="context" name="APP_LOG_FILE" source="holzyn.actor.log.file"
+                    defaultValue="logs/holzyn-actor.log"/>
+
+    <!-- 调试内存缓冲 Appender：推入 DebugLogBuffer（环形 2000），SSE 实时日志数据源 -->
+    <appender name="DEBUG_BUFFER" class="com.holzyn.actor.domain.debug.log.DebugLogAppender"/>
+
+    <!-- 落盘 Appender（UTF-8 固定，避免 zh-CN 区域下按 GBK 写盘产生乱码证据） -->
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>${APP_LOG_FILE}</file>
+        <append>true</append>
+        <immediateFlush>true</immediateFlush>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 异步包装：落盘 I/O 挪出世界引擎/决策线程（queueSize 大 + 不丢事件，宁可慢一点也不丢证据） -->
+    <appender name="FILE_ASYNC" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="FILE"/>
+        <queueSize>16384</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <includeCallerData>false</includeCallerData>
+    </appender>
+
+    <!-- 应用日志级别（与 application.yml 对齐） -->
+    <logger name="com.holzyn.actor" level="INFO"/>
+    <logger name="org.hibernate.SQL" level="WARN"/>
+    <logger name="org.hibernate.orm.deprecation" level="ERROR"/>
+
+    <!-- AI 接入层（2026-08-20 调试前端：AI 输入/输出实时日志）：
+         DEBUG 全量（完整 system/user 输入 + 输出）默认开启但只进调试缓冲——
+         additivity=false 使其不冒泡到 root（控制台保持 INFO 不刷屏），
+         调试前端「实时日志」页可看到每次 AI 调用的完整输入/输出；
+         2026-09-21 起同时写 FILE_ASYNC（世界运行测试需要的 AI 层证据在此唯一可得）。 -->
+    <logger name="com.holzyn.actor.ai" level="DEBUG" additivity="false">
+        <appender-ref ref="DEBUG_BUFFER"/>
+        <appender-ref ref="FILE_ASYNC"/>
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="DEBUG_BUFFER"/>
+        <appender-ref ref="FILE_ASYNC"/>
+    </root>
+</configuration>

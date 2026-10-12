@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.account.controller;
 
 import com.holzyn.actor.common.R;
@@ -21,7 +39,6 @@ import java.util.Map;
  * PUT /api/local-account 保存/更新账户（所有字段选填，onboarded 置 1 视为完成向导）；
  * POST /api/local-account/onboarded 单独标记首次向导完成；
  * GET /api/local-account/me 返回会话信息（供前端判断是否已完成首次设置，替代原 /api/auth/me）。</p>
- * <p>所属模块：domain/account/controller（本地账户功能域-控制器）</p>
  */
 @RestController
 @RequestMapping("/api/local-account")
@@ -45,6 +62,7 @@ public class LocalAccountController {
      * <p>约定：请求体各字段选填；传入的字段以非 null 覆盖；onboarded=1 一并标记完成首次向导。</p>
      *
      * @param vo 本地账户请求内容
+     *
      * @return 保存后的 VO
      */
     @PutMapping
@@ -64,8 +82,6 @@ public class LocalAccountController {
 
     /**
      * 会话信息（替代原 /api/auth/me）：返回是否已完成首次设置 + 本地账户信息。
-     *
-     * @return { onboarded: boolean, account: LocalAccountVO }
      */
     @GetMapping("/me")
     public R<Map<String, Object>> me() {
@@ -74,5 +90,25 @@ public class LocalAccountController {
         body.put("onboarded", Integer.valueOf(1).equals(vo.getOnboarded()));
         body.put("account", vo);
         return R.ok(body);
+    }
+
+    /**
+     * 记录「上次所在项目」（世界沙盘 S1：应用启动直达上次项目）。
+     * <p>前端在进入项目空间时调用；请求体 { projectId }；只写不清（返回画廊不清空）。</p>
+     *
+     * @param body 请求体 { projectId }
+     *
+     * @return 更新后的 VO
+     */
+    @PostMapping("/last-project")
+    public R<LocalAccountVO> setLastProject(@RequestBody Map<String, Object> body) {
+        Long projectId = null;
+        Object raw = body == null ? null : body.get("projectId");
+        if (raw instanceof Number n) {
+            projectId = n.longValue();
+        } else if (raw != null) {
+            projectId = Long.valueOf(String.valueOf(raw));
+        }
+        return R.ok(localAccountService.setLastProject(projectId));
     }
 }

@@ -1,7 +1,22 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="topology-view">
-    <!-- 全局关系拓扑页：整页容器渲染全项目角色/普通人群/幽灵关系网络图；
-         点击节点在右上角弹出角色卡片；幽灵角色（暂无具体信息）可「前往补充」→ 跳 NPC 角色页预填新增 -->
+    <!--
+      全局关系拓扑页：整页容器渲染全项目角色/普通人群/幽灵关系网络图；
+      点击节点在右上角弹出角色卡片；幽灵角色（暂无具体信息）可「前往补充」→ 跳 NPC 角色页预填新增
+    -->
     <RelationTopology
       :project-id="projectId"
       :active="true"
@@ -19,7 +34,6 @@
  * 「暂无具体信息，请前往补充」）→ 跳转项目「NPC 角色」页自动打开新增弹窗并预填角色名；
  * 保存成功后回跳本页，后端已按名称全表扫描关系表完成关联。</p>
  * <p>数据源与渲染全部复用 RelationTopology（variant=page）。</p>
- * <p>所属模块：features/character（角色功能域）</p>
  */
 import { useRoute, useRouter } from 'vue-router'
 import RelationTopology from '../components/RelationTopology.vue'

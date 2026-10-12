@@ -2,7 +2,7 @@
 
 > **文档类型**：数据库结构说明
 > **日期**：2026-08-17
-> **数据来源**：远程库 `mysql.mbfsr.com:23306/holzyn` 实测（2026-08-17 采集）+ 历史迁移脚本语义整理
+> **数据来源**：远程库 `mysql.example.com:3306/holzyn` 实测（2026-08-17 采集）+ 历史迁移脚本语义整理
 > **建表脚本**：`docs/sql/V1.0__holzyn_actor_mysql_all_tables.sql`（MySQL）、`docs/sql/H2__holzyn_actor_all_tables.sql`（H2 本地）
 > **说明**：本模块业务表统一 `actor_` 前缀，存放在 web 共享库 `holzyn` 中；`sys_user` 为 web 模块共享表。
 

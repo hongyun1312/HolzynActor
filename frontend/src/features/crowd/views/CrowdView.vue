@@ -1,12 +1,24 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="crowd-view">
     <!-- 页头 -->
-    <div class="page-header">
-      <div>
-        <div class="page-title">普通型人群</div>
-        <div class="page-desc">AI 依据世界观生成普通型 NPC（每人独立档案）：标准字段数据（字段字典）→ 居民生成 → 关系生成 → 两级 AI 调度。</div>
-      </div>
-      <div class="header-ops">
+    <PageHeader
+      title="普通型人群"
+      desc="AI 依据世界观生成普通型 NPC（每人独立档案）：标准字段数据（字段字典）→ 居民生成 → 关系生成 → 两级 AI 调度。"
+    >
+      <template #actions>
         <el-button :loading="relationAllLoading" @click="openAllRelations">
           <el-icon><HIcon name="Connection" /></el-icon>&nbsp;为全部普通 NPC 生成关系
         </el-button>
@@ -16,8 +28,8 @@
         <el-button type="primary" @click="openGen">
           <el-icon><HIcon name="Highlight" /></el-icon>&nbsp;AI 生成居民
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 环境摘要 -->
     <el-alert v-if="envSummary" class="env-alert" type="success" :closable="false" show-icon>
@@ -116,7 +128,12 @@
       <el-table-column prop="age" label="年龄" width="70" sortable="custom" />
       <el-table-column prop="affiliation" label="归属" width="130" sortable="custom" show-overflow-tooltip />
       <el-table-column prop="occupation" label="职业" width="110" sortable="custom" show-overflow-tooltip />
-      <el-table-column prop="location" label="所在地" width="130" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="所在地" width="150" sortable="custom" prop="location" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.location">{{ row.location }}<el-tag v-if="row.locationId" size="small" type="success" effect="plain">已归一</el-tag></span>
+          <span v-else>—</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="detail" label="角色详情" min-width="200" show-overflow-tooltip />
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
@@ -151,7 +168,7 @@
         :page-sizes="[10, 20, 50, 100]" background @size-change="onSizeChange" @current-change="onPageChange" />
     </div>
 
-    <!-- 新增/编辑居民对话框（含次级种族，字段取自字段字典可手动补充） -->
+    <!-- /编辑居民对话框（含次级种族，字段取自字段字典可手动补充） -->
     <el-dialog v-model="editDialog.visible" :title="editDialog.mode === 'create' ? '新增居民' : `编辑居民 · ${editDialog.form.name}`"
       width="680px" :close-on-click-modal="false">
       <el-form ref="editFormRef" :model="editDialog.form" :rules="editRules" label-width="92px">
@@ -420,7 +437,7 @@
 
 <script setup>
 /**
- * 普通型人群页（项目级，2026-08-19 分类体系重构后）。
+ * 普通型人群页（项目级， 分类体系重构后）。
  * <p>职责：普通型 NPC 的表格化管理——新字段列（名称/性别/种族/次级种族/年龄/归属/职业/所在地/详情/关系/操作），
  * 全部字段可筛选可排序（走后端 NpcQuery + sortBy/sortDir 白名单）+ 关键词 + 分页；
  * 标准字段数据（字段字典）管理（AI 一次性拟定 → 预览确认【字段树含出处 + 主次分类字段选择】→ 整体保存；
@@ -440,8 +457,10 @@ import {
   generateCrowdRelations, generateAllCrowdRelations, batchSaveCrowdRelations,
   scheduleOrdinaryNpcs, scheduleOrdinaryNpcsAi, fetchOrdinaryNpcEnvSummary, fetchOrdinaryNpcRuntime,
   setOrdinaryNpcScheduleEnabled,
-  fetchCharacterRelations, batchSaveCharacterRelations
+  fetchCharacterRelations, batchSaveCharacterRelations,
+  fetchWorldLocations
 } from '@/shared/api'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const props = defineProps({ projectId: { type: [String, Number], default: null } })
 const route = useRoute()
@@ -521,7 +540,16 @@ onMounted(() => {
   loadFieldDict()
   loadEnv()
   loadRuntime()
+  loadWorldLocations()
 })
+
+/** 加载世界观地点表作为所在地候选（失败静默，回退既有居民地点）。 */
+async function loadWorldLocations() {
+  try {
+    const locs = await fetchWorldLocations(projectId)
+    worldLocationNames.value = (locs || []).map(l => l.name).filter(Boolean)
+  } catch (_) { worldLocationNames.value = [] }
+}
 
 // ==================== 列表 ====================
 
@@ -632,7 +660,7 @@ function onSortChange({ prop, order }) {
   search()
 }
 
-// ==================== CRUD ====================
+//
 
 /** 打开新增居民对话框。 */
 function openCreate() {
@@ -652,7 +680,7 @@ function openEdit(row) {
   editDialog.visible = true
 }
 
-/** 新增/编辑保存。 */
+/** /编辑保存。 */
 async function saveEdit() {
   await editFormRef.value.validate()
   editSaving.value = true
@@ -911,7 +939,9 @@ async function confirmGen() {
 
 /**
  * 打开单普通 NPC 关系管理对话框。
- * @param row          表格行（普通 NPC）
+ *
+ * @param row 表格行（普通 NPC）
+ *
  * @param autoGenerate 是否自动发起 AI 生成（「生成」按钮）
  */
 async function openRelation(row, autoGenerate) {
@@ -1137,7 +1167,12 @@ const subRaceOptions = computed(() => unique((fieldDict.value.race || [])
 const affiliationOptions = computed(() => unique((fieldDict.value.affiliation || []).map(r => r.level1)))
 const occupationOptions = computed(() => unique((fieldDict.value.occupation || []).map(r => r.level1)))
 const genderOptions = ['男', '女', '无性', '自定义']
-const locationOptions = computed(() => unique(list.value.map(r => r.location).filter(Boolean)))
+// ：所在地候选 = 世界观地点表优先 + 既有居民自由文本兜底（可自由输入；保存时后端归一到地点表）
+const worldLocationNames = ref([])
+const locationOptions = computed(() => unique([
+  ...worldLocationNames.value,
+  ...list.value.map(r => r.location).filter(Boolean)
+]))
 
 /** 编辑表单里当前种族对应的次级种族选项。 */
 const formSubRaceOptions = computed(() => {
@@ -1191,11 +1226,8 @@ function unique(arr) {
 </script>
 
 <style scoped>
-.crowd-view { max-width: 1360px; margin: 0 auto; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-.page-title { font-size: 1.3rem; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
-.page-desc { font-size: 0.85rem; color: var(--text-secondary); }
-.header-ops { display: flex; gap: 8px; flex-wrap: wrap; }
+.crowd-view { width: 100%; max-width: var(--content-max-w, 1440px); margin: 0 auto; }
+/* 页头样式由全局类 .page-header/.page-title/.page-desc/.page-actions 提供 */
 .env-alert { margin-bottom: 14px; }
 .env-title { font-weight: 600; margin-bottom: 4px; }
 .env-body { font-size: 0.88rem; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap; }

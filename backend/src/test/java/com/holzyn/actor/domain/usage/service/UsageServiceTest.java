@@ -85,6 +85,9 @@ class UsageServiceTest {
         assertEquals("记忆抽取", UsageService.sceneName("memory"));
         assertEquals("导入解析", UsageService.sceneName("import"));
         assertEquals("向量化（RAG）", UsageService.sceneName("embedding"));
+        // A4（2026-08-21）：世界事件生成场景——此前用量误记 dialog、trace 记 world_event（V2-1），
+        // 修正后需有中文标签，且 trace scene 与用量 scene 同字符串「world_event」
+        assertEquals("世界事件生成", UsageService.sceneName("world_event"));
         // 未知场景回退原始编码
         assertEquals("unknown_scene", UsageService.sceneName("unknown_scene"));
         assertEquals("unknown", UsageService.sceneName(null));
@@ -104,7 +107,7 @@ class UsageServiceTest {
         l.setTokenOut(20);
         l.setDurationMs(100);
         l.setCreatedAt(LocalDateTime.of(2026, 8, 18, 10, 30, 0));
-        Map<String, Object> row = UsageService.detailRow(l, "示例角色", "角色卡生成");
+        Map<String, Object> row = UsageService.detailRow(l, "罗小黑", "角色卡生成");
         // 原字段保留
         assertEquals(5L, row.get("id"));
         assertEquals(3L, row.get("characterId"));
@@ -113,7 +116,7 @@ class UsageServiceTest {
         assertEquals(20, row.get("tokenOut"));
         assertEquals(100, row.get("durationMs"));
         // 新增可读字段
-        assertEquals("示例角色", row.get("characterName"));
+        assertEquals("罗小黑", row.get("characterName"));
         assertEquals("角色卡生成", row.get("sceneName"));
     }
 }

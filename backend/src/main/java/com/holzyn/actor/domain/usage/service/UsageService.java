@@ -1,7 +1,25 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.usage.service;
 
-import com.holzyn.actor.domain.character.entity.ActorCharacter;
-import com.holzyn.actor.domain.character.repository.ActorCharacterRepository;
+import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
+import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
 import com.holzyn.actor.domain.project.entity.ActorProject;
 import com.holzyn.actor.domain.usage.entity.ActorUsageLog;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
@@ -22,10 +40,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * AI 用量统计服务（P2 管理后台「AI 用量」核心）。
+ * AI 用量统计服务。
  * <p>职责：按当前用户聚合 actor_usage_log（项目/模型/场景/日期维度 + 明细分页），
  * 供首页「AI 用量」Tab 展示；所有数据按 userId 归属隔离。</p>
- * <p>所属模块：service/usage（用量子域）</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -43,13 +60,17 @@ public class UsageService {
     /**
      * 统计当前用户的 AI 用量（支持 projectId / scene / model / dateRange 筛选）。
      *
-     * @param userId    归属用户 ID
+     * @param userId 归属用户 ID
+     *
      * @param projectId 项目筛选（可空）
-     * @param scene     场景筛选（可空：card_gen/dialog/action）
-     * @param model     模型筛选（可空）
+     *
+     * @param scene 场景筛选（可空：card_gen/dialog/action）
+     *
+     * @param model 模型筛选（可空）
+     *
      * @param startDate 起始日期（可空，yyyy-MM-dd）
-     * @param endDate   结束日期（可空，yyyy-MM-dd）
-     * @return {summary, byProject, byScene, byModel, byDate, detail}
+     *
+     * @param endDate 结束日期（可空，yyyy-MM-dd）
      */
     public Map<String, Object> stats(Long userId, Long projectId, String scene, String model,
                                      String startDate, String endDate) {
@@ -79,7 +100,7 @@ public class UsageService {
         result.put("byDate", groupBy(filtered, l -> l.getCreatedAt() == null
                 ? "" : l.getCreatedAt().toLocalDate().toString(), d -> d));
         // 明细：为每行补充 characterName（角色名）与 sceneName（场景中文名），
-        // 避免前端直接展示 characterId 数字与 scene 编码（2026-08-18 增强）
+        // 避免前端直接展示 characterId 数字与 scene 编码（增强）
         Set<Long> charIds = filtered.stream()
                 .map(ActorUsageLog::getCharacterId)
                 .filter(Objects::nonNull)
@@ -98,6 +119,7 @@ public class UsageService {
      * 汇总指标（调用次数 / 输入输出 token / 总耗时）。
      *
      * @param logs 日志列表
+     *
      * @return 汇总 Map
      */
     static Map<String, Object> summary(List<ActorUsageLog> logs) {
@@ -117,8 +139,10 @@ public class UsageService {
     /**
      * 计算输入缓存命中率（命中 / (命中 + 未命中)，保留 1 位小数，单位 %）。
      *
-     * @param hit  命中缓存的输入 token 数
+     * @param hit 命中缓存的输入 token 数
+     *
      * @param miss 未命中缓存的输入 token 数
+     *
      * @return 命中率（0-100）；无缓存数据时返回 0
      */
     static double cacheHitRate(int hit, int miss) {
@@ -129,9 +153,12 @@ public class UsageService {
     /**
      * 按分组键聚合（count / tokenIn / tokenOut / durationMs）。
      *
-     * @param logs          日志列表
-     * @param keyExtractor  分组键提取器
+     * @param logs 日志列表
+     *
+     * @param keyExtractor 分组键提取器
+     *
      * @param labelResolver 分组标签解析器
+     *
      * @return 分组聚合列表
      */
     static List<Map<String, Object>> groupBy(List<ActorUsageLog> logs, Function<ActorUsageLog, String> keyExtractor,
@@ -161,7 +188,9 @@ public class UsageService {
      * 解析项目名（id=0 视为「未归属项目」）。
      *
      * @param userId 归属用户 ID
-     * @param idStr  项目 ID 字符串
+     *
+     * @param idStr 项目 ID 字符串
+     *
      * @return 项目名
      */
     private String projectName(Long userId, String idStr) {
@@ -184,7 +213,9 @@ public class UsageService {
      * 再过滤角色列表，只保留属于这些项目的角色——避免越权泄露其他用户角色名。</p>
      *
      * @param userId 归属用户 ID
-     * @param ids    角色 ID 集合（可空）
+     *
+     * @param ids 角色 ID 集合（可空）
+     *
      * @return 角色ID → 角色名 映射（找不到的角色不包含）
      */
     private Map<Long, String> characterNameMap(Long userId, Collection<Long> ids) {
@@ -205,9 +236,12 @@ public class UsageService {
      * 额外补充 characterName（角色名，无角色=项目级）与 sceneName（场景中文名）。
      * 静态包私有便于单测。</p>
      *
-     * @param l             用量日志实体
+     * @param l 用量日志实体
+     *
      * @param characterName 角色名（已解析，缺失时传入兜底文案）
-     * @param sceneName     场景中文名（已解析，未知场景回退原始编码）
+     *
+     * @param sceneName 场景中文名（已解析，未知场景回退原始编码）
+     *
      * @return 明细行 Map
      */
     static Map<String, Object> detailRow(ActorUsageLog l, String characterName, String sceneName) {
@@ -233,13 +267,15 @@ public class UsageService {
 
     /**
      * 场景标签。
-     * <p>2026-08-18 补齐：title_gen / location_extract / memory / import / embedding 等
-     * 既有记录场景此前缺标签（按场景页显示原始编码）。静态包私有便于单测。</p>
+     * <p>齐：title_gen / location_extract / memory / import / embedding 等
+     * 既有记录场景此前缺标签（按场景页显示原始编码）。静态包私有便于单测；
+     * 提升为 public 供调试前端用量聚合复用（与 AI Trace 场景标签同源）。</p>
      *
      * @param scene 场景编码
+     *
      * @return 中文标签
      */
-    static String sceneName(String scene) {
+    public static String sceneName(String scene) {
         if (scene == null) {
             return "unknown";
         }
@@ -253,6 +289,7 @@ public class UsageService {
             case "memory" -> "记忆抽取";
             case "import" -> "导入解析";
             case "embedding" -> "向量化（RAG）";
+            case "semantic_cache_embedding" -> "向量化（语义缓存查询）";
             case "relation_gen" -> "关系生成";
             case "crowd_category_gen" -> "字段字典拟定";
             case "ordinary_npc_gen" -> "居民批量生成";
@@ -260,6 +297,8 @@ public class UsageService {
             case "world_segment" -> "世界观分段";
             case "world_segment_characters" -> "角色分离";
             case "world_time_infer" -> "世界时间推断";
+            case "world_event" -> "世界事件生成";
+            case "world_event_polish" -> "跨日事件润色";
             default -> scene;
         };
     }
@@ -267,8 +306,10 @@ public class UsageService {
     /**
      * 解析日期范围（isStart=true 取当天 00:00；false 取当天 23:59:59）。
      *
-     * @param raw     原始日期字符串
+     * @param raw 原始日期字符串
+     *
      * @param isStart 是否为起始
+     *
      * @return 时间（可空）
      */
     private LocalDateTime parseDate(String raw, boolean isStart) {

@@ -1,5 +1,23 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 /**
- * HarmonyOS 图标注册表（华为鸿蒙 HarmonyOS_Icons.zip，2026-08-18 全量接入）。
+ * HarmonyOS 图标注册表（华为鸿蒙 HarmonyOS_Icons.zip， 全量接入）。
  * <p>职责：① 用 `?raw` 静态引入已提取到 src/assets/icons 的 HarmonyOS SVG 文本；
  * ② 提供「Element Plus 图标名 → HarmonyOS 图标文件名」的映射（HIcon 组件按此解析）。</p>
  * <p>说明：图标 SVG 已在提取时统一把 `fill="#000000"` 改为 `fill="currentColor"`，
@@ -8,7 +26,6 @@
  * 太阳→ic_public_brightness、月亮→ic_public_brightness_filled、魔法棒→ic_public_highlight、
  * 仪表盘→ic_public_home、知识库→ic_public_albums、世界观→ic_public_worldclock、
  * API→ic_public_security、用量→ic_public_view_list、展开箭头→ic_public_drawer。</p>
- * <p>所属模块：shared/components（通用组件）</p>
  */
 import ic_public_add from '@/assets/icons/ic_public_add.svg?raw'
 import ic_public_albums from '@/assets/icons/ic_public_albums.svg?raw'
@@ -49,6 +66,7 @@ import ic_public_upload from '@/assets/icons/ic_public_upload.svg?raw'
 import ic_public_upload_filled from '@/assets/icons/ic_public_upload_filled.svg?raw'
 import ic_public_view_list from '@/assets/icons/ic_public_view_list.svg?raw'
 import ic_public_worldclock from '@/assets/icons/ic_public_worldclock.svg?raw'
+import ic_gallery_map_all from '@/assets/icons/ic_gallery_map_all.svg?raw'
 
 /** HarmonyOS 图标文件名 → SVG 文本（供 HIcon 渲染；key 不带 .svg 后缀） */
 export const HARMONY_ICONS = {
@@ -90,7 +108,8 @@ export const HARMONY_ICONS = {
   ic_public_upload,
   ic_public_upload_filled,
   ic_public_view_list,
-  ic_public_worldclock
+  ic_public_worldclock,
+  ic_gallery_map_all
 }
 
 /** Element Plus 图标名 → HarmonyOS 图标文件名（HIcon 的 name 传 Element 名即可自动替换） */
@@ -136,5 +155,8 @@ export const ELEMENT_TO_HARMONY = {
   Search: 'ic_public_search',
   MoreFilled: 'ic_public_more',
   UploadFilled: 'ic_public_upload_filled',
-  FolderOpened: 'ic_public_folder'
+  FolderOpened: 'ic_public_folder',
+  // 世界沙盘 S1：地图定位标记（来自 HarmonyOS_Icons.zip ic_gallery_map_all）
+  MapLocation: 'ic_gallery_map_all',
+  LocationFilled: 'ic_gallery_map_all'
 }

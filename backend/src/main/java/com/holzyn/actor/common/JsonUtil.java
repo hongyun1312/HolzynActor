@@ -1,10 +1,27 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.common;
 
 /**
  * JSON 文本提取工具。
  * <p>职责：从模型输出中提取合法 JSON 文本（剥离 Markdown 代码块 / 首尾说明文字），
  * 供行动决策、群聊发言人评估、世界事件生成等结构化输出场景复用。</p>
- * <p>所属模块：common（通用组件）</p>
  */
 public final class JsonUtil {
 
@@ -17,6 +34,7 @@ public final class JsonUtil {
      * <p>处理顺序：去首尾空白 → 剥离 ```json 代码块 → 截取首个 { 到最后一个 } 之间的内容。</p>
      *
      * @param content 模型输出文本
+     *
      * @return 提取后的 JSON 文本（无可用 JSON 时返回 null）
      */
     public static String extractJson(String content) {
@@ -59,8 +77,10 @@ public final class JsonUtil {
      * 从 JSON 文本中提取指定顶层字段的字符串值。
      * <p>用于在无需完整反序列化时快速取单个字段（解析失败返回 null，不抛异常）。</p>
      *
-     * @param json  合法 JSON 对象文本
+     * @param json 合法 JSON 对象文本
+     *
      * @param field 顶层字段名
+     *
      * @return 字段字符串值（字段缺失/非文本/解析失败返回 null）
      */
     public static String extractField(String json, String field) {

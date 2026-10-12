@@ -1,3 +1,16 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="relation-topology" :class="variant">
     <!-- 空态①：项目无任何角色/普通人群 -->
@@ -20,10 +33,13 @@
     </div>
 
     <template v-else>
-      <!-- 工具栏：生成关系按钮 + 节点/关系计数 -->
+      <!-- 工具栏：生成关系按钮 + 关系管理抽屉 + 节点/关系计数 -->
       <div class="topo-toolbar">
         <span class="topo-count">节点 {{ nodes.length }} · 关系 {{ relations.length }}</span>
         <div class="topo-actions">
+          <el-button size="small" @click="openDrawer()">
+            <el-icon><HIcon name="DataAnalysis" /></el-icon>&nbsp;关系管理
+          </el-button>
           <el-button v-if="variant === 'tab'" size="small" type="primary" :loading="generating"
             :disabled="!selectedCharacterId" :title="selectedCharacterId ? '' : '请先在左侧选中一个角色'"
             @click="handleGenerate('character')">
@@ -119,39 +135,141 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 关系列表抽屉（用户：手动增删改 CRUD） -->
+    <el-drawer v-model="drawerVisible" title="角色关系管理" size="600px">
+      <div class="rel-drawer">
+        <div class="rel-drawer-ops">
+          <el-button type="primary" size="small" @click="openCreate()">
+            <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增关系
+          </el-button>
+          <span class="rel-drawer-hint">好感随互动自动增减 · 支持手动编辑与 AI 精修</span>
+        </div>
+        <el-table :data="relations" size="small" max-height="calc(100vh - 200px)" empty-text="暂无关系数据（可使用上方「生成」让 AI 识别）">
+          <el-table-column label="从" min-width="90" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.fromName || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="关系" width="120">
+            <template #default="{ row }">
+              <span class="rel-type" :style="{ color: colorForType(row.relationType) }">{{ row.relationType || '未知' }}</span>
+              <div class="rel-state">{{ relStateText(row) }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="到" min-width="90" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.toName || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="好感" width="64" align="center">
+            <template #default="{ row }">
+              <span :class="['rel-aff', (row.affinity || 0) > 0 ? 'pos' : (row.affinity || 0) < 0 ? 'neg' : '']">{{ fmtAff(row.affinity) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="信任" width="56" align="center">
+            <template #default="{ row }">{{ row.trust ?? 0 }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="168" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+              <el-button link type="warning" size="small" :loading="refiningId === row.id" @click="handleAiRefine(row)">AI精修</el-button>
+              <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-drawer>
+
+    <!-- 关系编辑弹窗（新增/编辑共用，） -->
+    <el-dialog v-model="formVisible" :title="formMode === 'edit' ? '编辑关系' : '新增关系'" width="540px" top="8vh">
+      <el-form label-width="76px" size="default">
+        <el-form-item label="从（起点）">
+          <el-select v-model="form.fromKey" filterable placeholder="选择起点角色（NPC/普通人群/待补充）">
+            <el-option v-for="n in nodes" :key="n.id" :label="nodeLabel(n)" :value="n.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="到（目标）">
+          <el-select v-model="form.toKey" filterable placeholder="选择目标角色">
+            <el-option v-for="n in nodes" :key="n.id" :label="nodeLabel(n)" :value="n.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关系类型">
+          <el-input v-model="form.relationType" placeholder="如：师徒 / 挚友 / 敌对（50 字内）" maxlength="50" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="form.description" type="textarea" :rows="2" placeholder="关系描述（可空）" maxlength="255" />
+        </el-form-item>
+        <el-form-item label="好感">
+          <el-input-number v-model="form.affinity" :min="-100" :max="100" :step="1" controls-position="right" />
+          <span class="rel-form-hint">-100 厌恶 ~ 100 喜爱</span>
+        </el-form-item>
+        <el-form-item label="信任">
+          <el-input-number v-model="form.trust" :min="0" :max="100" :step="1" controls-position="right" />
+          <span class="rel-form-hint">0~100</span>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="form.relationState" placeholder="自动按好感/信任计算">
+            <el-option label="自动计算（按好感/信任）" value="auto" />
+            <el-option label="陌生" value="stranger" />
+            <el-option label="相识" value="acquaintance" />
+            <el-option label="朋友" value="friend" />
+            <el-option label="亲密" value="intimate" />
+            <el-option label="对手" value="rival" />
+            <el-option label="敌对" value="hostile" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="formVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!form.fromKey || !form.toKey" @click="saveForm">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 拓扑右键菜单（：边=编辑/删除；节点/画布=新增关系） -->
+    <div v-if="ctxMenu.visible" class="rel-ctxmenu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @contextmenu.prevent>
+      <template v-if="ctxMenu.type === 'edge'">
+        <div class="rel-ctx-title">{{ ctxMenu.edge ? `${ctxMenu.edge.fromName} → ${ctxMenu.edge.toName}` : '' }}</div>
+        <div class="rel-ctx-item" @click="ctxEditEdge"><el-icon><HIcon name="Edit" /></el-icon>&nbsp;编辑关系</div>
+        <div class="rel-ctx-item danger" @click="ctxDeleteEdge"><el-icon><HIcon name="Delete" /></el-icon>&nbsp;删除关系</div>
+      </template>
+      <template v-else>
+        <div class="rel-ctx-item" @click="ctxAddRelation"><el-icon><HIcon name="Plus" /></el-icon>&nbsp;{{ ctxMenu.type === 'node' ? `以「${ctxNodeName}」为起点新增关系` : '新增关系' }}</div>
+      </template>
+    </div>
   </div>
 </template>
 
 <script setup>
 /**
- * 角色关系拓扑图（角色页「关系拓扑」Tab + 全局拓扑页共用组件，AntV G6 v5）。
+ * 角色关系拓扑图。
  * <p>三大能力：</p>
  * <ul>
- *   <li><b>G6 生命周期管理</b>：onMounted 建图 → onBeforeUnmount 销毁；ResizeObserver 跟随容器尺寸；
- *       激活（Tab 切回/路由进入）时重算尺寸 + fitView；主题/主色变化（MutationObserver 监听 html[data-theme]/--accent）
- *       自动按新令牌重建图；大图动画关闭保证 50~200+ 节点流畅。</li>
- *   <li><b>主题令牌映射</b>：读 DSH 令牌（--accent/--bg-layer-1/--text-primary/…）映射为 G6 画布色，
- *       深浅双主题与个性化主色/世界题材联动自动跟随。</li>
- *   <li><b>三类节点 + 关系类型配色/图例</b>：NPC（主色系，大小=重要度）/ 普通人群成员（青绿色系）/
- *       幽灵·待补充（灰色虚线）；关系类型内置 ~40 语义色 + 哈希兜底，图例区展示。</li>
- *   <li><b>AI 关系生成（预览确认）</b>：variant=tab 生成当前选中角色的关系（需先选中）；variant=page
- *       一键生成全项目关系；已有数据时弹窗选择「重建/补充」；AI 结果弹预览列表（可勾选）确认后批量入库。</li>
- *   <li><b>右上角角色卡片（variant=page）</b>：点击节点 → 右上角卡片显示角色信息（NPC=档案/普通人群=档案）；
- *       两表都没有（幽灵）→「暂无具体信息，请前往补充」→ emit navigate-supplement（父级跳新增角色页并预填名字）。</li>
- *   <li><b>交互</b>：拖拽平移/滚轮缩放/拖拽节点；hover 高亮相邻节点（degree=1）其余降透明；
- *       点击高亮其直接关联、其余弱化（透明度 0.45 仍清晰可见）；点击空白画布取消选中、全部恢复全量显示；
- *       Tooltip 悬浮详情。</li>
- *   <li><b>空态提示</b>：无角色 / 加载失败（可重试）/ 有角色无关系三种空态。</li>
+ * <li><b>生命周期管理</b>：onMounted 建图 → onBeforeUnmount 销毁；ResizeObserver 跟随容器尺寸；
+ * 激活（Tab 切回/路由进入）时重算尺寸 + fitView；主题/主色变化（MutationObserver 监听 html[data-theme]/--accent）
+ * 自动按新令牌重建图；大图动画关闭保证 50~200+ 节点流畅。</li>
+ * <li><b>主题令牌映射</b>：读 DSH 令牌（--accent/--bg-layer-1/--text-primary/…）映射为 画布色，
+ * 深浅双主题与个性化主色/世界题材联动自动跟随。</li>
+ * <li><b>三类节点 + 关系类型配色/图例</b>：NPC（主色系，大小=重要度）/ 普通人群成员（青绿色系）/
+ * 幽灵·待补充（灰色虚线）；关系类型内置 ~40 语义色 + 哈希兜底，图例区展示。</li>
+ * <li><b>AI 关系生成（预览确认）</b>：variant=tab 生成当前选中角色的关系（需先选中）；variant=page
+ * 一键生成全项目关系；已有数据时弹窗选择「重建/补充」；AI 结果弹预览列表（可勾选）确认后批量入库。</li>
+ * <li><b>右上角角色卡片（variant=page）</b>：点击节点 → 右上角卡片显示角色信息（NPC=档案/普通人群=档案）；
+ * 两表都没有（幽灵）→「暂无具体信息，请前往补充」→ emit navigate-supplement（父级跳新增角色页并预填名字）。</li>
+ * <li><b>交互</b>：拖拽平移/滚轮缩放/拖拽节点；hover 高亮相邻节点（degree=1）其余降透明；
+ * 点击高亮其直接关联、其余弱化（透明度 0.45 仍清晰可见）；点击空白画布取消选中、全部恢复全量显示；
+ * Tooltip 悬浮详情。</li>
+ * <li><b>空态提示</b>：无角色 / 加载失败（可重试）/ 有角色无关系三种空态。</li>
  * </ul>
  * <p>数据源：GET /api/projects/{id}/character-relations（后端返回 nodes[npc/crowd/ghost] + relations[fromKey/toKey]）。</p>
- * <p>所属模块：features/character（角色功能域）</p>
  */
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Graph } from '@antv/g6'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchCharacterRelations, generateCharacterRelations, batchSaveCharacterRelations } from '@/shared/api'
+import {
+  fetchCharacterRelations, generateCharacterRelations, batchSaveCharacterRelations,
+  createCharacterRelation, updateCharacterRelation, deleteCharacterRelation, aiRefineCharacterRelation
+} from '@/shared/api'
+// 统一身份引用
+import { npcRef } from '@/shared/npcRef'
 
-// ==================== Props / Emits ====================
+//
 const props = defineProps({
   /** 项目 ID（数据源归属） */
   projectId: { type: Number, required: true },
@@ -167,13 +285,13 @@ const props = defineProps({
 const emit = defineEmits(['select-character', 'navigate-supplement', 'clear-selection'])
 
 // ==================== 数据状态 ====================
-/** state: loading | ready | error | no-characters */
+
 const state = ref('loading')
 const errorMsg = ref('')
-const nodes = ref([])        // G6 节点 [{ id: key, data: {...} }]
-const edges = ref([])        // G6 边 [{ id: 'rel-..', source, target, data }]
+const nodes = ref([])        // 节点 [{ id: key, data: {...} }]
+const edges = ref([])        //
 const relations = ref([])    // 原始关系（空态/计数/图例用）
-const typeCount = reactive({}) // { [relationType]: count }
+const typeCount = reactive({}) //
 const cardNode = ref(null)   // page 变体右上角卡片当前节点
 const pageSelectedKey = ref('') // page 变体内部选中节点 key
 
@@ -188,6 +306,202 @@ let lastLoadedKey = ''
 const generating = ref(false)
 const saving = ref(false)
 const preview = reactive({ visible: false, mode: 'supplement', scope: 'character', characterId: null, items: [] })
+
+// ==================== 关系手动 CRUD（抽屉/编辑弹窗/右键菜单） ====================
+const drawerVisible = ref(false)          // 关系列表抽屉
+const formVisible = ref(false)            // /编辑弹窗
+const formMode = ref('create')            // create | edit
+const editingId = ref(null)               // 编辑中的关系 id
+const refiningId = ref(null)              // AI 精修中的关系 id
+const ctxMenu = reactive({ visible: false, x: 0, y: 0, type: 'canvas', edge: null, nodeKey: '' })
+/** /编辑表单（fromKey/toKey 为节点 key：npc-/crowd-/ghost-） */
+const form = reactive({
+  fromKey: '', toKey: '',
+  relationType: '', description: '',
+  affinity: 0, trust: 0, relationState: 'auto'
+})
+
+/** 关系状态中文标签（后端返回 label 优先，兜底本地映射） */
+const REL_STATE_LABEL = {
+  stranger: '陌生', acquaintance: '相识', friend: '朋友',
+  intimate: '亲密', rival: '对手', hostile: '敌对'
+}
+function relStateLabel(state) {
+  return REL_STATE_LABEL[state] || state || '—'
+}
+/** 抽屉「关系」列：状态标签（含动态字段时展示） */
+function relStateText(row) {
+  if (row.affinity == null && row.trust == null) return '未演化'
+  return relStateLabel(row.relationState)
+}
+/** 好感格式化（0 显示 0；缺省显示 0） */
+function fmtAff(v) {
+  if (v == null) return 0
+  return v > 0 ? `+${v}` : String(v)
+}
+/** 节点下拉标签：名称 + 类型徽标 */
+function nodeLabel(n) {
+  const d = n.data || {}
+  const tag = d.kind === 'crowd' ? '普通' : d.kind === 'ghost' ? '待补' : (d.type === 'common' ? 'NPC' : '特殊')
+  return `${d.name}（${tag}）`
+}
+/** 节点 key → {ref, name}（npc-{id}/crowd-{id} → 统一身份引用 npc:{id}；ghost → 仅名称） */
+function refOfNodeKey(key) {
+  const n = nodes.value.find(x => x.id === key)
+  if (!n) return { ref: null, name: '' }
+  // ：单主表后特殊型与普通型共用 actor_profile 一套 id 空间，端点引用统一 npc:{id}
+  if (key.startsWith('npc-')) return { ref: npcRef(key.slice(4)), name: n.data.name }
+  if (key.startsWith('crowd-')) return { ref: npcRef(key.slice(6)), name: n.data.name }
+  return { ref: null, name: n.data.name }
+}
+
+/** 打开关系列表抽屉 */
+function openDrawer() {
+  drawerVisible.value = true
+}
+
+/** 打开新增弹窗（preFromKey=右键起点可空） */
+function openCreate(preFromKey) {
+  formMode.value = 'create'
+  editingId.value = null
+  form.fromKey = preFromKey || ''
+  form.toKey = ''
+  form.relationType = ''
+  form.description = ''
+  form.affinity = 0
+  form.trust = 0
+  form.relationState = 'auto'
+  formVisible.value = true
+}
+
+/** 打开编辑弹窗（预填行数据） */
+function openEdit(row) {
+  const edge = edges.value.find(e => e.id === `rel-${row.id}`)
+  formMode.value = 'edit'
+  editingId.value = row.id
+  form.fromKey = edge ? edge.source : ''
+  form.toKey = edge ? edge.target : ''
+  form.relationType = row.relationType || ''
+  form.description = row.description || ''
+  form.affinity = row.affinity ?? 0
+  form.trust = row.trust ?? 0
+  form.relationState = row.relationState || 'auto'
+  formVisible.value = true
+}
+
+/** 保存（新增/编辑）：端点变更时才提交 ref/名称，避免误改端点 */
+async function saveForm() {
+  if (!form.fromKey || !form.toKey) return
+  saving.value = true
+  try {
+    const f = refOfNodeKey(form.fromKey)
+    const t = refOfNodeKey(form.toKey)
+    const isEdit = formMode.value === 'edit'
+    const editing = relations.value.find(r => r.id === editingId.value)
+    // 端点是否发生变更：与现有行的 fromRef/toRef 比较（ghost 行 ref=null）
+    const fChanged = !isEdit || !sameRef(f.ref, editing && editing.fromRef)
+    const tChanged = !isEdit || !sameRef(t.ref, editing && editing.toRef)
+    const payload = {
+      relationType: form.relationType || null,
+      description: form.description || null,
+      affinity: form.affinity,
+      trust: form.trust,
+      relationState: form.relationState === 'auto' ? null : form.relationState
+    }
+    if (fChanged) { payload.fromRef = f.ref; payload.fromName = f.name || null }
+    if (tChanged) { payload.toRef = t.ref; payload.toName = t.name || null }
+    if (isEdit) {
+      await updateCharacterRelation(editingId.value, payload)
+      ElMessage.success('关系已更新')
+    } else {
+      await createCharacterRelation(props.projectId, payload)
+      ElMessage.success('关系已新增')
+    }
+    formVisible.value = false
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+/** 两端 ref 是否相同（null 与 null 视为相同——ghost 未变更时不重提） */
+function sameRef(a, b) {
+  return (a || '') === (b || '')
+}
+
+/** 删除关系（确认后） */
+async function handleDelete(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除关系「${row.fromName || '?'} → ${row.toName || '?'}（${row.relationType || '未知'}）」吗？`,
+      '删除关系', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+  } catch (_) {
+    return
+  }
+  try {
+    await deleteCharacterRelation(row.id)
+    ElMessage.success('关系已删除')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message || '删除失败')
+  }
+}
+
+/** AI 精修单条关系 */
+async function handleAiRefine(row) {
+  refiningId.value = row.id
+  try {
+    const res = await aiRefineCharacterRelation(props.projectId, row.id)
+    ElMessage.success(`AI 精修完成：好感 ${res?.affinity ?? row.affinity ?? 0} · 信任 ${res?.trust ?? row.trust ?? 0} · ${relStateLabel(res?.relationState || row.relationState)}`)
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message || 'AI 精修失败')
+  } finally {
+    refiningId.value = null
+  }
+}
+
+// ==================== 右键菜单（拓扑右键 CRUD） ====================
+
+/** 关闭右键菜单 */
+function closeCtxMenu() {
+  ctxMenu.visible = false
+  ctxMenu.edge = null
+  ctxMenu.nodeKey = ''
+}
+
+/** 右键菜单当前节点名（节点右键「以 X 为起点」文案） */
+const ctxNodeName = computed(() => {
+  const n = nodes.value.find(x => x.id === ctxMenu.nodeKey)
+  return n ? n.data.name : ''
+})
+
+/** 边右键 → 编辑 */
+function ctxEditEdge() {
+  const edge = ctxMenu.edge
+  closeCtxMenu()
+  if (!edge) return
+  const row = relations.value.find(r => r.id === edge.data?.id)
+  if (row) openEdit(row)
+}
+
+/** 边右键 → 删除 */
+function ctxDeleteEdge() {
+  const edge = ctxMenu.edge
+  closeCtxMenu()
+  if (!edge) return
+  const row = relations.value.find(r => r.id === edge.data?.id)
+  if (row) handleDelete(row)
+}
+
+/** 节点/画布右键 → 新增关系（节点右键以其为起点） */
+function ctxAddRelation() {
+  const fromKey = ctxMenu.nodeKey || ''
+  closeCtxMenu()
+  openCreate(fromKey)
+}
 
 // ==================== 关系类型配色（内置常见类型 + 哈希兜底） ====================
 const RELATION_PALETTE = {
@@ -213,7 +527,7 @@ function colorForType(type) {
   return FALLBACK_PALETTE[h % FALLBACK_PALETTE.length]
 }
 
-// ==================== 主题令牌映射（DSH → G6 色板） ====================
+// ==================== 主题令牌映射 ====================
 function readTokens() {
   const root = document.documentElement
   const cs = getComputedStyle(root)
@@ -284,7 +598,13 @@ async function load() {
         id: `rel-${r.id}`,
         source: r.fromKey,
         target: r.toKey,
-        data: { id: r.id, fromName: r.fromName, toName: r.toName, relationType: r.relationType || '未知关系', description: r.description || '' }
+        data: {
+          id: r.id, fromName: r.fromName, toName: r.toName, relationType: r.relationType || '未知关系',
+          description: r.description || '', fromRef: r.fromRef || null, toRef: r.toRef || null,
+          affinity: r.affinity ?? 0, trust: r.trust ?? 0,
+          relationState: r.relationState || '', relationStateLabel: r.relationStateLabel || '',
+          lastInteractionAt: r.lastInteractionAt || null
+        }
       }))
     relations.value = rels || []
     Object.keys(typeCount).forEach(k => delete typeCount[k])
@@ -326,14 +646,14 @@ function stateLabel(s) {
   return ({ idle: '空闲', walk: '行走', stop: '停留', talk: '交谈', rest: '休息' })[s] || s || '—'
 }
 
-// ==================== G6 节点样式（按类型） ====================
+// ==================== 节点样式（按类型） ====================
 function nodeSizeOf(d) {
   return 26 + (d.data.importance || 3) * 4
 }
 
 /**
  * 节点基础样式（按 kind 区分：NPC 主色系 / 普通人群 青绿 / 幽灵 灰色虚线）。
- * <p>2026-08-18 颜色可见性修复：此前普通 NPC/普通人群/幽灵的填充都向背景色混了 82%~86%，
+ * <p>颜色可见性修复：此前普通 NPC/普通人群/幽灵的填充都向背景色混了 82%~86%，
  * 浅色主题下节点与角色名几乎不可见。现统一加深填充（混背景 45%~50%）、加粗描边（1.2/1.4→2）、
  * 标签全部改用主文本色（幽灵用次级文本色但仍清晰），三类配色体系不变。</p>
  */
@@ -347,7 +667,7 @@ function nodeStyleOf(d) {
     labelFontSize: 11,
     labelFill: t.textPrimary, // 角色名统一主文本色，深浅主题均清晰可见
     labelFontWeight: 500,
-    // G6 v5.1.1 updateStyle 合并缺陷修复：状态样式清除后，仅存在于状态样式（selected/inactive）
+    // v5.1.1 updateStyle 合并缺陷修复：状态样式清除后，仅存在于状态样式（selected/inactive）
     // 而未在基样式声明的属性会残留在元素 attributes 里（见 §32.6）。这里基样式显式声明，
     // 使 inactive 的 opacity 0.45 / labelOpacity 0.75 在清除后必然被基值覆盖还原。
     opacity: 1,
@@ -378,7 +698,7 @@ function nodeStyleOf(d) {
   }
 }
 
-// ==================== G6 图构建 ====================
+// ==================== 图构建 ====================
 function buildGraph() {
   if (!containerRef.value || state.value !== 'ready') return null
   const el = containerRef.value
@@ -417,7 +737,7 @@ function buildGraph() {
           lineWidth: 2
         },
         inactive: {
-          // 2026-08-18 可见性：原 0.18/0.35 太暗（关系表为空时选中任意角色其余全暗到不可见）；
+          // 可见性：原 0.18/0.35 太暗（关系表为空时选中任意角色其余全暗到不可见）；
           // 放宽到 0.45/0.75，未选中节点仍清晰可见、只是弱化，选中态靠光晕+实心+加粗区分
           opacity: 0.45,
           labelOpacity: 0.75
@@ -432,7 +752,7 @@ function buildGraph() {
         opacity: 0.85,
         endArrow: true,
         endArrowSize: 7,
-        // G6 v5.1.1 updateStyle 合并缺陷修复：selected 状态的 labelText 清除后不会从元素属性中移除，
+        // v5.1.1 updateStyle 合并缺陷修复：selected 状态的 labelText 清除后不会从元素属性中移除，
         // 基样式显式 labelText:''（假值 → 不渲染标签）兜底，保证取消选中后边上文字必然消失。
         labelText: ''
       },
@@ -456,7 +776,7 @@ function buildGraph() {
     },
     layout: {
       type: 'force',
-      // ⚠ 参数符号（2026-08-18 修复）：G6 v5 force 布局的 nodeStrength 源码里
+      // ⚠ 参数符号： v5 force 布局的 nodeStrength 源码里
       // weight = (factor / coulombDisScale²) × nodeStrength，正值=斥力（默认 1000）、负值=引力。
       // 此前误传 -200 → 所有节点互相吸引 → 全部堆到画布中心；删掉改回默认正值即可正常散开。
       // linkDistance 控制边两端距离；preventOverlap + nodeSize 防重叠。
@@ -509,20 +829,74 @@ function buildGraph() {
     }
   })
 
+  // ：拓扑右键菜单（边=编辑/删除；节点=以该节点为起点新增；画布=新增）
+  graph.on('edge:contextmenu', (ev) => {
+    const id = String(ev.target?.id || '')
+    if (!id.startsWith('rel-')) return
+    ev.preventDefault?.()
+    ctxMenu.edge = edges.value.find(x => x.id === id) || null
+    ctxMenu.nodeKey = ''
+    ctxMenu.type = 'edge'
+    openCtxAt(ev)
+  })
+  graph.on('node:contextmenu', (ev) => {
+    const key = String(ev.target?.id || '')
+    if (!key || key.startsWith('rel-')) return
+    ev.preventDefault?.()
+    ctxMenu.edge = null
+    ctxMenu.nodeKey = key
+    ctxMenu.type = 'node'
+    openCtxAt(ev)
+  })
+  graph.on('canvas:contextmenu', (ev) => {
+    ev.preventDefault?.()
+    ctxMenu.edge = null
+    ctxMenu.nodeKey = ''
+    ctxMenu.type = 'canvas'
+    openCtxAt(ev)
+  })
+
   return graph
 }
 
-/** Tooltip 内容（节点按 kind 展示；边展示关系） */
+/**
+ * 右键菜单定位：优先取 事件客户端坐标，兜底由画布容器 + 画布坐标换算；
+ * 靠近视口边缘时向内收敛避免溢出。
+ */
+function openCtxAt(ev) {
+  let px = 0
+  let py = 0
+  const c = ev.client
+  if (c && (c.x != null || c[0] != null)) {
+    px = c.x ?? c[0]
+    py = c.y ?? c[1]
+  } else if (ev.clientX != null) {
+    px = ev.clientX
+    py = ev.clientY
+  } else if (containerRef.value) {
+    const rect = containerRef.value.getBoundingClientRect()
+    px = rect.left + (ev.x ?? 0)
+    py = rect.top + (ev.y ?? 0)
+  }
+  ctxMenu.x = Math.max(4, Math.min(px, window.innerWidth - 240))
+  ctxMenu.y = Math.max(4, Math.min(py, window.innerHeight - 140))
+  ctxMenu.visible = true
+}
+
+/** Tooltip 内容（节点按 kind 展示；边展示关系 + 动态字段） */
 function tooltipContent(event) {
   const id = String(event.target.id || '')
   if (id.startsWith('rel-')) {
     const e = edges.value.find(x => x.id === id)
     if (!e) return ''
     const d = e.data
+    const aff = (d.affinity ?? 0) > 0 ? `+${d.affinity}` : (d.affinity ?? 0)
     return `<div class="topo-tooltip">
       <div class="tt-title">${esc(d.fromName)} → ${esc(d.toName)}</div>
       <div class="tt-row"><span class="tt-k">关系</span><span class="tt-dot" style="background:${colorForType(d.relationType)}"></span>${esc(d.relationType)}</div>
+      <div class="tt-row"><span class="tt-k">好感</span><span>${aff}</span><span class="tt-k">信任</span><span>${d.trust ?? 0}</span><span class="tt-k">状态</span><span>${esc(d.relationStateLabel || relStateLabel(d.relationState))}</span></div>
       ${d.description ? `<div class="tt-row"><span class="tt-k">描述</span>${esc(d.description)}</div>` : ''}
+      <div class="tt-ghost">右键可编辑/删除 · 好感随互动自动增减</div>
     </div>`
   }
   const n = nodes.value.find(x => x.id === id)
@@ -583,7 +957,7 @@ function highlightCenter() {
 /**
  * 应用选中高亮：中心节点 + 其直接关联节点/边 → selected 状态（光晕+加粗+关系标签），
  * 其余无关节点/边 → inactive 状态（降低透明度变暗），无选中时全部恢复原样。
- * <p>2026-08-18 修复：旧实现用「节点 id 集合」去判断边（sel.has(e.id) 恒为 false），
+ * <p>旧实现用「节点 id 集合」去判断边（sel.has(e.id) 恒为 false），
  * 导致选中的直接关联边从不高亮、关系类型标签也不显示；现按「边的两端是否含中心」判断。</p>
  */
 function applySelection() {
@@ -648,11 +1022,16 @@ onMounted(async () => {
   setupThemeObserver()
   resizeObserver = new ResizeObserver(() => { if (props.active) resizeGraph() })
   if (containerRef.value) resizeObserver.observe(containerRef.value)
+  // ：全局点击关闭右键菜单（含菜单自身项点击后的冒泡）
+  document.addEventListener('click', closeCtxMenu)
+  document.addEventListener('scroll', closeCtxMenu, true)
 })
 
 onBeforeUnmount(() => {
   if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
   if (themeObserver) { themeObserver.disconnect(); themeObserver = null }
+  document.removeEventListener('click', closeCtxMenu)
+  document.removeEventListener('scroll', closeCtxMenu, true)
   destroyGraph()
 })
 
@@ -663,6 +1042,7 @@ watch(() => props.active, (v) => { if (v) onActivated() })
 // ==================== AI 关系生成（预览确认后入库） ====================
 /**
  * 点击生成：先判定范围是否已有数据 → 有则弹窗选「重建/补充」→ 调 AI 生成预览 → 弹预览确认弹窗。
+ *
  * @param scope character（当前选中角色）/ project（全项目）
  */
 async function handleGenerate(scope) {
@@ -839,10 +1219,58 @@ defineExpose({ reload: load })
 .pv-arrow { color: var(--text-placeholder); flex-shrink: 0; }
 .pv-type { flex-shrink: 0; }
 .pv-desc { color: var(--text-secondary); font-size: 0.74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ==================== 关系管理抽屉 / 编辑弹窗 / 右键菜单 ==================== */
+.rel-drawer { display: flex; flex-direction: column; gap: 10px; }
+.rel-drawer-ops { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.rel-drawer-hint { font-size: 0.72rem; color: var(--text-tertiary); }
+.rel-type { font-weight: 600; font-size: 0.8rem; }
+.rel-state { font-size: 0.68rem; color: var(--text-tertiary); margin-top: 1px; }
+.rel-aff { font-weight: 600; font-size: 0.78rem; }
+.rel-aff.pos { color: #10b981; }
+.rel-aff.neg { color: #ef4444; }
+.rel-form-hint { margin-left: 8px; font-size: 0.7rem; color: var(--text-tertiary); }
+
+/* 右键菜单（fixed 定位覆盖在画布上方） */
+.rel-ctxmenu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 180px;
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-l2);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lv3);
+  padding: 5px;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+.rel-ctx-title {
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rel-ctx-item {
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-regular);
+  white-space: nowrap;
+}
+.rel-ctx-item:hover { background: var(--bg-layer-2); }
+.rel-ctx-item.danger { color: #ef4444; }
+.rel-ctx-item.danger:hover { background: color-mix(in srgb, #ef4444 10%, var(--bg-layer-1)); }
 </style>
 
 <style>
-/* 非 scoped：G6 Tooltip 的 HTML 注入到 body/容器，需全局选择器才能命中 */
+/* 非 scoped： Tooltip 的 HTML 注入到 body/容器，需全局选择器才能命中 */
 .topo-tooltip {
   font-size: 12px;
   line-height: 1.6;

@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.settings.entity;
 
 import jakarta.persistence.*;
@@ -11,7 +29,6 @@ import java.time.LocalDateTime;
  * project_id 非空表示项目级覆盖（随 .holzyn 包导入导出）；
  * 解析规则：项目覆盖 > 用户覆盖 > 内置；重置即删除覆盖行回退低一级。
  * 唯一约束 (user_id, project_id, code) 保证同一归属同一模板编码只有一条。</p>
- * <p>所属模块：model/entity（实体层-模板子域）</p>
  */
 @Data
 @Entity
@@ -44,7 +61,7 @@ public class ActorPromptTemplate {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String template;
 
-    /** 系统提示词（2026-08-19 新增：随模板落库，代码不再硬编码 Prompt 文本；可空=无系统提示词） */
+    /** 系统提示词（随模板落库，代码不再硬编码 Prompt 文本；可空=无系统提示词） */
     @Column(name = "system_message", columnDefinition = "TEXT")
     private String systemMessage;
 
@@ -58,7 +75,7 @@ public class ActorPromptTemplate {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    /** 更新时间 */
+    /** 时间 */
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
@@ -76,7 +93,7 @@ public class ActorPromptTemplate {
     }
 
     /**
-     * 更新前回调：刷新更新时间。
+     * 前回调：刷新更新时间。
      */
     @PreUpdate
     void preUpdate() {

@@ -1,50 +1,75 @@
+/*
+ * Copyright (c) 2026 HONGYUN
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package com.holzyn.actor.domain.project.service;
 
 import com.holzyn.actor.common.BizException;
+import com.holzyn.actor.common.NpcRefs;
+import com.holzyn.actor.domain.npc.state.service.NpcActivityStateService;
 import com.holzyn.actor.domain.project.entity.ActorProject;
-import com.holzyn.actor.domain.character.entity.ActorCharacter;
-import com.holzyn.actor.domain.conversation.entity.ActorConversation;
-import com.holzyn.actor.domain.conversation.entity.ActorMessage;
-import com.holzyn.actor.domain.conversation.entity.ActorGroupChatConfig;
+import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
+import com.holzyn.actor.domain.npc.dialogue.entity.ActorConversation;
+import com.holzyn.actor.domain.npc.dialogue.entity.ActorMessage;
+import com.holzyn.actor.domain.npc.dialogue.entity.ActorGroupChatConfig;
 import com.holzyn.actor.domain.world.entity.ActorWorldSetting;
 import com.holzyn.actor.domain.world.entity.ActorWorldLocation;
 import com.holzyn.actor.domain.world.entity.ActorEvent;
-import com.holzyn.actor.domain.memory.entity.ActorMemory;
+import com.holzyn.actor.domain.npc.memory.entity.ActorMemory;
 import com.holzyn.actor.domain.knowledge.entity.ActorKnowledgeDoc;
 import com.holzyn.actor.domain.world.entity.ActorWorldClock;
 import com.holzyn.actor.domain.crowd.entity.ActorCrowdRuntime;
 import com.holzyn.actor.domain.crowd.entity.ActorNpcFieldDict;
-import com.holzyn.actor.domain.crowd.entity.ActorOrdinaryNpc;
 import com.holzyn.actor.domain.crowd.repository.ActorCrowdRuntimeRepository;
 import com.holzyn.actor.domain.crowd.repository.ActorNpcFieldDictRepository;
-import com.holzyn.actor.domain.crowd.repository.ActorOrdinaryNpcRepository;
+import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
 import com.holzyn.actor.domain.world.entity.ActorScene;
 import com.holzyn.actor.domain.usage.entity.ActorUsageLog;
 import com.holzyn.actor.domain.settings.entity.ModelProvider;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository;
-import com.holzyn.actor.domain.character.repository.ActorCharacterRepository;
-import com.holzyn.actor.domain.character.repository.ActorCharacterCardRepository;
-import com.holzyn.actor.domain.conversation.repository.ActorConversationRepository;
-import com.holzyn.actor.domain.conversation.repository.ActorConversationMemberRepository;
-import com.holzyn.actor.domain.conversation.repository.ActorMessageRepository;
-import com.holzyn.actor.domain.memory.repository.ActorMemoryRepository;
+import com.holzyn.actor.domain.npc.dialogue.repository.ActorConversationRepository;
+import com.holzyn.actor.domain.npc.dialogue.repository.ActorConversationMemberRepository;
+import com.holzyn.actor.domain.npc.dialogue.repository.ActorMessageRepository;
+import com.holzyn.actor.domain.npc.memory.repository.ActorMemoryRepository;
 import com.holzyn.actor.domain.knowledge.repository.ActorKnowledgeDocRepository;
-import com.holzyn.actor.domain.crowd.repository.ActorCrowdRuntimeRepository;
-import com.holzyn.actor.domain.crowd.repository.ActorNpcFieldDictRepository;
-import com.holzyn.actor.domain.crowd.repository.ActorOrdinaryNpcRepository;
 import com.holzyn.actor.domain.world.repository.ActorWorldClockRepository;
 import com.holzyn.actor.domain.world.repository.WorldLocationRepository;
-import com.holzyn.actor.domain.action.repository.ActorActionPlanRepository;
-import com.holzyn.actor.domain.action.repository.ActorActionLogRepository;
+import com.holzyn.actor.domain.npc.goal.repository.ActorActionPlanRepository;
+import com.holzyn.actor.domain.npc.action.repository.ActorActionLogRepository;
 import com.holzyn.actor.domain.world.repository.ActorEventRepository;
 import com.holzyn.actor.domain.settings.repository.ActorPromptTemplateRepository;
 import com.holzyn.actor.domain.settings.repository.ModelProviderRepository;
-import com.holzyn.actor.domain.conversation.repository.ActorGroupChatConfigRepository;
+import com.holzyn.actor.domain.npc.dialogue.repository.ActorGroupChatConfigRepository;
 import com.holzyn.actor.domain.usage.repository.ActorUsageLogRepository;
 import com.holzyn.actor.domain.world.repository.ActorSceneRepository;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
 import com.holzyn.actor.common.HolzynCrypto;
+// M1 世界地图（沙盘场景/摆放/住所/沙盘状态）导出：历史 .holzyn 包不含此段，缺装配=跳过，零阻断
+import com.holzyn.actor.domain.sandbox.entity.ActorSandboxScene;
+import com.holzyn.actor.domain.sandbox.entity.ActorScenePlacement;
+import com.holzyn.actor.domain.sandbox.entity.ActorSandboxState;
+import com.holzyn.actor.domain.sandbox.repository.ActorSandboxSceneRepository;
+import com.holzyn.actor.domain.sandbox.repository.ActorScenePlacementRepository;
+import com.holzyn.actor.domain.sandbox.repository.ActorSandboxStateRepository;
+import com.holzyn.actor.domain.worldmap.entity.ActorNpcHome;
+import com.holzyn.actor.domain.worldmap.entity.ActorHomeMember;
+import com.holzyn.actor.domain.worldmap.repository.ActorNpcHomeRepository;
+import com.holzyn.actor.domain.worldmap.repository.ActorHomeMemberRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -64,14 +89,13 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * .holzyn 项目包导出服务（V2.0 设计文档，导入/导出能力）。
+ * .holzyn 项目包导出服务。
  * <p>职责：将 DB 中的 actor 项目导出为 .holzyn 分发态单文件（ZIP 容器）——
  * 结构：顶层 holzyn.json 索引 + actor/ 模块目录（settings/ world/ characters/
  * conversations/ messages/ events/ actions/ memory/ knowledge/ ordinary_npcs/ world_clock/ usage/）。
  * 敏感数据处理：settings/apis.json 默认空骨架（不打包密钥）；includeSensitive=true 时
  * 含 API 配置，password 非空则用「密码加密」（PBKDF2 + AES-GCM）加密该文件整块。
  * 实体沿用 DB 数字 id（导入时做 id 映射）。</p>
- * <p>所属模块：service/project（项目导入导出子域）</p>
  */
 @Slf4j
 @Service
@@ -90,13 +114,26 @@ public class ProjectExportService {
     private final ActorProjectRepository projectRepository;
     private final ActorWorldSettingRepository worldSettingRepository;
     private final ActorCharacterRepository characterRepository;
-    private final ActorCharacterCardRepository cardRepository;
+
+    /**
+     * NPC 作息运行态访问器。
+     * <p><b>为什么必须有它</b>：{@code state} / {@code last_action} / {@code daily_plan_json} 三个运行态字段
+     * 原先挂在 {@code actor_profile_ordinary}（普通型 NPC 表）上， 已把该表<b>物理废弃</b>并把运行态
+     * 收敛到 {@code actor_state}（{@code activity_state} / {@code last_action} / {@code daily_plan_json} 三列，
+     * 运行态唯一家）——主表实体 {@link ActorCharacter} 上<b>不再有</b>这三个字段，导出运行态只能经本访问器
+     * 批量读（{@code activityByRef} 一次查询取全，避免逐 NPC 查库）。</p>
+     * <p>字段注入（非 final）保持既有构造器签名不变；{@code null}=未装配（导出回退默认态 {@code idle}/空串，
+     * 零阻断——运行态读不到绝不让整包导出失败）。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private NpcActivityStateService npcActivityStateService;
+
     private final ActorConversationRepository conversationRepository;
     private final ActorConversationMemberRepository conversationMemberRepository;
     private final ActorMessageRepository messageRepository;
     private final ActorMemoryRepository memoryRepository;
     private final ActorKnowledgeDocRepository knowledgeDocRepository;
-    private final ActorOrdinaryNpcRepository ordinaryNpcRepository;
+    private final ActorCharacterRepository ordinaryNpcRepository;
     private final ActorNpcFieldDictRepository fieldDictRepository;
     private final ActorCrowdRuntimeRepository crowdRuntimeRepository;
     private final ActorWorldClockRepository worldClockRepository;
@@ -113,12 +150,32 @@ public class ProjectExportService {
     private final HolzynCrypto holzynCrypto;
     private final ObjectMapper objectMapper;
 
+    // ==================== M1 世界地图导出（字段注入保持构造器签名不变；null=未装配跳过对应段，零阻断） ====================
+    /** 沙盘场景（M1 世界地图权威场景，layout_json 为权威布局） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorSandboxSceneRepository sandboxSceneRepository;
+    /** 沙盘摆放（actor_sandbox_placement） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorScenePlacementRepository sandboxPlacementRepository;
+    /** 住所（M2 移动状态机，actor_npc_home） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorNpcHomeRepository npcHomeRepository;
+    /** 住户（actor_home_member） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorHomeMemberRepository homeMemberRepository;
+    /** 沙盘状态（NPC 坐标权威源，actor_sandbox_state） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorSandboxStateRepository sandboxStateRepository;
+
     /**
      * 导出项目为 .holzyn 包（ZIP 字节）。
      *
-     * @param projectId       项目 ID
+     * @param projectId 项目 ID
+     *
      * @param includeSensitive 是否打包 API 等敏感数据（默认 false）
-     * @param password         密码（可选；提供时对敏感文件做密码加密）
+     *
+     * @param password 密码（可选；提供时对敏感文件做密码加密）
+     *
      * @return .holzyn ZIP 字节数组
      */
     @Transactional(readOnly = true)
@@ -147,12 +204,12 @@ public class ProjectExportService {
                     ? List.of(APIS_PATH) : List.of());
             holzynJson.put("encryption", encryption);
             Map<String, Object> modules = new LinkedHashMap<>();
-            // 启用模块：actor（schemaVersion 非空）
+            // 启用
             Map<String, Object> actorModule = new LinkedHashMap<>();
             actorModule.put("enabled", true);
             actorModule.put("schemaVersion", SCHEMA_VERSION);
             modules.put("actor", actorModule);
-            // 预留模块：未启用，schemaVersion=null（Map.of 不允许 null，用 LinkedHashMap）
+            // 预留
             for (String m : List.of("natural", "civil", "fauna", "orchestrator", "web")) {
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("enabled", false);
@@ -192,6 +249,20 @@ public class ProjectExportService {
             writeJsonl(zos, "actor/actions.jsonl", buildActions(chars));
             writeJson(zos, "actor/scenes.json", sceneRepository.findByProjectIdOrderByEnabledDescIdAsc(projectId)
                     .stream().map(this::sceneVO).toList());
+            // ---------- M1 世界地图（沙盘场景/摆放/住所/沙盘状态；v2.0 新增段，历史包无此数据） ----------
+            writeJson(zos, "actor/sandbox/scene.json", sandboxSceneRepository == null ? null
+                    : sandboxSceneRepository.findFirstByProjectIdOrderByIdAsc(projectId)
+                    .map(this::sandboxSceneVO).orElse(null));
+            writeJson(zos, "actor/sandbox/placements.json", sandboxPlacementRepository == null ? List.of()
+                    : sandboxPlacementRepository.findByProjectIdOrderBySceneIdAscSortOrderAscIdAsc(projectId)
+                    .stream().map(this::sandboxPlacementVO).toList());
+            writeJson(zos, "actor/sandbox/homes.json", npcHomeRepository == null ? List.of()
+                    : npcHomeRepository.findByProjectIdOrderByIdAsc(projectId).stream()
+                    .map(h -> sandboxHomeVO(h, homeMemberRepository == null ? List.<ActorHomeMember>of()
+                            : homeMemberRepository.findByHomeIdOrderByIdAsc(h.getId()))).toList());
+            writeJson(zos, "actor/sandbox/states.json", sandboxStateRepository == null ? List.of()
+                    : sandboxStateRepository.findByProjectIdOrderByIdAsc(projectId)
+                    .stream().map(this::sandboxStateVO).toList());
             writeJson(zos, "actor/memory.json", memoryRepository.findByProjectIdAndDeletedOrderByIdDesc(projectId, 0)
                     .stream().map(this::memoryVO).toList());
             writeJson(zos, "actor/knowledge.json", knowledgeDocRepository.findByProjectIdOrderByIdAsc(projectId)
@@ -252,7 +323,7 @@ public class ProjectExportService {
 
     /**
      * Prompt 模板（settings/prompts.json）：项目级覆盖（user_id=当前用户 + project_id=当前项目），
-     * 2026-08-19 起含系统提示词（systemMessage）。
+     * 起含系统提示词（systemMessage）。
      */
     private List<Map<String, Object>> buildPrompts(Long userId, Long projectId) {
         return promptTemplateRepository.findByUserIdAndProjectIdOrderByCodeAsc(userId, projectId).stream()
@@ -331,21 +402,49 @@ public class ProjectExportService {
     }
 
     /**
-     * 角色卡（当前态，每个角色最新版本）。
+     * 角色档案。
+     * <p><b>背景</b>：{@code actor_profile_card} 表已<b>物理废弃</b>（"角色卡"作为独立实体的
+     * 多版本卡面语义连同 {@code system_prompt} 概念一并作废），档案并入角色统一主表
+     * <b>与角色行一一对应</b>（不再有"每角色多版本卡片"，故本条目的 {@code id} 即角色 id）。</p>
+     * <p><b>键口径</b>（对齐 {@code HolzynImportService} 已迁移的导入契约）：</p>
+     * <ul>
+     * <li>{@code characterId}：角色 id——导入侧 id 映射（旧 id → 新 id）的锚点，<b>必留</b>；</li>
+     * <li>{@code personaJson}：档案 JSON 文本（{@code actor_profile.persona_json} 原样）；
+     * 导入侧兼容"文本"与"内嵌对象"两种形态，这里按文本导出（保真、且坏档案不会拖垮整包）；</li>
+     * <li>{@code version}：档案版本号（{@code persona_version}）——导入侧优先取本键，
+     * 缺失时回退读档案内的 {@code persona_version}；</li>
+     * <li><b>{@code systemPrompt} 键已删除</b>：{@code system_prompt} 概念已废弃——提示词不再随档案
+     * 固化，改为<b>运行时按场景渲染分片</b>（注入/对话/决策各自渲染），包内旧值无落点，
+     * 导入侧同样不再读该键；</li>
+     * <li><b>{@code source} 键已删除</b>：档案来源改由档案 JSON 内的 {@code _sources} /
+     * {@code generated_by} 表达，包外层的旧字段无落点。</li>
+     * </ul>
+     * <p><b>零阻断 + 无 N+1</b>：档案直接从传入的 {@link ActorCharacter} 行内取（{@code getPersonaJson()}），
+     * 不再经 {@code PersonaService.latestPersonaJson} 逐角色回查（省一轮 N+1）；无档案的行跳过
+     * （对齐历史 {@code ifPresent} 语义），不抛异常。</p>
+     *
+     * @param chars 待导出的角色/档案行（已按项目查询得到）
+     *
+     * @return character_cards.json 条目列表（顺序与 chars 一致）
      */
     private List<Map<String, Object>> buildCharacterCards(List<ActorCharacter> chars) {
         List<Map<String, Object>> out = new ArrayList<>();
         for (ActorCharacter c : chars) {
-            cardRepository.findTopByCharacterIdOrderByVersionDesc(c.getId()).ifPresent(card -> {
-                Map<String, Object> m = new LinkedHashMap<>();
-                m.put("id", card.getId());
-                m.put("characterId", card.getCharacterId());
-                m.put("version", card.getVersion());
-                m.put("personaJson", card.getPersonaJson());
-                m.put("systemPrompt", card.getSystemPrompt());
-                m.put("source", card.getSource());
-                out.add(m);
-            });
+            if (c == null || c.getId() == null) {
+                continue;
+            }
+            String personaJson = c.getPersonaJson();
+            // 零阻断：无档案（未建档/空串）不产生条目——导入侧亦按"无 personaJson 则跳过"处理
+            if (personaJson == null || personaJson.isBlank()) {
+                continue;
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            // 单表合一：档案行 id 即角色 id（原 actor_profile_card.id 已不存在）
+            m.put("id", c.getId());
+            m.put("characterId", c.getId());
+            m.put("version", c.getPersonaVersion());
+            m.put("personaJson", personaJson);
+            out.add(m);
         }
         return out;
     }
@@ -460,7 +559,7 @@ public class ProjectExportService {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", mem.getId());
         m.put("characterId", mem.getCharacterId());
-        m.put("kind", mem.getKind());
+        m.put("type", mem.getType());
         m.put("content", mem.getContent());
         m.put("importance", mem.getImportance());
         m.put("deleted", mem.getDeleted());
@@ -490,17 +589,43 @@ public class ProjectExportService {
         m.put("worldStartAt", c.getWorldStartAt());
         m.put("worldStartGameHour", c.getWorldStartGameHour());
         m.put("lastGameHour", c.getLastGameHour());
+        // 时间口径统一：世界时间权威=引擎推进位置（last_game_second），必须随档导出——
+        // 否则导入后引擎位置从 0 起跑（0001年01月01日 00时），导出时的世界时间丢失（时钟字段
+        // 与 AI 提示词时间感同源于该列）。
+        m.put("lastGameSecond", c.getLastGameSecond());
         m.put("paused", c.getPaused());
         m.put("lastSummary", c.getLastSummary());
         return m;
     }
 
     /**
-     * 普通型 NPC（单表扁平，每人独立一行；2026-08-19 分类体系重构：含次级种族，不含废弃分类字段）。
+     * 普通型 NPC（单表扁平，每人独立一行； 分类体系重构：含次级种族，不含废弃分类字段）。
+     * <p><b>两处口径修正</b>：</p>
+     * <ol>
+     * <li><b>行范围</b>：单表合并后"普通型 NPC"= {@code actor_profile} 中 {@code type='common'} 的行，
+     * 原 {@code ActorOrdinaryNpcRepository.findByProjectIdOrderByIdAsc} 的"只含普通型"语义必须在
+     * 合并后的统一仓库上显式写回 type 过滤——否则特殊型角色也会混进本文件，而导入侧对本文件
+     * <b>强制</b>写 {@code type=common}（见 {@code HolzynImportService}），特殊型一旦被导进来，
+     * 回导时就会被克隆成一个普通型副本（脏数据）。同时过滤软删除行：导出只带有效数据。</li>
+     * <li><b>运行态来源</b>：{@code state} / {@code lastAction} 两个运行态字段已随
+     * {@code actor_profile_ordinary} 物理废弃迁入 {@code actor_state}（{@code activity_state} /
+     * {@code last_action}，运行态唯一家），主表实体上再无该字段——改为<b>一次批量读运行态</b>
+     * （{@code activityByRef} 单次查询，循环内零查库），<b>导出键名保持不变</b>；
+     * 无状态行 → {@code idle} / 空串（零阻断：读不到运行态不得中断整包导出）。</li>
+     * </ol>
+     *
+     * @param projectId 项目 ID
+     *
+     * @return ordinary_npcs.json 条目列表
      */
     private List<Map<String, Object>> buildOrdinaryNpcs(Long projectId) {
         List<Map<String, Object>> out = new ArrayList<>();
-        for (ActorOrdinaryNpc n : ordinaryNpcRepository.findByProjectIdOrderByIdAsc(projectId)) {
+        // ：批量取运行态（npcRef → {state, lastAction}）——1 次查询回填整页，避免逐 NPC 查库（N+1）
+        Map<String, NpcActivityStateService.ActivityUpdate> runStates =
+                npcActivityStateService == null ? Map.of() : npcActivityStateService.activityByRef(projectId);
+        // ：普通型 = type='common'（历史写 crowd 的行在写入侧已由 NpcRefs.normalizeType 归一）
+        for (ActorCharacter n : ordinaryNpcRepository.findByProjectIdAndTypeAndDeletedOrderByIdAsc(
+                projectId, NpcRefs.TYPE_COMMON, 0)) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", n.getId());
             m.put("name", n.getName());
@@ -512,15 +637,20 @@ public class ProjectExportService {
             m.put("location", n.getLocation());
             m.put("occupation", n.getOccupation());
             m.put("detail", n.getDetail());
-            m.put("state", n.getState());
-            m.put("lastAction", n.getLastAction());
+            // ：运行态从 actor_state 读（主表已无 state/last_action 列）；键名沿用既有导出键
+            String ref = NpcRefs.of(n.getId());
+            NpcActivityStateService.ActivityUpdate rs = ref == null ? null : runStates.get(ref);
+            String runState = rs == null || rs.state() == null || rs.state().isBlank()
+                    ? NpcActivityStateService.DEFAULT_ACTIVITY : rs.state();
+            m.put("state", runState);
+            m.put("lastAction", rs == null || rs.lastAction() == null ? "" : rs.lastAction());
             out.add(m);
         }
         return out;
     }
 
     /**
-     * 普通型 NPC 标准字段数据字典（2026-08-19 新增：race 含次级种族/affiliation/occupation，含出处）。
+     * 普通型 NPC 标准字段数据字典（race 含次级种族/affiliation/occupation，含出处）。
      */
     private List<Map<String, Object>> buildFieldDict(Long projectId) {
         List<Map<String, Object>> out = new ArrayList<>();
@@ -568,6 +698,113 @@ public class ProjectExportService {
     /**
      * 用量统计（该项目 usage_log 明细 + 汇总，不含任何密钥）。
      */
+    // ==================== M1 世界地图（沙盘场景/摆放/住所/沙盘状态）视图 ====================
+
+    /**
+     * 沙盘场景视图（M1 世界地图）。layout_json/anchor_json 等 JSON 文本<b>原文</b>导出，
+     * 导入侧原样还原 + 新 id；region/placement 内嵌的 locationId 为旧 id，由导入侧按地点名重解析。
+     */
+    private Map<String, Object> sandboxSceneVO(ActorSandboxScene s) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", s.getId());
+        m.put("name", s.getName());
+        m.put("templateCode", s.getTemplateCode());
+        m.put("styleCode", s.getStyleCode());
+        m.put("sceneSize", s.getSceneSize());
+        m.put("seed", s.getSeed());
+        m.put("layoutJson", s.getLayoutJson());
+        m.put("envJson", s.getEnvJson());
+        m.put("anchorJson", s.getAnchorJson());
+        m.put("terrainOverrideJson", s.getTerrainOverrideJson());
+        m.put("paletteJson", s.getPaletteJson());
+        m.put("styleDesc", s.getStyleDesc());
+        m.put("source", s.getSource());
+        m.put("version", s.getVersion());
+        return m;
+    }
+
+    /** 沙盘摆放视图（scene_id/project_id 由导入侧重建，不导出）。 */
+    private Map<String, Object> sandboxPlacementVO(ActorScenePlacement p) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", p.getId());
+        m.put("assetId", p.getAssetId());
+        m.put("name", p.getName());
+        m.put("posX", p.getPosX());
+        m.put("posY", p.getPosY());
+        m.put("posZ", p.getPosZ());
+        m.put("scaleX", p.getScaleX());
+        m.put("scaleY", p.getScaleY());
+        m.put("scaleZ", p.getScaleZ());
+        m.put("rotX", p.getRotX());
+        m.put("rotY", p.getRotY());
+        m.put("rotZ", p.getRotZ());
+        m.put("sortOrder", p.getSortOrder());
+        return m;
+    }
+
+    /**
+     * 住所视图（含住户）。locationId 原 id + locationName 双带，导入侧优先按地点名重解析
+     * （地点 id 导入后变化）；placementId 由导入侧按摆放 id 映射重建。
+     */
+    private Map<String, Object> sandboxHomeVO(ActorNpcHome h, List<ActorHomeMember> members) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", h.getId());
+        m.put("name", h.getName());
+        m.put("locationId", h.getLocationId());
+        m.put("locationName", locationNameOf(h.getLocationId()));
+        m.put("placementId", h.getPlacementId());
+        m.put("posX", h.getPosX());
+        m.put("posZ", h.getPosZ());
+        m.put("roomLabel", h.getRoomLabel());
+        m.put("region", h.getRegion());
+        m.put("note", h.getNote());
+        m.put("status", h.getStatus());
+        m.put("decorationLevel", h.getDecorationLevel());
+        List<Map<String, Object>> memberNodes = new ArrayList<>();
+        for (ActorHomeMember mm : members) {
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("characterRef", mm.getCharacterRef());
+            node.put("isOwner", mm.getIsOwner());
+            node.put("role", mm.getRole());
+            node.put("roomLabel", mm.getRoomLabel());
+            memberNodes.add(node);
+        }
+        m.put("members", memberNodes);
+        return m;
+    }
+
+    /** 地点名反查（home.locationId → 地点名；失败返回 null，导入侧回退按名重解析）。 */
+    private String locationNameOf(Long locationId) {
+        if (locationId == null) {
+            return null;
+        }
+        try {
+            return worldLocationRepository.findById(locationId).map(ActorWorldLocation::getName).orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 沙盘状态视图（npc_ref 原样导出，导入侧按角色 id 映射重写为 special/crowd/npc:{newId}）。 */
+    private Map<String, Object> sandboxStateVO(ActorSandboxState st) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", st.getId());
+        m.put("npcType", st.getNpcType());
+        m.put("npcRef", st.getNpcRef());
+        m.put("posX", st.getPosX());
+        m.put("posY", st.getPosY());
+        m.put("posZ", st.getPosZ());
+        m.put("heading", st.getHeading());
+        m.put("moveState", st.getMoveState());
+        m.put("targetPosJson", st.getTargetPosJson());
+        m.put("actionText", st.getActionText());
+        m.put("statusText", st.getStatusText());
+        m.put("thoughtText", st.getThoughtText());
+        m.put("thoughtSource", st.getThoughtSource());
+        m.put("gameSecond", st.getGameSecond());
+        return m;
+    }
+
     private Map<String, Object> buildUsageStats(Long userId, Long projectId) {
         List<ActorUsageLog> logs = usageLogRepository.findByUserIdOrderByIdDesc(userId).stream()
                 .filter(l -> projectId.equals(l.getProjectId())).toList();

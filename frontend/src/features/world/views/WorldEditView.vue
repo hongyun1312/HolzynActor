@@ -1,27 +1,39 @@
+<!--
+  Copyright (c) 2026 HONGYUN
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  SPDX-License-Identifier: Apache-2.0
+-->
 <template>
   <div class="world-edit-view">
     <!-- 头部：返回世界详情 + 标题 + 保存 -->
-    <div class="page-header">
-      <div>
-        <div class="page-title">修改世界 · {{ project?.name || '' }}</div>
-        <div class="page-desc">与「世界详情」同款分节展示，各区块就地编辑；地点详情以表格维护（增删改查）。保存后覆盖更新当前版本。</div>
-      </div>
-      <div class="header-ops">
+    <PageHeader
+      :title="`修改世界 · ${project?.name || ''}`"
+      desc="与「世界详情」同款分节展示，各区块就地编辑；地点详情以表格维护（增删改查）。保存后覆盖更新当前版本。"
+    >
+      <template #actions>
         <el-button type="primary" :loading="saving" @click="saveWorld">
           <el-icon><HIcon name="Check" /></el-icon>&nbsp;保存世界观
         </el-button>
         <el-button @click="$router.push(`/project/${projectId}/world`)">
           <el-icon><HIcon name="Back" /></el-icon>&nbsp;返回世界详情
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 分节编辑（与详情页同款左侧 Tab 导航，各区块就地编辑） -->
     <div v-if="!worldForm.name && !loadingDone" class="empty-card tech-card">
       <el-empty description="加载中…" />
     </div>
     <div v-else class="edit-body">
-      <el-tabs v-model="activeSection" tab-position="left" class="world-tabs">
+      <PageTabs v-model="activeSection" position="left">
         <el-tab-pane label="基本信息" name="basic">
           <div class="world-card tech-card">
             <el-form label-width="90px" class="section-form">
@@ -98,14 +110,14 @@
             <el-input v-model="worldForm.freeText" type="textarea" :rows="14" maxlength="5000" show-word-limit placeholder="完整世界观自由文本（角色卡生成的知识库注入源，越详细角色卡越贴合，≤5000 字）" />
           </div>
         </el-tab-pane>
-      </el-tabs>
+      </PageTabs>
     </div>
   </div>
 </template>
 
 <script setup>
 /**
- * 世界详情修改页（模块化重构 V1.0；第十二轮重构：与详情页同款左 Tab 分节 + 就地编辑）。
+ * 世界详情修改页。
  * <p>职责：世界观专属编辑页——采用与「世界详情」一致的左侧 Tab 分节展示（基本信息/地理设定/
  * 地点详情/势力阵营/规则体系/文化风俗/历史背景/完整世界观），每个区块就地编辑；
  * 地点详情以表格维护（WorldLocationTable：AI 提取 + 修改增删改查）。
@@ -116,6 +128,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchProject, fetchWorldSetting, saveWorldSetting } from '@/shared/api'
 import WorldLocationTable from '@/shared/components/WorldLocationTable.vue'
+import PageHeader from '@/shared/layout/PageHeader.vue'
+import PageTabs from '@/shared/layout/PageTabs.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -159,18 +173,10 @@ onMounted(loadAll)
 </script>
 
 <style scoped>
-.world-edit-view { max-width: 1200px; margin: 0 auto; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-.page-title { font-size: 1.3rem; font-weight: 700; color: var(--text-primary); }
-.page-desc { font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px; }
-.header-ops { display: flex; gap: 8px; flex-shrink: 0; }
+.world-edit-view { width: 100%; max-width: var(--content-max-w, 1440px); margin: 0 auto; }
+/* 页头与左置标签样式由全局类/PageTabs 统一提供 */
 .empty-card { padding: 40px 0; }
 .edit-body { min-height: 360px; }
-/* 与详情页同款左侧 Tab 分节 */
-.world-tabs { width: 100%; }
-.world-tabs :deep(.el-tabs__header) { margin-right: 0; }
-.world-tabs :deep(.el-tabs__nav-wrap) { width: 128px; }
-.world-tabs :deep(.el-tabs__content) { overflow: visible; }
 .world-card { padding: 20px 24px; }
 .section-form { padding-top: 4px; }
 .section-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }

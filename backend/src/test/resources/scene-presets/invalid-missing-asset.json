@@ -1,0 +1,5 @@
+{
+  "name": "无效预设-缺 assetId",
+  "scene": { "templateCode": "village", "styleCode": "hills", "size": 500 },
+  "placements": [ { "posX": 50, "posZ": 50 } ]
+}
