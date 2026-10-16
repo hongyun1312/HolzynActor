@@ -28,7 +28,10 @@ export const updateWorldClock = (projectId, data) => http.put(`/api/projects/${p
 export const advanceWorldClock = (projectId) => http.post(`/api/projects/${projectId}/world-clock/advance`)
 
 // ==================== 每日世界帧（S4 天气可视化数据源） ====================
-// 当前生效世界帧（active；无 → 404）。weatherJson = {"区域": {"condition": "晴", "temperature": 15, "wind": "北风"}}
+// 当前生效世界帧。**契约（UI V2.0 §8.4）：恒 200**——首个游戏日 00:00 之前 generated=false
+// （世界还没过完第一个游戏日，属正常状态，非错误），此时帧字段为空、hint 为人类可读原因；
+// 已生成时 generated=true。调用方读 generated 分支，不要靠 catch 404 判断「未生成」。
+// weatherJson = {"区域": {"condition": "晴", "temperature": 15, "wind": "北风"}}
 export const fetchWorldFrame = (projectId) => http.get(`/api/projects/${projectId}/world-frame`)
 
 // ==================== 时间季节系统 ====================

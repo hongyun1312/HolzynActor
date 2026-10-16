@@ -303,6 +303,8 @@ public class CharacterRelationService {
         log.info("[关系CRUD] 新增关系：project={} id={} {}→{}（{}）好感={} 信任={} 状态={}",
                 projectId, saved.getId(), saved.getFromName(), saved.getToName(), saved.getRelationType(),
                 saved.getAffinity(), saved.getTrust(), saved.getRelationState());
+        // 实时广播：另一个标签页/协作者的拓扑页要能自己跟上（纯新增事件，不改任何既有语义）
+        relationDynamicsService.publishManualRelationEvent(projectId, saved, "create");
         return toVO(saved);
     }
 
@@ -354,6 +356,7 @@ public class CharacterRelationService {
         log.info("[关系CRUD] 更新关系：id={} {}→{}（{}）好感={} 信任={} 状态={}",
                 saved.getId(), saved.getFromName(), saved.getToName(), saved.getRelationType(),
                 saved.getAffinity(), saved.getTrust(), saved.getRelationState());
+        relationDynamicsService.publishManualRelationEvent(saved.getProjectId(), saved, "update");
         return toVO(saved);
     }
 
@@ -366,8 +369,10 @@ public class CharacterRelationService {
     public void delete(Long relationId) {
         ActorCharacterRelation rel = relationRepository.findById(relationId)
                 .orElseThrow(() -> new BizException(404, "关系不存在：" + relationId));
+        Long projectId = rel.getProjectId();
         relationRepository.delete(rel);
         log.info("[关系CRUD] 删除关系：id={} {}→{}（{}）", rel.getId(), rel.getFromName(), rel.getToName(), rel.getRelationType());
+        relationDynamicsService.publishManualRelationEvent(projectId, rel, "delete");
     }
 
     /**

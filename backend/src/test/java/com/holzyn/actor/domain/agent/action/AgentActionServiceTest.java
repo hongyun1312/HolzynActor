@@ -107,8 +107,9 @@ class AgentActionServiceTest {
 
         service.execute(plan(decisionJson(5)));
 
+        // P0-03：recordObservation 带决策来源参数（该测试决策 JSON 未打标 → null=视为 AI）
         verify(agentMemoryService).recordObservation(eq(100L), eq("npc:3"),
-                eq("前往城东市场采购药材（目标：城东市场）"), eq(5));
+                eq("前往城东市场采购药材（目标：城东市场）"), eq(5), isNull());
         verify(worldEventBus).publish(eq(1L), eq(100L), any());
         assertEquals("done", plan(decisionJson(5)).getStatus() == null ? null : "done");
     }
@@ -123,7 +124,7 @@ class AgentActionServiceTest {
 
         service.execute(p);
 
-        verify(agentMemoryService, never()).recordObservation(any(), any(), any(), any());
+        verify(agentMemoryService, never()).recordObservation(any(), any(), any(), any(), any());
         verify(worldEventBus).publish(eq(1L), eq(100L), any());
         assertEquals("done", p.getStatus(), "行动仍正常完成");
     }

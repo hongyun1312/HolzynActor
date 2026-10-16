@@ -83,14 +83,21 @@ public interface ActorWorldClockRepository extends JpaRepository<ActorWorldClock
 
     /**
      * 引擎推进位置窄更新（只写引擎列，绝不触碰 rate/paused/锚点等配置列）。
+     * <p>P0-01 根治：随位置一并原子写入 tick 队列两列（授权前沿 + 显式丢弃累计）——
+     * 已消费位置、授权前沿、丢弃量必须同事务提交，否则 torn state 会让下一轮重复消费
+     * 同一段游戏时间（double-simulate）。</p>
      *
      * @param projectId 项目 ID
      *
-     * @param gameSecond 推进后的游戏秒（权威位置）
+     * @param gameSecond 推进后的游戏秒（权威位置=已消费）
      *
      * @param gameHour 兼容派生游戏小时（gameSecond / 3600）
      *
-     * @param baseAt 回补基准（last_engine_run_at / last_sim_time 同写当前真实时刻）
+     * @param baseAt 生产者锚点（last_engine_run_at / last_sim_time 同写当前真实时刻）
+     *
+     * @param frontierSecond 授权前沿（游戏秒；队列尾=墙钟/Unity 已授权、尚未消费）
+     *
+     * @param droppedGameSeconds 显式丢弃累计（队列溢出部分，非 0 即 WARN）
      *
      * @param summary 本 tick 摘要
      *
@@ -99,13 +106,38 @@ public interface ActorWorldClockRepository extends JpaRepository<ActorWorldClock
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update ActorWorldClock c set c.lastGameSecond = :gameSecond, c.lastGameHour = :gameHour,"
-            + " c.lastEngineRunAt = :baseAt, c.lastSimTime = :baseAt, c.lastSummary = :summary"
+            + " c.lastEngineRunAt = :baseAt, c.lastSimTime = :baseAt, c.lastSummary = :summary,"
+            + " c.authorizedTargetSecond = :frontierSecond, c.droppedGameSeconds = :droppedGameSeconds"
             + " where c.projectId = :projectId")
     int updateEnginePosition(@Param("projectId") Long projectId,
                              @Param("gameSecond") long gameSecond,
                              @Param("gameHour") long gameHour,
                              @Param("baseAt") LocalDateTime baseAt,
+                             @Param("frontierSecond") long frontierSecond,
+                             @Param("droppedGameSeconds") long droppedGameSeconds,
                              @Param("summary") String summary);
+
+    /**
+     * 仅推进 tick 队列前沿（P0-01 根治「不足一个 tick」累计路径用）。
+     * <p>亚 tick 余量（&lt; tick-game-minutes×60 游戏秒）不再藏在 {@code last_engine_run_at} 与
+     * {@code now} 的差值里——显式写入授权前沿并刷新生产者锚点，重启不丢、任意 rate 都能自洽累计。
+     * 只写 {@code authorizedTargetSecond / lastEngineRunAt / lastSimTime}，不触碰位置/配置列。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param frontierSecond 新授权前沿（游戏秒）
+     *
+     * @param baseAt 新生产者锚点（当前真实时刻）
+     *
+     * @return 更新行数
+     */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update ActorWorldClock c set c.authorizedTargetSecond = :frontierSecond,"
+            + " c.lastEngineRunAt = :baseAt, c.lastSimTime = :baseAt where c.projectId = :projectId")
+    int updateEngineFrontier(@Param("projectId") Long projectId,
+                             @Param("frontierSecond") long frontierSecond,
+                             @Param("baseAt") LocalDateTime baseAt);
 
     /**
      * 仅刷新引擎回补基准（「无流逝」「不足一个 tick」两条不推进路径用）。

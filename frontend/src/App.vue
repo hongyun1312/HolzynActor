@@ -13,5 +13,11 @@
 -->
 <!-- HolzynActor 前端根组件：所有页面直接渲染（登录/注册/控制台/管理后台均自带布局） -->
 <template>
+  <!-- 全局更新横幅（桌面端 U1）：发现新版本时窗口顶部轻量提示，不打断任何页面操作 -->
+  <UpdateBanner />
   <router-view />
 </template>
+
+<script setup>
+import UpdateBanner from '@/shared/components/UpdateBanner.vue'
+</script>

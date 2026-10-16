@@ -303,6 +303,12 @@ public class AgentActionService {
             logEntry.setSummary(truncate(action));
             logEntry.setDetail(reason + (type == null || type.isBlank() ? "" : "（类型：" + type + "）"));
             logEntry.setLogTime(LocalDateTime.now());
+            // P0-03 决策源可追溯：行动日志透传决策来源（AI/程序化兜底/预算降级；缺失不产生行动日志）
+            com.holzyn.actor.domain.agent.runtime.DecisionSource ds =
+                    com.holzyn.actor.domain.agent.runtime.DecisionSources.of(decision);
+            if (ds != null) {
+                logEntry.setDecisionSource(ds.name());
+            }
             logRepository.save(logEntry);
 
             plan.setStatus("done");
@@ -427,6 +433,8 @@ public class AgentActionService {
                     .title(title)
                     .content(content.toString())
                     .payloadJson(plan.getActionJson())
+                    // P0-03 决策源可追溯：行动事件透传决策来源
+                    .decisionSource(sourceName(decision))
                     .sourceKey("plan:" + plan.getId())
                     .build());
             // B5：行动事件发布环节（非 AI）记 trace 行
@@ -462,8 +470,10 @@ public class AgentActionService {
             }
             String target = decision == null ? "" : decision.path("target").asText("");
             String content = action + (target.isBlank() ? "" : "（目标：" + target + "）");
+            // P0-03 决策源可追溯：记忆沉淀透传决策来源（兜底/预算降级产出打标，学习管线据此隔离）
             agentMemoryService.recordObservation(ch.getProjectId(), com.holzyn.actor.common.NpcRefs.of(ch.getId()),
-                    truncate(content, FIELD_MAX), Math.max(1, Math.min(5, urgency)));
+                    truncate(content, FIELD_MAX), Math.max(1, Math.min(5, urgency)),
+                    com.holzyn.actor.domain.agent.runtime.DecisionSources.of(decision));
             log.debug("[Action] 行动记忆已沉淀：plan={} char={} 重要度={}", plan.getId(), plan.getCharacterId(), urgency);
         } catch (Exception e) {
             log.warn("[Action] 行动记忆沉淀失败: plan={} : {}", plan.getId(), e.getMessage());
@@ -604,6 +614,20 @@ public class AgentActionService {
             return null;
         }
         return t.length() > max ? t.substring(0, max) : t;
+    }
+
+    /**
+     * 决策来源列值（P0-03）：从行动决策 JSON 读 {@code DecisionSource} 枚举名；
+     * 未打标/非法 → null（事件/记忆留空，向后兼容旧数据）。
+     *
+     * @param decision 行动决策 JSON（可空）
+     *
+     * @return 枚举名或 null
+     */
+    private static String sourceName(tools.jackson.databind.JsonNode decision) {
+        com.holzyn.actor.domain.agent.runtime.DecisionSource ds =
+                com.holzyn.actor.domain.agent.runtime.DecisionSources.of(decision);
+        return ds == null ? null : ds.name();
     }
 
     /**

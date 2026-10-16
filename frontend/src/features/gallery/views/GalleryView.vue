@@ -33,19 +33,43 @@
         </template>
       </PageHeader>
 
+    <!-- P0-5：未配置模型 API 常驻提醒横幅（会话内可关闭，下次启动再提醒） -->
+    <el-alert
+      v-if="showApiBanner"
+      class="gallery-api-banner"
+      type="warning"
+      show-icon
+      :closable="true"
+      @close="dismissApiBanner"
+      title="还没接上模型：角色暂时只会重复简单作息，不会自己思考和行动"
+      description="接入一个 OpenAI 兼容的模型接口后，世界才会真正运转——角色会自己思考、行动与对话。现在是「能看不能演」的兜底状态。"
+    >
+      <template #default>
+        <el-button size="small" type="warning" plain @click="openSettingsDialog('apis')">去接入模型</el-button>
+      </template>
+    </el-alert>
+
     <!-- 主体区 -->
     <div v-if="loading && projects.length === 0" v-loading="true" class="gallery-loading" />
-    <el-empty v-else-if="projects.length === 0" description="还没有项目，创建你的第一个项目开始构建世界">
-      <div class="empty-ops">
-        <el-button type="primary" @click="$router.push('/project/new')">新建你的第一个项目</el-button>
-        <el-button plain @click="openImportDialog">导入项目</el-button>
+    <EmptyState
+      v-else-if="projects.length === 0"
+      size="page"
+      icon="ic_gallery_map_all"
+      title="还没有项目"
+      desc="每个项目是一个独立的世界：有自己的世界观、角色、时间与记忆，互不干扰。"
+      primary-text="新建你的第一个项目"
+      secondary-text="导入已有项目"
+      @primary="$router.push('/project/new')"
+      @secondary="openImportDialog"
+    >
+      <template #extra>
         <!-- 新账户引导：无项目时优先配置用户级 API（解析文件建项目需要）；统一 SettingsButton 视觉 -->
-        <SettingsButton label="配置 API" @click="openSettingsDialog" />
-      </div>
-    </el-empty>
+        <SettingsButton label="配置 API（解析文件建项目需要）" @click="openSettingsDialog" />
+      </template>
+    </EmptyState>
     <template v-else>
-      <!-- 上半栏 · 最近项目（按最近更新时间倒序，最多 6 个） -->
-      <section class="gallery-section">
+      <!-- 上半栏 · 最近项目（按最近更新时间倒序，最多 6 个）：仅当它是「所有项目」的真子集时出现 -->
+      <section v-if="showRecent" class="gallery-section">
         <div class="section-head">
           <div>
             <div class="section-title">最近项目</div>
@@ -171,8 +195,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import AppShell from '@/shared/layout/AppShell.vue'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 import SettingsButton from '@/shared/components/SettingsButton.vue'
+// V2.0 批次二：空态统一走 EmptyState（空态即教学：标题 + 为什么空 + 唯一主 CTA）
+import EmptyState from '@/shared/components/EmptyState.vue'
 import GlobalSettingsDialog from '@/features/settings/views/GlobalSettingsDialog.vue'
-import { fetchProjects, deleteProject, importProjectPackage, exportProjectPackage } from '@/shared/api'
+import { fetchProjects, deleteProject, importProjectPackage, exportProjectPackage, fetchModelApis } from '@/shared/api'
 
 const router = useRouter()
 const projects = ref([])
@@ -182,16 +208,41 @@ const importDialog = reactive({ visible: false, file: null, password: '', loadin
 const exportDialog = reactive({ visible: false, project: null, includeSensitive: false, password: '', loading: false })
 // 首页设置弹窗：全局（用户级）设置四子页 Tab 内嵌（零路由依赖，保证可用）
 const settingsRef = ref(null)
+// P0-5：未配置模型 API 提醒横幅（会话内可关闭；sessionStorage 记关闭，下次启动再提醒）
+const showApiBanner = ref(false)
 
 /** 打开首页设置弹窗（顶栏事件 / 操作区 / 空态三入口统一入口；可指定初始 Tab，默认 API 配置） */
 function openSettingsDialog(tab) {
   settingsRef.value?.open(tab)
 }
 
+/** 会话内未配置模型 API 时展示常驻提醒横幅 */
+async function checkApiConfigured() {
+  try {
+    if (sessionStorage.getItem('holzyn.apiBanner.dismissed') === '1') return
+    const list = (await fetchModelApis(null)) || []
+    showApiBanner.value = list.length === 0
+  } catch (_) {
+    showApiBanner.value = false
+  }
+}
+
+/** 关闭横幅（仅本次会话；下次启动重新提醒） */
+function dismissApiBanner() {
+  sessionStorage.setItem('holzyn.apiBanner.dismissed', '1')
+  showApiBanner.value = false
+}
+
 // 最近项目：按更新时间倒序取前 6（后端无最近访问字段，以 updatedAt 近似）
 const recentProjects = computed(() =>
   [...projects.value].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 6)
 )
+
+// V2.0：项目数 ≤ 最近项目条数时，「最近项目」与「所有项目」是**同一批卡片**——
+// 实测只有 1 个项目时，画廊会把同一张卡上下各渲染一次（同一页面同一内容的两个入口，
+// 正是本方案要消除的问题）。所以「最近项目」只在它确实是**子集**时才出现：
+// 项目多到需要"先给最近几个"的快捷入口时才显示，否则直接只留「所有项目」。
+const showRecent = computed(() => projects.value.length > recentProjects.value.length)
 
 // 所有项目：本地搜索过滤
 const filteredProjects = computed(() => {
@@ -300,12 +351,19 @@ async function loadProjects() {
   finally { loading.value = false }
 }
 
-onMounted(loadProjects)
+onMounted(() => {
+  loadProjects()
+  checkApiConfigured()
+})
 </script>
 
 <style scoped>
 /* 页面内容由 .content-col（全局类）限宽居中；这里只保留画廊特有的段落间距与卡片样式 */
 .gallery-loading { height: 300px; }
+
+/* P0-5：未配置模型 API 提醒横幅 */
+.gallery-api-banner { margin-top: 14px; }
+.gallery-api-banner .el-alert__content { flex: 1; }
 
 .gallery-section { margin-top: 16px; padding-bottom: 12px; }
 .section-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 14px; }

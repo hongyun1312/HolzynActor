@@ -28,7 +28,7 @@ import org.springframework.stereotype.Component;
  * <p>对应《HolzynActor_NanoJev并行决策模型接入_开发路径 .md》§7 「配置
  * {@code holzyn.actor.ai.nanojev.*}（base-url/开关/超时/批上限）」。</p>
  * <p><b>供应商/鉴权来源</b>：base-url 走本配置
- * （默认空=未配置即禁用，fail-closed；外网机示例 {@code https://llm.example.com:14443/v1}，
+ * （默认空=未配置即禁用，fail-closed；外网机示例 {@code https://llm.example.com/v1}，
  * 内网机 HONGYUN 示例 {@code http://127.0.0.1:9100/v1}），<b>API Key 默认不存本配置</b>——
  * 经 {@code ModelApiService.resolveProviderConfig} 复用当前 chat provider 的密钥
  * （NanoJev 与 Qwen3.6-35B 同网关同 Key，双环境天然跟随 DB 配置，不重复存 Key）。</p>
@@ -66,7 +66,7 @@ public class NanoJevProperties {
     private boolean enabled = false;
 
     /**
-     * NanoJev evaluate 网关 Base URL（已含 /v1，如 https://llm.example.com:14443/v1；
+     * NanoJev evaluate 网关 Base URL（已含 /v1，如 https://llm.example.com/v1；
      * 默认空=未配置，客户端 isEnabled()=false，调用方回退 Qwen/程序化）
      */
     private String baseUrl = "";

@@ -32,7 +32,12 @@
         @contextmenu.prevent="$emit('context', $event, item)"
       >
         <el-icon class="side-icon"><HIcon :name="item.icon" /></el-icon>
-        <span v-if="!collapsed" class="side-text">{{ item.name }}</span>
+        <span v-if="!collapsed" class="side-text">
+          {{ item.name }}
+          <!-- V2.0（P3）：副标签用于消歧同名字面（如「对话 → 世界运行中」/「对谈 → 世界静止」），
+               弱化小字，不改变主名，因此不破坏既有的位置肌肉记忆。 -->
+          <em v-if="item.sub" class="side-sub">{{ item.sub }}</em>
+        </span>
       </a>
     </div>
 
@@ -69,7 +74,10 @@
           @contextmenu.prevent="$emit('context', $event, child)"
         >
           <el-icon class="side-icon"><HIcon :name="child.icon" /></el-icon>
-          <span v-if="!collapsed" class="side-text">{{ child.name }}</span>
+          <span v-if="!collapsed" class="side-text">
+            {{ child.name }}
+            <em v-if="child.sub" class="side-sub">{{ child.sub }}</em>
+          </span>
         </a>
       </div>
     </div>
@@ -183,6 +191,15 @@ const sectionCount = computed(() => (props.sections || []).length)
 }
 .side-icon { font-size: 16px; flex-shrink: 0; }
 .side-text { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+/* V2.0 副标签：消歧用弱化小字（如「对话 世界运行中」），不参与主名的字重与强调 */
+.side-sub {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
 
 /* 置顶项与分组之间加一道细分隔，形成「主工作区 / 功能域」的视觉分层 */
 .side-pinned { display: flex; flex-direction: column; gap: 2px; padding-bottom: var(--space-2, 8px); margin-bottom: var(--space-2, 8px); border-bottom: 1px solid var(--border-l1); }

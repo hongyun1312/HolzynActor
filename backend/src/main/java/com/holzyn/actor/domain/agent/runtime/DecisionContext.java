@@ -64,6 +64,13 @@ public class DecisionContext {
     /** 实时行为决策系统 预留：被中断计划 ID */
     private final Long interruptedPlanId;
 
+    /**
+     * 是否为决策重试补算（P0-02 根治）：true=本决策由失败入队的重试作业重跑（回填到
+     * 原定 gameSecond）。决策循环据此把成功决策打标 {@code AI_RETRY}（可追溯「这条 AI
+     * 决策经过重试」）；false/缺省=常规决策入口（引擎 tick/手动/刺激等）。
+     */
+    private final boolean retry;
+
     private DecisionContext(Builder b) {
         this.projectId = b.projectId;
         this.userId = b.userId;
@@ -75,6 +82,7 @@ public class DecisionContext {
         this.stimulusType = b.stimulusType;
         this.stimulusText = b.stimulusText;
         this.interruptedPlanId = b.interruptedPlanId;
+        this.retry = b.retry;
     }
 
     /**
@@ -149,6 +157,11 @@ public class DecisionContext {
         return interruptedPlanId;
     }
 
+    /** 是否为决策重试补算（P0-02 根治；缺省 false） */
+    public boolean retry() {
+        return retry;
+    }
+
     /**
      * 建造器（决策上下文各字段可空语义见字段注释）。
      */
@@ -163,6 +176,7 @@ public class DecisionContext {
         private String stimulusType;
         private String stimulusText;
         private Long interruptedPlanId;
+        private boolean retry;
 
         public Builder projectId(Long projectId) {
             this.projectId = projectId;
@@ -211,6 +225,12 @@ public class DecisionContext {
 
         public Builder interruptedPlanId(Long interruptedPlanId) {
             this.interruptedPlanId = interruptedPlanId;
+            return this;
+        }
+
+        /** 标记为重试补算（P0-02 根治：回填原定 gameSecond 的重跑决策） */
+        public Builder retry(boolean retry) {
+            this.retry = retry;
             return this;
         }
 

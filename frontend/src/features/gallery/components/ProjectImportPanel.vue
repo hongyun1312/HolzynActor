@@ -81,9 +81,10 @@ async function doImport() {
 </script>
 
 <style scoped>
-.project-import-panel { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+/* V2.0 批次二：1100/760 硬编码 → 全站栅格令牌 */
+.project-import-panel { max-width: var(--page-w-content, 1200px); margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 /* 页头（size="sm"）样式由全局类提供 */
-.import-card { padding: 22px 26px; max-width: 760px; }
+.import-card { padding: 22px 26px; max-width: var(--page-w-form, 720px); }
 .holzyn-upload { margin-top: 16px; }
 .import-foot { margin-top: 16px; display: flex; align-items: center; gap: 12px; }
 .import-tip { font-size: 0.78rem; color: var(--text-secondary); }

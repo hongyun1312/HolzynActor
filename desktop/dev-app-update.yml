@@ -1,0 +1,10 @@
+# ============================================================
+# HolzynActor 桌面端 · 开发模式更新源（dev-app-update.yml）
+# 用途：npm start（未打包）时 electron-updater 读取本文件进行真实更新检查联调；
+#      与打包后自动生成的 app-update.yml 同源（GitHub Releases provider）。
+# 说明：仅用于开发联调「检查→发现→下载」链路；正式打包由 desktop/package.json
+#      的 build.publish 生成 app-update.yml，本文件不进入安装包。
+# ============================================================
+provider: github
+owner: hongyun1312
+repo: HolzynActor

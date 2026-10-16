@@ -493,7 +493,8 @@ onMounted(loadAll)
 .gs-card.danger { border-color: var(--state-danger-bg); }
 .gs-title { font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
 .gs-desc { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 10px; }
-.gs-form { padding-top: 6px; max-width: 720px; }
+/* V2.0：表单宽度改走令牌 --page-w-form（720）——表单页统一档位，不再内联魔法数字 */
+.gs-form { padding-top: 6px; max-width: var(--page-w-form, 720px); }
 .gs-hint { margin-left: 10px; font-size: 0.75rem; color: var(--text-secondary); }
 .gs-hint-btn { margin-left: 10px; }
 /* 主题色板 */

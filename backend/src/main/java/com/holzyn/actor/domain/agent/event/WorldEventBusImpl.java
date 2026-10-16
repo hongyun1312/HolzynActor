@@ -142,6 +142,8 @@ public class WorldEventBusImpl implements WorldEventBus {
         event.setPayloadJson(spec.getPayloadJson());
         event.setImportance(normalizeImportance(spec.getImportance()));
         event.setGameHour(resolveGameHour(projectId, spec.getGameHour()));
+        // P0-03 决策源可追溯：行动事件透传决策来源（kind=action 由行动决策打标）
+        event.setDecisionSource(normalizeDecisionSource(spec.getDecisionSource()));
         event.setSourceKey(truncate(sourceKey, 100));
         event.setCreatedAt(LocalDateTime.now());
         event.setUpdatedAt(LocalDateTime.now());
@@ -318,6 +320,18 @@ public class WorldEventBusImpl implements WorldEventBus {
      */
     static String normalizeVisibility(String visibility) {
         return com.holzyn.actor.common.ActorEventFields.normalizeVisibility(visibility);
+    }
+
+    /**
+     * 决策来源归一化（P0-03）：空白/非法回退 null（非决策来源事件不标记）；
+     * 合法枚举名（AI/AI_RETRY/FALLBACK_PROGRAMMATIC/BUDGET_EXHAUSTED/DECISION_MISSING）原样保留。
+     */
+    static String normalizeDecisionSource(String decisionSource) {
+        if (decisionSource == null || decisionSource.isBlank()) {
+            return null;
+        }
+        String s = decisionSource.trim();
+        return com.holzyn.actor.domain.agent.runtime.DecisionSources.parse(s) == null ? null : s;
     }
 
     /**

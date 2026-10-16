@@ -36,6 +36,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -428,15 +429,24 @@ class WorldFrameServiceTest {
     }
 
     @Test
-    void getActiveFrame_returnsVoOrThrows() {
+    void getActiveFrame_returnsVoOrPendingState() {
         when(frameRepository.findByProjectIdAndStatus(1L, "active"))
                 .thenReturn(List.of(frame(5L, 1L, 1L, "ai", null)));
         WorldFrameVO vo = service.getActiveFrame(1L);
         assertNotNull(vo);
         assertEquals(5L, vo.getFrameId());
+        assertEquals(Boolean.TRUE, vo.getGenerated(), "有 active 帧 → generated=true");
+        assertNull(vo.getHint(), "已生成时不给 hint");
 
+        // UI V2.0 §8.4 契约：无 active 帧不再 404，而是 200 + generated=false + hint（未生成是正常状态）
         when(frameRepository.findByProjectIdAndStatus(2L, "active")).thenReturn(List.of());
-        assertThrows(BizException.class, () -> service.getActiveFrame(2L), "无 active 帧应 404");
+        WorldFrameVO pending = service.getActiveFrame(2L);
+        assertNotNull(pending);
+        assertEquals(Boolean.FALSE, pending.getGenerated(), "无 active 帧 → generated=false");
+        assertEquals(2L, pending.getProjectId(), "未生成也要回填 projectId，便于前端归位");
+        assertEquals(WorldFrameService.HINT_NO_FRAME, pending.getHint(), "未生成必须给出人类可读原因");
+        assertNull(pending.getFrameId(), "未生成时不得伪造帧字段");
+        assertNull(pending.getWeatherJson(), "未生成时天气为空（前端据 generated 走未生成分支）");
     }
 
     @Test

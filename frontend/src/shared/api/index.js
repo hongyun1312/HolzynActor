@@ -34,6 +34,10 @@ export * from './world'
 export * from './character'
 // 对话（单聊/群聊/世界事件）
 export * from './conversation'
+// 对谈（M1/M2：静止世界聊天模式，独立于世界联动对话）
+export * from './dialogue'
+// 玩家档案（M3：玩家 persona + 玩家-角色关系设定/关系行）
+export * from './playerProfile'
 // 人群
 export * from './crowd'
 // 知识库

@@ -1,7 +1,7 @@
 {
   "name": "holzynactor-desktop",
   "productName": "HolzynActor",
-  "version": "1.0.0-beta.1",
+  "version": "1.1.0-beta.1",
   "description": "HolzynActor 全境众生 · 浮生 —— AI 世界模拟引擎桌面端（Electron 壳 + Spring Boot 后端 sidecar + 内置裁剪 JRE）",
   "main": "main.js",
   "author": "HONGYUN",
@@ -12,7 +12,12 @@
     "build:backend": "call ..\\build.bat",
     "pack": "electron-builder --win nsis",
     "pack:portable": "electron-builder --win portable",
-    "pack:dir": "electron-builder --win dir"
+    "pack:dir": "electron-builder --win dir",
+    "publish:stable": "electron-builder --win nsis --publish always",
+    "publish:beta": "electron-builder --win nsis --publish always --config.publish.channel=beta"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.10"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -32,7 +37,7 @@
     ],
     "extraResources": [
       {
-        "from": "../backend/target/holzyn-actor-1.0.0-beta.1.jar",
+        "from": "../backend/target/holzyn-actor-1.1.0-beta.1.jar",
         "to": "backend/holzyn-actor.jar"
       },
       {
@@ -40,12 +45,21 @@
         "to": "runtime"
       }
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "hongyun1312",
+        "repo": "HolzynActor",
+        "releaseType": "draft"
+      }
+    ],
     "win": {
       "target": [
         "nsis",
         "portable"
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "signingHashAlgorithms": ["sha256"]
     },
     "nsis": {
       "oneClick": false,

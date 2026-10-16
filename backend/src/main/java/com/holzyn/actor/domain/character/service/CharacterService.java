@@ -87,6 +87,18 @@ public class CharacterService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private NpcActivityStateService npcActivityStateService;
 
+    /**
+     * 关系拓扑节点「附加语义」解析器（UI V3.0 关系工作台新增）。
+     * <p><b>为什么必须有它</b>：重做前拓扑节点只有姓名/重要度可编码，关系表为空时整块画布是
+     * 一盘孤立圆点；而「谁和谁是一拨人」世界内核里本就有真实答案（中观组织 + 血缘谱系）。
+     * 本解析器把归属/家族/所在地/档案速览一次带给前端，使默认视图能按世界事实分圈。</p>
+     * <p>字段注入（非 final）保持既有构造器签名不变（存量单测零改动）；{@code null}=未装配 →
+     * 节点 meta 全空（{@link com.holzyn.actor.domain.character.vo.CharacterRelationGraphVO.NodeMeta#EMPTY}），
+     * 前端走职业/归属文本兜底分区，零阻断。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CharacterRelationMetaResolver relationMetaResolver;
+
     /** 节点详细信息返回截断长度（避免全量 detail 撑爆拓扑接口 payload） */
     private static final int NODE_DETAIL_MAX = 300;
 
@@ -268,7 +280,26 @@ public class CharacterService {
         // 访问器未装配/读失败 → 空 Map（节点回退 idle/空串，零阻断）
         Map<String, NpcActivityStateService.ActivityUpdate> runStateByRef = npcActivityStateService == null
                 ? Map.of() : npcActivityStateService.activityByRef(projectId);
-        return buildGraph(npcs, ordinaryNpcs, rels, runStateByRef);
+        // UI V3.0：一次批量解析「圈子（中观组织）+ 家族（血缘分量）+ 所在地/档案速览」附加语义
+        // （3 条查询封顶、无 N+1；解析失败内部降级为空 Map，绝不阻断拓扑接口）
+        Map<Long, CharacterRelationGraphVO.NodeMeta> metaByActorId = relationMetaResolver == null
+                ? Map.of() : relationMetaResolver.resolve(projectId, allCharacters(npcs, ordinaryNpcs));
+        return buildGraph(npcs, ordinaryNpcs, rels, runStateByRef, metaByActorId);
+    }
+
+    /**
+     * 合并特殊型 + 普通型角色为一个列表（附加语义解析用；顺序稳定=特殊型在前）。
+     *
+     * @param npcs 特殊型角色
+     *
+     * @param ordinaryNpcs 普通型角色
+     *
+     * @return 合并后的角色列表
+     */
+    private static List<ActorCharacter> allCharacters(List<ActorCharacter> npcs, List<ActorCharacter> ordinaryNpcs) {
+        List<ActorCharacter> all = new ArrayList<>(npcs == null ? List.of() : npcs);
+        all.addAll(ordinaryNpcs == null ? List.of() : ordinaryNpcs);
+        return all;
     }
 
     /**
@@ -313,8 +344,36 @@ public class CharacterService {
     static CharacterRelationGraphVO buildGraph(List<ActorCharacter> npcs, List<ActorCharacter> ordinaryNpcs,
                                                List<ActorCharacterRelation> rels,
                                                Map<String, NpcActivityStateService.ActivityUpdate> runStateByRef) {
+        return buildGraph(npcs, ordinaryNpcs, rels, runStateByRef, Map.of());
+    }
+
+    /**
+     * 纯映射函数：在运行态快照之外，额外接收<b>节点附加语义</b>（UI V3.0 关系工作台新增）。
+     *
+     * <p>附加语义 = 圈子（中观组织）/ 家族（血缘分量）/ 所在地 / 档案速览，由
+     * {@link CharacterRelationMetaResolver} 一次批量解析后透传（本函数保持纯函数、零仓库依赖，
+     * 便于单测）。未提供时节点 meta 全空 —— 旧调用方行为与旧字段语义完全不变。</p>
+     *
+     * @param npcs 项目下全部特殊型角色
+     *
+     * @param ordinaryNpcs 项目下全部普通型 NPC
+     *
+     * @param rels 项目下全部关系
+     *
+     * @param runStateByRef 普通型运行态（{@code npc:{id}} → state/lastAction；可空=全按默认态）
+     *
+     * @param metaByActorId 角色 ID → 附加语义（可空=全部空 meta）
+     *
+     * @return 拓扑图 VO
+     */
+    static CharacterRelationGraphVO buildGraph(List<ActorCharacter> npcs, List<ActorCharacter> ordinaryNpcs,
+                                               List<ActorCharacterRelation> rels,
+                                               Map<String, NpcActivityStateService.ActivityUpdate> runStateByRef,
+                                               Map<Long, CharacterRelationGraphVO.NodeMeta> metaByActorId) {
         Map<String, NpcActivityStateService.ActivityUpdate> runStates =
                 runStateByRef == null ? Map.of() : runStateByRef;
+        Map<Long, CharacterRelationGraphVO.NodeMeta> metas =
+                metaByActorId == null ? Map.of() : metaByActorId;
         Map<Long, ActorCharacter> npcById = npcs.stream()
                 .collect(Collectors.toMap(ActorCharacter::getId, c -> c));
         Map<Long, ActorCharacter> ordinaryById = ordinaryNpcs.stream()
@@ -327,7 +386,8 @@ public class CharacterService {
         for (ActorCharacter c : npcs) {
             nodes.add(new CharacterRelationGraphVO.NodeVO(
                     "npc-" + c.getId(), c.getName(), "npc", c.getType(), c.getImportance(), c.getIsProtagonist(),
-                    c.getTitle(), truncate(c.getDetail(), NODE_DETAIL_MAX), null, null, null, null));
+                    c.getTitle(), truncate(c.getDetail(), NODE_DETAIL_MAX), null, null, null, null,
+                    metaOf(metas, c.getId())));
         }
         // 普通型 NPC 节点（每个普通 NPC 以具体人名独立成节点）
         for (ActorCharacter m : ordinaryNpcs) {
@@ -341,7 +401,7 @@ public class CharacterService {
             nodes.add(new CharacterRelationGraphVO.NodeVO(
                     "crowd-" + m.getId(), m.getName(), "crowd", null, null, null, null,
                     truncate(m.getDetail(), NODE_DETAIL_MAX), m.getAffiliation(), m.getOccupation(),
-                    runState, runLastAction));
+                    runState, runLastAction, metaOf(metas, m.getId())));
         }
 
         // 幽灵节点去重收集（key -> 名称）
@@ -366,9 +426,28 @@ public class CharacterService {
         }
         // 幽灵节点收尾追加
         ghostIndex.forEach((key, name) -> nodes.add(new CharacterRelationGraphVO.NodeVO(
-                key, name, "ghost", null, null, null, null, null, null, null, null, null)));
+                key, name, "ghost", null, null, null, null, null, null, null, null, null,
+                CharacterRelationGraphVO.NodeMeta.EMPTY)));
 
         return new CharacterRelationGraphVO(nodes, edges);
+    }
+
+    /**
+     * 节点附加语义取值（缺失一律回退空对象，前端无需判空）。
+     *
+     * @param metas 角色 ID → 附加语义
+     *
+     * @param actorId 角色 ID
+     *
+     * @return 附加语义（永不为 null）
+     */
+    private static CharacterRelationGraphVO.NodeMeta metaOf(
+            Map<Long, CharacterRelationGraphVO.NodeMeta> metas, Long actorId) {
+        if (actorId == null) {
+            return CharacterRelationGraphVO.NodeMeta.EMPTY;
+        }
+        CharacterRelationGraphVO.NodeMeta meta = metas.get(actorId);
+        return meta == null ? CharacterRelationGraphVO.NodeMeta.EMPTY : meta;
     }
 
     /** 按名称建索引（名称去空白后首条胜出；空名跳过） */

@@ -432,6 +432,129 @@ class AiCallOutsideTransactionTest {
         assertNoTransaction(svc, "scanAndBackfill");
     }
 
+    /**
+     * 项目级 AI 助手（2026-10-10 第 50 次 · M1+M2）追加入网：对话编排
+     * （AssistantChatService.chat——工具决策 jsonMode 调用 + 最终回答流式调用均为秒级~分钟级 AI）
+     * 一律不得带 @Transactional；落库由 AssistantSessionService 短事务承担。
+     */
+    @Test
+    @DisplayName("项目级 AI 助手对话编排不得带 @Transactional（工具循环与流式回答在事务外）")
+    void assistantChatIsNotTransactional() throws Exception {
+        Class<?> chat = Class.forName("com.holzyn.actor.domain.assistant.service.AssistantChatService");
+        assertNoTransaction(chat, "chat", Long.class, Long.class, String.class, String.class,
+                Class.forName("com.holzyn.actor.domain.assistant.service.AssistantChatService$SseSink"));
+    }
+
+    /**
+     * 项目级 AI 助手（2026-10-12 第 51 次 · M3+M4）追加入网：世界干预服务
+     * （AssistantInterventionService.plan/confirm/revise——执行路径会触发 AI：插话回复
+     * RoleplayService.sendMessage 流式生成、触发行动 AgentRuntime.triggerAction 决策；
+     * M5 修改后执行 revise 同样经 execute 触发同类 AI）
+     * 一律不得带 @Transactional；落库由干预计划仓库/会话服务各自短事务承担。
+     */
+    @Test
+    @DisplayName("项目级 AI 助手世界干预不得带 @Transactional（执行路径触发插话回复与行动决策 AI）")
+    void assistantInterventionIsNotTransactional() throws Exception {
+        Class<?> svc = Class.forName("com.holzyn.actor.domain.assistant.service.AssistantInterventionService");
+        assertNoTransaction(svc, "plan", Long.class, Long.class, Long.class, String.class,
+                Class.forName("java.util.Map"));
+        assertNoTransaction(svc, "confirm", Long.class, Long.class, Long.class);
+        assertNoTransaction(svc, "cancel", Long.class, Long.class, Long.class);
+        assertNoTransaction(svc, "revise", Long.class, Long.class, Long.class,
+                Class.forName("java.util.Map"));
+    }
+
+    /**
+     * 对谈模式（2026-10-12 第 54 次 · M1 对谈地基）追加入网：单聊编排
+     * （DialogueChatService.chat——SSE 流式回复 scene=dialogue_reply，秒级 AI）
+     * 一律不得带 @Transactional；落库由 DialogueMessageService 短事务承担。
+     */
+    @Test
+    @DisplayName("对谈单聊编排不得带 @Transactional（SSE 流式回复 AI 在事务外）")
+    void dialogueChatIsNotTransactional() throws Exception {
+        Class<?> chat = Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueChatService");
+        assertNoTransaction(chat, "chat", Long.class, Long.class, Long.class, String.class,
+                Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueChatService$SseSink"));
+    }
+
+    /**
+     * 对谈模式（2026-10-12 第 54 次 · M1 对谈地基）追加入网：AI 动态开场白
+     * （DialogueGreetingService.generate——scene=dialogue_greeting，秒级 AI）
+     * 一律不得带 @Transactional；落库由 DialogueMessageService 短事务承担。
+     */
+    @Test
+    @DisplayName("对谈 AI 动态开场白不得带 @Transactional（开场白 AI 在事务外）")
+    void dialogueGreetingIsNotTransactional() throws Exception {
+        Class<?> greeting = Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueGreetingService");
+        assertNoTransaction(greeting, "generate", Long.class, Long.class, Long.class);
+    }
+
+    /**
+     * 对谈模式（2026-10-12 第 55 次 · M2 前端聊天 UI 单聊闭环）追加入网：重写一条角色回复
+     * （DialogueChatService.regenerate——复用 dialogue_reply 流式生成，秒级 AI）
+     * 一律不得带 @Transactional；截断/落库由 DialogueMessageService 短事务承担。
+     */
+    @Test
+    @DisplayName("对谈重写回复不得带 @Transactional（重写 AI 在事务外）")
+    void dialogueRegenerateIsNotTransactional() throws Exception {
+        Class<?> chat = Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueChatService");
+        assertNoTransaction(chat, "regenerate", Long.class, Long.class, Long.class, Long.class,
+                Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueChatService$SseSink"));
+    }
+
+    /**
+     * 对谈模式（2026-10-12 第 57 次 · M4 记忆/世界书等价物+上下文管理增强）追加入网：
+     * 滚动窗口自动摘要（DialogueSummaryService.maybeSummarize——scene=dialogue_summary，
+     * 超窗时秒级 AI 摘要）一律不得带 @Transactional；摘要写回由
+     * DialogueSessionService.updateSummary 短事务承担。
+     */
+    @Test
+    @DisplayName("对谈滚动窗口自动摘要不得带 @Transactional（摘要 AI 在事务外，写回短事务）")
+    void dialogueSummaryIsNotTransactional() throws Exception {
+        Class<?> summary = Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueSummaryService");
+        assertNoTransaction(summary, "maybeSummarize", Long.class, Long.class, Long.class);
+    }
+
+    /**
+     * 对谈模式（2026-10-13 第 58 次 · M5 群聊）追加入网：群聊回复编排
+     * （DialogueGroupChatService.groupChat——scene=dialogue_group_reply，逐角色独立
+     * AI 调用串行流式）一律不得带 @Transactional；玩家/角色消息落库由
+     * DialogueMessageService 短事务承担。
+     */
+    @Test
+    @DisplayName("对谈群聊回复编排不得带 @Transactional（逐角色 AI 在事务外，落库短事务）")
+    void dialogueGroupChatIsNotTransactional() throws Exception {
+        Class<?> group = Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueGroupChatService");
+        assertNoTransaction(group, "groupChat", Long.class, Long.class, Long.class, String.class,
+                Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueChatService$SseSink"));
+    }
+
+    /**
+     * 对谈模式（2026-10-13 第 58 次 · M5 群聊）追加入网：群聊开场白
+     * （DialogueGreetingService.generateGroup——按在场角色逐人生成，秒级 AI）
+     * 一律不得带 @Transactional；开场白落库由 DialogueMessageService 短事务承担。
+     */
+    @Test
+    @DisplayName("对谈群聊开场白不得带 @Transactional（逐角色开场 AI 在事务外）")
+    void dialogueGroupGreetingIsNotTransactional() throws Exception {
+        Class<?> greeting = Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueGreetingService");
+        assertNoTransaction(greeting, "generateGroup", Long.class, Long.class, Long.class);
+    }
+
+    /**
+     * 对谈模式（2026-10-13 第 59 次 · M6 沉淀收尾）追加入网：沉淀确认卡片
+     * （DialogueConsolidationService.preview——scene=dialogue_consolidation，jsonMode
+     * 非流式抽取，秒级 AI）一律不得带 @Transactional；落库由 apply 阶段的
+     * PlayerProfileService.applyConsolidatedRelation / AgentMemoryService.recordObservation /
+     * DialogueSessionService.markConsolidated 各自短事务承担。
+     */
+    @Test
+    @DisplayName("对谈沉淀确认卡片不得带 @Transactional（AI 抽取在事务外，落库分层短事务）")
+    void dialogueConsolidationIsNotTransactional() throws Exception {
+        Class<?> consolidation = Class.forName("com.holzyn.actor.domain.dialogue.service.DialogueConsolidationService");
+        assertNoTransaction(consolidation, "preview", Long.class, Long.class, Long.class);
+    }
+
     /** 断言指定公开方法存在且未标注 @Transactional（方法不存在则测试失败，防止签名漂移后静默放过）。 */
     private void assertNoTransaction(Class<?> type, String name, Class<?>... params) throws Exception {
         Method m = type.getMethod(name, params);

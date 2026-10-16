@@ -429,7 +429,10 @@ public class WorldClockService {
         // 计算先落局部变量（窄更新前不修改受管实体）；落库后实例已被 clearAutomatically 脱管，
         // 回填仅供出参 VO/广播口径。
         LocalDateTime now = LocalDateTime.now();
-        clockRepository.updateEnginePosition(projectId, target, target / 3600L, now, clock.getLastSummary());
+        // P0-01 根治：校准即「世界时间显式设为目标」——授权前沿一并设为目标（无积压），丢弃累计保持不变
+        long dropped = clock.getDroppedGameSeconds() == null ? 0L : clock.getDroppedGameSeconds();
+        clockRepository.updateEnginePosition(projectId, target, target / 3600L, now, target, dropped,
+                clock.getLastSummary());
         int rate = clock.getRate() == null || clock.getRate() <= 0 ? DEFAULT_RATE : clock.getRate();
         long remaining = target % 3600L;
         clockRepository.updateConfig(projectId, clock.getRate(), clock.getPaused(), clock.getPausedAt(),
@@ -565,8 +568,10 @@ public class WorldClockService {
             // 不整实体回写（引擎每 tick 也在写本行，整实体覆盖会让双方互相覆盖旧快照）。
             calibratedSecond = target;
             calibratedSimAt = LocalDateTime.now();
+            // P0-01 根治：校准即「世界时间显式设为目标」——授权前沿一并设为目标（无积压），丢弃累计保持不变
+            long dropped = clock.getDroppedGameSeconds() == null ? 0L : clock.getDroppedGameSeconds();
             clockRepository.updateEnginePosition(projectId, target, target / 3600L, calibratedSimAt,
-                    clock.getLastSummary());
+                    target, dropped, clock.getLastSummary());
             // 锚点重基（时间口径统一）：诊断口径在重基瞬间与权威位置严格相等；
             // 回补基准同步重置为当前（不补校准前的真实流逝）——经 updateConfig 武装基准列落库。
             int r = clock.getRate() == null || clock.getRate() <= 0 ? DEFAULT_RATE : clock.getRate();
@@ -674,6 +679,8 @@ public class WorldClockService {
         // 重置引擎回补基准：拨动后的世界从新位置按自然流逝接续，不补拨动跨度
         clock.setLastEngineRunAt(LocalDateTime.now());
         clock.setLastSimTime(LocalDateTime.now());
+        // P0-01 根治：拨动即「世界时间显式设为目标」——授权前沿一并设为目标（无积压）
+        clock.setAuthorizedTargetSecond(target);
         // 时间口径统一：锚点随权威位置重基（诊断口径与权威位置在拨动后严格相等）
         rebaseAnchorTo(clock, target);
         clockRepository.save(clock);
@@ -797,6 +804,12 @@ public class WorldClockService {
         vo.setEngineGameSecond(engineSecond);
         vo.setEngineRefRealTime(System.currentTimeMillis());
         vo.setEngineTickGameSeconds(Math.max(1, tickGameMinutes) * 60);
+        // P0-01 根治：tick 队列观测（授权前沿/未消费积压/显式丢弃累计）——与引擎位置同源、诊断口径
+        long frontier = clock.getAuthorizedTargetSecond() == null
+                ? engineSecond : Math.max(engineSecond, clock.getAuthorizedTargetSecond());
+        vo.setAuthorizedTargetSecond(frontier);
+        vo.setBacklogGameSeconds(Math.max(0L, frontier - engineSecond));
+        vo.setDroppedGameSeconds(clock.getDroppedGameSeconds() == null ? 0L : clock.getDroppedGameSeconds());
         // 兼容字段保留（第几天/当日小时/时段）——与权威位置同源
         vo.setDay(Math.floorDiv(gameHour, 24) + 1);
         vo.setHourOfDay((int) Math.floorMod(gameHour, 24));

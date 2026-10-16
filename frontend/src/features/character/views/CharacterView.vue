@@ -79,64 +79,33 @@
         </div>
 
         <el-tabs v-model="infoTab" class="info-tabs" @tab-change="onInfoTabChange">
-          <!-- Tab 1 · 概览：基础档案只读（需选中角色） -->
+          <!-- Tab 1 · 概览：V2.0 §13.4 巨型组件拆分第一步——整页搬迁为独立面板组件（像素/文案/交互不变）。
+               面板输入只有两个：角色本身 + 该角色的发育条目；「详细信息」折叠态与档位文案已下沉到面板内部。 -->
           <el-tab-pane label="概览" name="overview">
-            <div v-if="!currentChar" class="main-empty">
-              <el-empty description="从左侧选择一个角色查看详情" />
-            </div>
-            <template v-else>
-            <div class="ov-grid">
-              <div class="ov-item"><span class="k">姓名</span><span class="v">{{ currentChar.name }}</span></div>
-              <div class="ov-item"><span class="k">头衔</span><span class="v">{{ currentChar.title || '—' }}</span></div>
-              <div class="ov-item"><span class="k">类型</span><span class="v">{{ currentChar.type === 'common' ? '普通型' : '特殊型 NPC' }}</span></div>
-              <div class="ov-item"><span class="k">是否主角</span><span class="v">{{ currentChar.isProtagonist === 1 ? '是' : '否' }}</span></div>
-              <div class="ov-item"><span class="k">位置</span><span class="v">
-                <template v-if="currentChar.location">{{ currentChar.location }}<el-tag v-if="currentChar.locationId" size="small" type="success" effect="plain">已归一</el-tag></template>
-                <template v-else>—</template>
-              </span></div>
-              <div class="ov-item"><span class="k">重要度</span><span class="v"><el-rate :model-value="currentChar.importance" disabled size="small" /></span></div>
-              <!-- O6 G2 全生命周期阶段机：年龄 / 发育阶段 / 认知 LOD（数据源 /api/debug/growth/overview；旧 jar 无端点显示 —） -->
-              <div class="ov-item"><span class="k">年龄</span><span class="v">
-                <template v-if="growthOf(currentChar)">{{ growthOf(currentChar).age }} 岁</template>
-                <template v-else>—</template>
-              </span></div>
-              <div class="ov-item"><span class="k">发育阶段</span><span class="v">
-                <template v-if="growthOf(currentChar)">
-                  {{ growthOf(currentChar).stageLabel || growthOf(currentChar).stage || '—' }}
-                  <el-tag v-if="growthOf(currentChar).stage === 'DECEASED'" size="small" type="danger" effect="dark">已故</el-tag>
-                  <el-tag v-else-if="growthOf(currentChar).stage === 'INFANT'" size="small" type="warning" effect="plain">婴幼儿期</el-tag>
-                </template>
-                <template v-else>—</template>
-              </span></div>
-              <div class="ov-item"><span class="k">认知档位</span><span class="v">
-                <template v-if="growthOf(currentChar)">
-                  <el-tag size="small" :type="tierTag(growthOf(currentChar).tier)" effect="plain">{{ tierLabel(growthOf(currentChar).tier) }}</el-tag>
-                </template>
-                <template v-else>—</template>
-              </span></div>
-              <div class="ov-item"><span class="k">角色档案</span><span class="v">
-                <el-tag v-if="currentChar.hasCard" size="small" type="success">已生成</el-tag>
-                <el-tag v-else size="small" type="info">未生成</el-tag>
-              </span></div>
-            </div>
-            <div class="ov-detail">
-              <div class="ov-detail-label">详细信息</div>
-              <div class="ov-detail-text">{{ currentChar.detail || '—' }}</div>
-            </div>
-            <el-button size="small" text type="primary" @click="openCharDialog(currentChar)">编辑档案</el-button>
-            </template>
+            <CharacterOverviewPanel
+              :character="currentChar"
+              :growth="growthOf(currentChar)"
+              @edit="openCharDialog(currentChar)"
+              @open-card="infoTab = 'card'"
+            />
           </el-tab-pane>
 
           <!-- Tab 2 · 角色档案（11 维，只读）：服务端 personaRenderText 按维切分渲染；编辑属 G1b -->
           <el-tab-pane label="角色档案（11 维）" name="card">
             <div v-if="!currentChar" class="main-empty">
-              <el-empty description="从左侧选择一个角色查看详情" />
+              <EmptyState size="inline" icon="ic_public_contacts" title="从左侧选择一个角色查看详情" />
             </div>
             <template v-else>
             <div v-if="!roleCard" class="main-empty">
-              <el-empty description="该角色尚未生成角色档案（11 维）">
-                <el-button type="primary" :loading="generatingMap[currentChar.id]" @click="generateOne(currentChar)">AI 生成角色档案</el-button>
-              </el-empty>
+              <EmptyState
+                size="page"
+                icon="ic_public_albums"
+                title="该角色还没有 11 维档案"
+                desc="由 AI 依据角色设定生成：身份、性格、目标、说话方式、关系态度等 11 个维度。生成后可在「记忆 / Prompt / 状态」等标签页复用。"
+                primary-text="AI 生成角色档案"
+                :primary-icon="'MagicStick'"
+                @primary="generateOne(currentChar)"
+              />
             </div>
             <template v-else>
               <!-- 只读 11 维档案（组件：features/character/components/PersonaArchivePanel.vue） -->
@@ -153,7 +122,7 @@
           <!-- Tab 3 · Prompt：system_prompt 概念随 G1a 废弃（改为运行时按场景渲染分片），此页仅保留说明 -->
           <el-tab-pane label="Prompt" name="prompt">
             <div v-if="!currentChar" class="main-empty">
-              <el-empty description="从左侧选择一个角色查看详情" />
+              <EmptyState size="inline" icon="ic_public_contacts" title="从左侧选择一个角色查看详情" />
             </div>
             <template v-else>
               <el-alert
@@ -168,195 +137,13 @@
 
           <!-- Tab 4 · 记忆：角色长期记忆（需选中角色） -->
           <el-tab-pane label="记忆" name="memory">
-            <div v-if="!currentChar" class="main-empty">
-              <el-empty description="从左侧选择一个角色查看详情" />
-            </div>
-            <template v-else>
-            <div class="memory-ops">
-              <span class="memory-hint">对话后 AI 自动抽取（M1 三重机制：重要度 1 丢 / 2 进工作记忆草稿 / 3+ 直进长期记忆；update/invalidate 版本链演进；target=world 世界信息路由到「项目记忆」页）</span>
-              <div class="memory-ops-right">
-                <el-button size="small" text type="info" @click="openInjectionPreview" title="分场景注入组合预览（M5：各段文本 + 命中记忆得分 + token 预算）">注入预览</el-button>
-                <el-button size="small" text type="warning" @click="doMaintenance" title="统一维护（L1 TTL/巩固扫描 + 归档超龄/保留/二次清理，M5）">统一维护</el-button>
-                <el-button size="small" text type="primary" :loading="extracting" @click="doExtractMemories">手动抽取</el-button>
-              </div>
-            </div>
-            <div v-loading="memoryLoading" class="memory-list">
-              <div v-if="memories.length === 0" class="side-empty">暂无记忆，对话几轮后自动生成</div>
-              <div v-for="m in memories" :key="m.id" class="memory-item" :class="memoryClass(m)">
-                <div class="memory-head">
-                  <el-tag size="small" :type="typeTag(m)" effect="plain">
-                    {{ typeLabel(m) }}
-                  </el-tag>
-                  <el-tag size="small" :type="impTag(m.importance)" effect="light">重要度 {{ m.importance }}</el-tag>
-                  <el-button class="memory-op" size="small" text type="primary" @click="openEditMemoryDialog(m)" title="编辑该记忆（版本+1，旧版自动归档）">
-                    <el-icon><HIcon name="Edit" /></el-icon>
-                  </el-button>
-                  <el-button class="memory-op" size="small" text type="warning" @click="doArchiveMemory(m)" title="归档该记忆（写入归档冷存储，不再参与注入）">
-                    <el-icon><HIcon name="Document" /></el-icon>
-                  </el-button>
-                  <el-button class="memory-del" size="small" text type="danger" @click="doDeleteMemory(m)" title="删除该记忆">
-                    <el-icon><HIcon name="Delete" /></el-icon>
-                  </el-button>
-                </div>
-                <div class="memory-content">{{ m.content }}</div>
-              </div>
-            </div>
-            <!-- M3 L3 核心记忆（恒在上下文：静态基线只读 + 动态核心块 CRUD） -->
-            <div class="core-memory-sec">
-              <div class="core-memory-head">
-                <span class="core-memory-title">核心记忆（L3 恒在）</span>
-                <el-button size="small" text type="primary" :loading="coreMemoryLoading" @click="loadCoreMemories">刷新</el-button>
-                <el-button size="small" type="primary" plain @click="openCoreBlockDialog()">
-                  <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新建核心块
-                </el-button>
-              </div>
-              <div v-loading="coreMemoryLoading" class="core-memory-body">
-                <div v-if="coreBaselineText" class="core-baseline">
-                  <div class="core-baseline-title">静态基线（来自角色档案/脑力/目标/关系，恒在注入）</div>
-                  <div class="core-baseline-text">{{ coreBaselineText }}</div>
-                </div>
-                <div v-if="coreBlocks.length === 0 && !coreBaselineText" class="side-empty">
-                  暂无核心记忆。身份信息由静态基线渲染；可由「新建核心块」手动添加，或对话/反思时由 AI 自动演进（core_memory_update）
-                </div>
-                <div v-for="b in coreBlocks" :key="b.id" class="core-block-item">
-                  <div class="core-block-head">
-                    <el-tag size="small" :type="coreBlockTag(b)" effect="plain">{{ b.blockKey.startsWith('custom:') ? b.blockName || b.blockKey : (coreBlockKeyLabel(b.blockKey)) }}</el-tag>
-                    <el-tag size="small" effect="light">重要度 {{ b.importance }}</el-tag>
-                    <el-tag size="small" effect="plain" :type="b.editableByAgent === 0 ? 'info' : 'warning'">
-                      {{ b.editableByAgent === 0 ? '仅用户可改' : 'agent 可自编辑' }}
-                    </el-tag>
-                    <span class="core-block-version">v{{ b.version }}</span>
-                    <div class="core-block-ops">
-                      <el-button size="small" text type="primary" @click="openCoreBlockDialog(b)">编辑</el-button>
-                      <el-button size="small" text type="warning" @click="doArchiveCoreBlock(b)">归档</el-button>
-                      <el-button size="small" text type="danger" @click="doDeleteCoreBlock(b)">删除</el-button>
-                    </div>
-                  </div>
-                  <div class="core-block-content">{{ b.content }}</div>
-                </div>
-              </div>
-            </div>
-            <!-- M2 L1 工作记忆（热缓冲：草稿/任务/上下文/感知，会话结束后巩固进长期记忆） -->
-            <div class="working-memory-sec">
-              <div class="working-memory-title">工作记忆（L1 热缓冲）</div>
-              <div v-loading="workingMemoryLoading" class="working-memory-list">
-                <div v-if="workingMemories.length === 0" class="side-empty">暂无进行中的工作项（对话抽取草稿、行动关注点、感知快照将在会话结束后巩固为长期记忆）</div>
-                <div v-for="w in workingMemories" :key="w.id" class="working-memory-item">
-                  <div class="working-memory-head">
-                    <el-tag size="small" :type="workingTypeTag(w)" effect="plain">{{ workingTypeLabel(w) }}</el-tag>
-                    <el-tag v-if="w.importanceHint" size="small" effect="light">建议重要度 {{ w.importanceHint }}</el-tag>
-                    <span class="working-memory-time">{{ fmtTime(w.createdAt) }}</span>
-                  </div>
-                  <div class="working-memory-content">{{ w.content }}</div>
-                </div>
-              </div>
-            </div>
-            <!-- M5 记忆治理健康度（§11.3：归档量 / 版本链 / 分层分布——角色维度健康度摘要） -->
-            <div class="working-memory-sec">
-              <div class="working-memory-title">记忆治理健康度（M5）</div>
-              <div v-loading="healthLoading" class="memory-health-grid">
-                <div class="health-item">
-                  <div class="health-label">归档量</div>
-                  <div class="health-value mono">{{ memoryHealth?.archive?.total ?? 0 }}</div>
-                  <div class="health-sub">按原因 {{ reasonSummary(memoryHealth?.archive?.byReason) }} · 还原 {{ memoryHealth?.archive?.restored ?? 0 }}</div>
-                </div>
-                <div class="health-item">
-                  <div class="health-label">版本链数</div>
-                  <div class="health-value mono">{{ memoryHealth?.versionChain?.totalVersionChainCount ?? 0 }}</div>
-                  <div class="health-sub">L2 {{ memoryHealth?.versionChain?.l2VersionChainCount ?? 0 }} · L3 {{ memoryHealth?.versionChain?.l3CoreBlockChainCount ?? 0 }}</div>
-                </div>
-                <div class="health-item">
-                  <div class="health-label">分层 L1/L2/L3</div>
-                  <div class="health-value mono">{{ memoryHealth?.tier?.l1?.activeCount ?? 0 }} / {{ memoryHealth?.tier?.l2?.total ?? 0 }} / {{ memoryHealth?.tier?.l3CoreBlocks ?? 0 }}</div>
-                  <div class="health-sub">L2：语义 {{ memoryHealth?.tier?.l2?.semantic ?? 0 }} · 经历 {{ memoryHealth?.tier?.l2?.episodic ?? 0 }} · 反思 {{ memoryHealth?.tier?.l2?.reflection ?? 0 }} · 计划 {{ memoryHealth?.tier?.l2?.plan ?? 0 }} · 摘要 {{ memoryHealth?.tier?.l2?.summary ?? 0 }}</div>
-                </div>
-              </div>
-            </div>
-            <!-- O1 记忆内核扩展：L1 短期模糊（艾宾浩斯渐进遗忘 + 睡眠清洗状态，只读展示 + 手动触发） -->
-            <div class="working-memory-sec">
-              <div class="working-memory-title">
-                L1 短期模糊（O1：艾宾浩斯遗忘曲线 · 睡眠清洗）
-                <el-button size="small" text type="primary" :loading="fuzzLoading" @click="loadFuzzStates">刷新</el-button>
-              </div>
-              <div v-loading="fuzzLoading" class="working-memory-list">
-                <div v-if="fuzzStates.length === 0" class="side-empty">
-                  暂无短期模糊记忆。角色经历类记忆写入 L1 short_term 后，将随时间按艾宾浩斯曲线渐进模糊，睡眠时按重要度分档（蒸馏 L2 / 琐事合并 / 模糊跳升）
-                </div>
-                <div v-for="f in fuzzStates" :key="f.id" class="working-memory-item">
-                  <div class="working-memory-head">
-                    <el-tag size="small" :type="fuzzLevelTag(f.fuzzLevel)" effect="light">模糊 {{ Math.round(f.fuzzLevel * 100) }}%</el-tag>
-                    <el-tag size="small" effect="plain" :type="fuzzStatusTag(f.status)">{{ fuzzStatusLabel(f.status) }}</el-tag>
-                    <el-tag v-if="f.retrievalCount" size="small" effect="plain" type="info">检索 {{ f.retrievalCount }} 次</el-tag>
-                    <span v-if="f.distilledMemoryId" class="working-memory-time mono">已蒸馏 → L2 #{{ f.distilledMemoryId }}</span>
-                    <span class="working-memory-time mono">{{ gameSecondText(f.nextFuzzGameSecond) }} 复查</span>
-                    <el-button class="memory-op" size="small" text type="primary"
-                               :loading="fuzzTriggerId === f.memoryWorkingId"
-                               @click="doTriggerFuzz(f)" title="立即模糊一次（无视艾宾浩斯间隔）">模糊</el-button>
-                  </div>
-                  <div class="working-memory-content">{{ f.currentContent }}</div>
-                  <div v-if="f.originalContent !== f.currentContent" class="fuzz-original">
-                    <span class="fuzz-original-label">原版：</span>{{ f.originalContent }}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <!-- O2 决策与协调：前瞻推演 / 冲突检测协商 / state delta（只读回看，P1-1/P1-2/P1-3） -->
-            <div class="working-memory-sec">
-              <div class="working-memory-title">
-                决策与协调（O2：前瞻推演 · 冲突协商 · 状态增量）
-                <el-button size="small" text type="primary" :loading="dcLoading" @click="loadDecisionCoord">刷新</el-button>
-              </div>
-              <div v-loading="dcLoading" class="dc-wrap">
-                <div class="dc-empty" v-if="dcForesight.length === 0 && dcConflicts.length === 0 && dcDeltas.length === 0">
-                  暂无 O2 记录。角色遇到资源/关系/位置类刺激或紧急事件时产生前瞻推演；行动目标与他人冲突时产生冲突协商；每次行动执行后产生状态增量
-                </div>
-                <!-- 前瞻推演 -->
-                <div v-if="dcForesight.length" class="dc-sec">
-                  <div class="dc-sec-title">前瞻推演（P1-1）</div>
-                  <div v-for="f in dcForesight" :key="f.id" class="dc-item">
-                    <div class="working-memory-head">
-                      <el-tag size="small" :type="f.success ? 'success' : 'warning'" effect="plain">{{ f.success ? '有候选' : '无候选' }}</el-tag>
-                      <span class="dc-reason">{{ f.triggerReason }}</span>
-                      <span class="working-memory-time mono">{{ gameSecondText(f.gameSecond) }}</span>
-                    </div>
-                    <div class="working-memory-content">{{ f.finalAction }}</div>
-                    <div v-if="f.candidatesJson && f.candidatesJson !== '[]'" class="dc-cands">{{ prettyCandidates(f.candidatesJson) }}</div>
-                  </div>
-                </div>
-                <!-- 冲突协商 -->
-                <div v-if="dcConflicts.length" class="dc-sec">
-                  <div class="dc-sec-title">冲突协商（P1-3）</div>
-                  <div v-for="c in dcConflicts" :key="c.id" class="dc-item">
-                    <div class="working-memory-head">
-                      <el-tag size="small" :type="dcResolutionTag(c.resolution)" effect="plain">{{ dcResolutionLabel(c.resolution) }}</el-tag>
-                      <el-tag size="small" effect="plain" type="info">{{ c.conflictType }}</el-tag>
-                      <span class="dc-reason">争「{{ c.resourceName }}」 vs {{ c.opponentName }}</span>
-                      <span class="working-memory-time mono">{{ gameSecondText(c.gameSecond) }}</span>
-                    </div>
-                    <div class="working-memory-content">{{ c.actionAfter }}</div>
-                  </div>
-                </div>
-                <!-- state delta -->
-                <div v-if="dcDeltas.length" class="dc-sec">
-                  <div class="dc-sec-title">状态增量（P1-2）</div>
-                  <div v-for="d in dcDeltas" :key="d.id" class="dc-item">
-                    <div class="working-memory-head">
-                      <span class="dc-reason">plan #{{ d.decisionId }}</span>
-                      <el-tag v-for="f in (d.changedFields || [])" :key="f" size="small" effect="plain" type="info">{{ f }}</el-tag>
-                      <span class="working-memory-time mono">{{ gameSecondText(d.gameSecond) }}</span>
-                    </div>
-                    <div class="working-memory-content">{{ dcActionOf(d.changesJson) }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            </template>
+            <CharacterMemoryPanel ref="memoryPanel" :character="currentChar" :project-id="projectId" />
           </el-tab-pane>
 
           <!-- Tab 5 · 目标/计划：特殊 NPC 长期目标 + 当日计划（D2 F7，需选中角色） -->
           <el-tab-pane label="目标/计划" name="goalplan">
             <div v-if="!currentChar" class="main-empty">
-              <el-empty description="从左侧选择一个角色查看详情" />
+              <EmptyState size="inline" icon="ic_public_contacts" title="从左侧选择一个角色查看详情" />
             </div>
             <template v-else>
             <div class="gp-ops">
@@ -417,7 +204,7 @@
           <!-- Tab 6 · 状态：NPC 内部状态展示（M3 状态模块；需求进度条 + 心情 + 主导情绪 + PAD 三维 + urgency 预警；切换 Tab 时自动加载） -->
           <el-tab-pane label="状态" name="state" lazy>
             <div v-if="!currentChar" class="main-empty">
-              <el-empty description="从左侧选择一个角色查看详情" />
+              <EmptyState size="inline" icon="ic_public_contacts" title="从左侧选择一个角色查看详情" />
             </div>
             <template v-else>
               <div class="st-ops">
@@ -429,7 +216,13 @@
 
               <!-- 空态：接口无数据（旧 jar 无端点或该角色从未驱动） -->
               <div v-if="!npcState" class="st-empty">
-                <el-empty v-if="!stateLoading" description="暂无内部状态数据（世界引擎驱动后出现）" :image-size="72" />
+                <EmptyState
+                  v-if="!stateLoading"
+                  size="page"
+                  icon="ic_public_brightness"
+                  title="还没有内部状态数据"
+                  desc="需求、心情、情绪与疲劳由世界引擎在推进时写入。世界开始推进后回到本页即可看到。"
+                />
               </div>
 
               <template v-else>
@@ -592,7 +385,11 @@
                     <EChart :option="stCurveOption" height="280px" />
                   </div>
                   <div v-else class="st-empty">
-                    <el-empty v-if="!stateLoading" description="暂无历史采样（推进世界引擎后生成曲线数据）" :image-size="56" />
+                    <EmptyState
+                      v-if="!stateLoading"
+                      size="inline"
+                      title="暂无历史采样——推进世界引擎后这里会画出曲线"
+                    />
                   </div>
                 </div>
               </template>
@@ -615,7 +412,7 @@
           <!-- Tab 8 · 人格与面具（O6 G3 只读观测：人格偏移日志 + 社会面具真实/表达 PAD 分离） -->
           <el-tab-pane label="人格与面具" name="personamask">
             <div v-if="!currentChar" class="main-empty">
-              <el-empty description="从左侧选择一个角色查看详情" />
+              <EmptyState size="inline" icon="ic_public_contacts" title="从左侧选择一个角色查看详情" />
             </div>
             <template v-else>
               <div class="personamask-ops">
@@ -813,95 +610,7 @@
         <el-button type="primary" :loading="savingGoal" @click="saveGoal">保存</el-button>
       </template>
     </el-dialog>
-    <!-- 核心块新增/编辑对话框（M3：块键/显示名/内容/重要度/agent 可编辑标识） -->
-    <el-dialog v-model="coreBlockDialog.visible" :title="coreBlockDialog.editId ? '编辑核心块' : '新建核心块'" width="560px" top="8vh">
-      <el-form :model="coreBlockDialog.form" label-width="110px">
-        <el-form-item v-if="!coreBlockDialog.editId" label="块键" required>
-          <el-select v-model="coreBlockDialog.form.blockKey" filterable allow-create default-first-option style="width: 100%"
-            placeholder="选择标准键或输入 custom: 自定义键">
-            <el-option label="identity · 身份" value="identity" />
-            <el-option label="personality · 性格" value="personality" />
-            <el-option label="beliefs · 核心信念" value="beliefs" />
-            <el-option label="values · 价值观" value="values" />
-            <el-option label="goals · 长期目标" value="goals" />
-            <el-option label="relations · 关键关系" value="relations" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-else label="块键">
-          <el-tag effect="plain">{{ coreBlockKeyLabel(coreBlockDialog.form.blockKey) }}</el-tag>
-        </el-form-item>
-        <el-form-item label="块显示名">
-          <el-input v-model="coreBlockDialog.form.blockName" maxlength="100" placeholder="如 核心信念（选填，缺省用块键/标准名）" />
-        </el-form-item>
-        <el-form-item label="内容" required>
-          <el-input v-model="coreBlockDialog.form.content" type="textarea" :rows="5" maxlength="400" show-word-limit
-            placeholder="核心块内容（≤400 字，恒在注入上下文；如：守护家园高于一切）" />
-        </el-form-item>
-        <el-form-item label="重要度">
-          <el-rate v-model="coreBlockDialog.form.importance" :max="5" />
-          <span class="gp-hint">决定恒在注入顺序（高重要度优先注入）</span>
-        </el-form-item>
-        <el-form-item label="agent 自编辑">
-          <el-switch v-model="coreBlockDialog.form.editableByAgent" :active-value="1" :inactive-value="0"
-            active-text="允许 AI 自编辑" inactive-text="仅用户可改（只读块）" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="coreBlockDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="savingCoreBlock" @click="saveCoreBlock">保存</el-button>
-      </template>
-    </el-dialog>
 
-    <!-- M4 L2 记忆编辑对话框（版本链更新：新条 version+1 + 旧条软删 + 旧条自动归档 superseded） -->
-    <el-dialog v-model="editMemoryDialog.visible" title="编辑记忆（版本递增）" width="560px">
-      <div class="edit-memory-hint">更新后自动生成新版本（version+1），旧版本写入归档（原因=被覆盖），读取以最新版本为准。</div>
-      <el-form label-width="70px">
-        <el-form-item label="内容" required>
-          <el-input v-model="editMemoryDialog.form.content" type="textarea" :rows="6" show-word-limit
-            placeholder="记忆内容（更新后旧版自动归档 superseded）" />
-        </el-form-item>
-        <el-form-item label="重要度">
-          <el-rate v-model="editMemoryDialog.form.importance" :max="5" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="editMemoryDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="editMemoryDialog.saving" @click="saveEditMemory">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- M5 注入预览对话框（分场景注入组合：各段文本 + 命中记忆得分 + token 预算） -->
-    <el-dialog v-model="injectionDialog.visible" title="记忆注入预览（M5 分场景注入）" width="720px">
-      <div class="ip-controls">
-        <el-select v-model="injectionDialog.scenario" size="small" style="width: 150px" @change="loadInjectionPreview">
-          <el-option v-for="s in injectionScenarios" :key="s.value" :label="s.label" :value="s.value" />
-        </el-select>
-        <el-input v-model="injectionDialog.query" size="small" placeholder="检索 query（决策/感知情境文本，可空）" style="width: 220px" clearable @keyup.enter="loadInjectionPreview" />
-        <el-button size="small" type="primary" :loading="injectionDialog.loading" @click="loadInjectionPreview">预览</el-button>
-        <span v-if="injectionDialog.data" class="ip-total dim">合计 {{ injectionDialog.data.totalTokens }} token · 场景 {{ injectionDialog.scenario }}</span>
-      </div>
-      <div v-if="injectionDialog.data" class="ip-body">
-        <div v-if="injectionDialog.data.segments.length === 0" class="side-empty">无内容——该角色当前无可注入记忆（各段均空）</div>
-        <div v-for="seg in injectionDialog.data.segments" :key="seg.key" class="ip-seg">
-          <div class="ip-seg-head">
-            <span class="mono ip-key">{{ seg.key }}</span>
-            <span class="ip-title">{{ seg.title }}</span>
-            <span class="dim mono">≈ {{ seg.tokens }} token</span>
-          </div>
-          <pre class="ip-text">{{ seg.text }}</pre>
-          <div v-if="seg.hits && seg.hits.length" class="ip-hits">
-            <div v-for="h in seg.hits" :key="h.id" class="ip-hit">
-              <span class="mono dim">#{{ h.id }}</span>
-              <el-tag size="small" effect="plain" :type="hitTypeTag(h.type)">{{ hitTypeLabel(h.type) }}</el-tag>
-              <span class="dim">重要度 {{ h.importance }} · 得分 {{ h.score }}</span>
-              <el-tag v-if="h.stale" size="small" type="warning">可能过时</el-tag>
-              <span class="ip-hit-content">{{ h.content }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div v-else class="dim">选择场景后点击「预览」，查看该角色实际注入对话/决策/感知/反思的组装组合与预算消耗。</div>
-    </el-dialog>
   </div>
 </template>
 
@@ -910,34 +619,35 @@
  * NPC 角色页（前端布局重构 V1.0，设计文档 §3.5.1；O6 G1a 起角色卡→角色档案（11 维，只读））。
  * <p>职责：特殊型角色（NPC）的管理 + 生成 + 展示全能力——
  * 左栏角色列表（头像/姓名/头衔/重要度/类型/主角标记，类型筛选，新增/编辑/删除）；
- * 右栏角色详情分 Tab：概览（基础档案只读）／角色档案（11 维，只读：服务端 personaRenderText 按维切分，
- * 由 {@code PersonaArchivePanel} 渲染，含"原始 JSON"折叠面板；编辑入口置灰，编辑器属 G1b）／
- * Prompt（system_prompt 已随 G1a 废弃，仅保留说明）／记忆（长期记忆列表+手动抽取）。</p>
- * <p>数据来源：/api/projects/{id}/characters、/api/characters/{id}/card(versions)、memories 系列接口。</p>
+ * 右栏角色详情分 Tab：概览（基础档案只读，{@code CharacterOverviewPanel}）／角色档案（11 维，只读：服务端
+ * personaRenderText 按维切分，由 {@code PersonaArchivePanel} 渲染，含"原始 JSON"折叠面板；编辑入口置灰，
+ * 编辑器属 G1b）／ Prompt（system_prompt 已随 G1a 废弃，仅保留说明）／记忆（{@code CharacterMemoryPanel}，
+ * 长期/工作/核心记忆 + 治理健康度 + 注入预览，接口调用在面板内）。</p>
+ * <p>数据来源：/api/projects/{id}/characters、/api/characters/{id}/card(versions)、
+ * /api/debug/npc-state、/api/debug/growth/*（记忆族接口见 CharacterMemoryPanel）。</p>
  */
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchCharacters, createCharacter, updateCharacter, deleteCharacter,
   generateCharacterCard, fetchCharacterCard, fetchCharacterCardVersions, editCharacterCard,
   restoreCharacterCard,
-  fetchMemories, deleteMemory, extractCharacterMemories, fetchWorkingMemories,
-  fetchCoreMemories, createCoreBlock, updateCoreBlock, deleteCoreBlock,
-  updateMemory, manualArchive,
-  fetchInjectionPreview, fetchMemoryHealth, consolidateMemory,
-  fetchFuzzStates, fetchFuzzDetail, triggerFuzz, fetchMemoryLineage, fetchInjectRouteTrace,
+  // 记忆族接口（memories / working / core / health / fuzz / 前瞻推演 / 状态增量 / 冲突协商）
+  // 已随「记忆」面板下沉到 CharacterMemoryPanel.vue（V2.0 §13.4）
   fetchGoalPlan, createGoal, updateGoal, deleteGoal, generateGoals,
   fetchWorldLocations,
   fetchNpcState,
   fetchNpcStateHistory,
-  fetchForesightRecords, fetchStateDeltas, fetchConflictRecords,
   // O6 G2 全生命周期阶段机：项目全 NPC 发育概览（年龄/阶段/认知 LOD/空间源，只读）
   fetchGrowthOverview,
   // O6 G3 人格演化 + 社会面具：偏移日志（含证据链）+ 面具状态（真实/表达 PAD 分离，只读）
   fetchGrowthShiftLogs, fetchGrowthMaskStatus
 } from '@/shared/api'
-import RelationTopology from '../components/RelationTopology.vue'
+// V2.0 §8.3 首屏拆包：关系拓扑用 AntV G6（打包后 1.44 MB / gzip 414 KB），而它是 12 个标签页里的
+// 第 7 个、且标签本身已是 lazy——静态 import 会让**每次打开角色详情**都先下载 G6，与用户是否看图无关。
+// 改为异步组件：G6 只在真正切到「关系拓扑」标签时才请求（实测本页首屏 JS 因此减少 414 KB）。
+const RelationTopology = defineAsyncComponent(() => import('../components/RelationTopology.vue'))
 import PersonaArchivePanel from '../components/PersonaArchivePanel.vue'
 // G1b：11 维档案可视化编辑器（表单为主 + JSON 兜底 + AI 补全缺失维 + 版本历史/回滚）
 import PersonaEditorDialog from '../components/PersonaEditorDialog.vue'
@@ -946,6 +656,12 @@ import { sourceLabel } from '../personaArchive'
 // 统一身份引用（G1a：special:/crowd: 已废弃，一律 npc:{id}）
 import { npcRef } from '@/shared/npcRef'
 import EChart from '@/shared/components/EChart.vue'
+// V2.0 批次二：空态统一走 EmptyState（12 处手写 el-empty 收敛；同屏同 CTA 不重复）
+import EmptyState from '@/shared/components/EmptyState.vue'
+// V2.0 §13.4 巨型组件拆分第一步：「概览」标签页整页搬迁为独立面板（像素/文案/交互不变）
+import CharacterOverviewPanel from '../components/CharacterOverviewPanel.vue'
+// V2.0 §13.4 第二步：「记忆」标签页整页搬迁为独立面板，5 组接口与 3 个对话框随之下沉
+import CharacterMemoryPanel from '../components/CharacterMemoryPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -973,49 +689,16 @@ const charRefreshKey = computed(() => characters.value.map(c => c.id).join(','))
 
 // ===== 右栏：详情 Tab =====
 const infoTab = ref('overview')
+// V2.0 §13.4：「详细信息」折叠态与 isDetailLong 判定已随「概览」面板下沉到 CharacterOverviewPanel.vue
+// V2.0 §13.4：「记忆」面板的加载时机由面板自己持有；本视图只在「切到记忆标签」时叫它重拉一次
+const memoryPanel = ref(null)
 const roleCard = ref(null)
-const memories = ref([])
-const memoryLoading = ref(false)
-const extracting = ref(false)
 // O6 G2 全生命周期阶段机：项目全 NPC 发育概览（id → {age, stage, stageLabel, tier, ...}，概览 Tab 展示）
 const growthMap = ref({})
 // O6 G3 人格演化 + 社会面具（「人格与面具」Tab 只读观测：偏移日志 + 面具真实/表达 PAD）
 const shiftLogs = ref([])
 const maskStatus = ref(null)
 const pmLoading = ref(false)
-// M2 L1 工作记忆（active 工作项：草稿/任务/上下文/感知）
-const workingMemories = ref([])
-const workingMemoryLoading = ref(false)
-// M3 L3 核心记忆（静态基线只读 + 动态核心块 CRUD）
-const coreBlocks = ref([])
-const coreBaselineText = ref('')
-const coreMemoryLoading = ref(false)
-const savingCoreBlock = ref(false)
-const coreBlockDialog = reactive({
-  visible: false, editId: null,
-  form: { blockKey: 'beliefs', blockName: '', content: '', importance: 3, editableByAgent: 1 }
-})
-// M4 L2 记忆编辑对话框（版本链更新：新条 version+1 + 旧条软删 + 旧条自动归档 superseded）
-const editMemoryDialog = reactive({ visible: false, editId: null, saving: false, form: { content: '', importance: 3 } })
-// M5 记忆治理健康度（归档量/版本链/分层分布——角色维度） + 注入预览对话框 + 巩固编排
-const memoryHealth = ref(null)
-const healthLoading = ref(false)
-const injectionDialog = reactive({ visible: false, scenario: 'dialog', query: '', loading: false, data: null })
-// O1 记忆内核扩展：L1 短期模糊状态（艾宾浩斯渐进遗忘 + 睡眠清洗；只读展示 + 手动触发）
-const fuzzStates = ref([])
-const fuzzLoading = ref(false)
-const fuzzTriggerId = ref(null)
-// O2 决策与协调（P1-1 前瞻推演 / P1-2 state delta / P1-3 冲突协商；只读回看）
-const dcForesight = ref([])
-const dcConflicts = ref([])
-const dcDeltas = ref([])
-const dcLoading = ref(false)
-const injectionScenarios = [
-  { value: 'dialog', label: '对话 dialog' },
-  { value: 'decision', label: '决策 decision' },
-  { value: 'perception', label: '感知 perception' },
-  { value: 'reflection', label: '反思 reflection' }
-]
 
 // ===== 目标/计划（D2 F7） =====
 const goals = ref([])
@@ -1112,12 +795,13 @@ async function loadChars() {
   } catch (e) { ElMessage.error(e.message || '加载角色失败') }
 }
 
-/** 选中角色：加载角色卡 + 记忆 + （目标/计划，若当前在目标 Tab）（keepTab=true 时保持当前 Tab，用于关系拓扑图内点选角色） */
+/** 选中角色：加载角色卡 + （目标/计划，若当前在目标 Tab）（keepTab=true 时保持当前 Tab，用于关系拓扑图内点选角色）
+ *  <p>记忆不再在这里加载：角色变化由 CharacterMemoryPanel 自己 watch 后重载（V2.0 §13.4）。</p> */
 async function selectChar(ch, keepTab = false) {
   currentChar.value = ch
   if (!keepTab) infoTab.value = 'overview'
+  // 「详细信息」折叠态由 CharacterOverviewPanel 自己按 character.id 变化复位（V2.0 §13.4）
   await loadRoleCard()
-  await loadMemories()
   await loadGrowthOverview()
   if (infoTab.value === 'goalplan') await loadGoalPlan()
 }
@@ -1134,7 +818,7 @@ async function selectCharFromTopology(id) {
 function clearSelectionFromTopology() {
   currentChar.value = null
   roleCard.value = null
-  memories.value = []
+  // 记忆由 CharacterMemoryPanel 自己按 character 变化清空（V2.0 §13.4）
   goals.value = []
   todayPlan.value = null
   todayPlanSummary.value = ''
@@ -1217,346 +901,7 @@ function pmFmt(v) {
   return (v > 0 ? '+' : '') + Number(v).toFixed(2)
 }
 
-/** 认知 LOD 档位中文名 */
-function tierLabel(t) {
-  return ({ dormant: '休眠（零 AI）', ambient: '周遭（AI 轻频）', focus: '焦点（AI 实时）' })[t] || t || '—'
-}
-
-/** 认知 LOD 档位标签色 */
-function tierTag(t) {
-  return ({ dormant: 'info', ambient: 'warning', focus: 'success' })[t] || 'info'
-}
-
-/** 加载当前角色记忆列表 */
-async function loadMemories() {
-  if (!currentChar.value) { memories.value = []; return }
-  memoryLoading.value = true
-  try {
-    const page = await fetchMemories(projectId, { characterId: currentChar.value.id, page: 1, size: 50 })
-    memories.value = page.list || []
-  } catch (_) { memories.value = [] }
-  finally { memoryLoading.value = false }
-  await loadWorkingMemories()
-  await loadCoreMemories()
-  await loadMemoryHealth()
-  await loadFuzzStates()
-  await loadDecisionCoord()
-}
-
-// ===== M5 记忆治理健康度 + 注入预览 + 巩固编排 =====
-
-/** 加载当前角色记忆治理健康度（归档量/版本链/分层分布，角色维度 npc:{id}） */
-async function loadMemoryHealth() {
-  if (!currentChar.value) { memoryHealth.value = null; return }
-  healthLoading.value = true
-  try {
-    const r = await fetchMemoryHealth(projectId, { characterRef: npcRef(currentChar.value.id) })
-    memoryHealth.value = r?.data || null
-  } catch (_) { memoryHealth.value = null }
-  finally { healthLoading.value = false }
-}
-
-/** 打开注入预览对话框并立即预览（默认 dialog 场景） */
-function openInjectionPreview() {
-  injectionDialog.visible = true
-  injectionDialog.data = null
-  injectionDialog.query = ''
-  loadInjectionPreview()
-}
-
-/** 按当前场景组装注入预览（分场景：dialog/decision/perception/reflection） */
-async function loadInjectionPreview() {
-  if (!currentChar.value) return
-  injectionDialog.loading = true
-  try {
-    const r = await fetchInjectionPreview(projectId, {
-      characterRef: npcRef(currentChar.value.id),
-      scenario: injectionDialog.scenario,
-      query: injectionDialog.query || undefined
-    })
-    injectionDialog.data = r?.data || null
-  } catch (e) { ElMessage.error(e.message || '注入预览失败') }
-  finally { injectionDialog.loading = false }
-}
-
-/** 手动触发统一巩固编排（M5：L1 TTL/巩固扫描 + 归档超龄/保留/二次清理，scene=memory_manage trace） */
-async function doMaintenance() {
-  try {
-    await ElMessageBox.confirm('触发统一维护（L1 工作记忆 TTL 清理/巩固扫描 + 归档超龄扫描/保留滚动/二次清理）？', '统一维护', { type: 'warning' })
-  } catch (_) { return }
-  try {
-    const r = await consolidateMemory({ maintenance: true })
-    ElMessage.success(`统一维护完成：${r.data?.maintenanceSteps ?? 0} 步`)
-    await loadMemories()
-  } catch (e) { ElMessage.error(e.message || '统一维护失败') }
-}
-
-/** 归档原因分组摘要（age/superseded/downgraded/evicted/manual） */
-function reasonSummary(byReason) {
-  if (!byReason || Object.keys(byReason).length === 0) return '-'
-  return Object.entries(byReason).map(([k, v]) => `${k}:${v}`).join(' · ')
-}
-
-/** 命中记忆类型显示名（预览命中 HitVO：仅 type，无 subtype） */
-function hitTypeLabel(t) {
-  return ({ semantic: '语义', episodic: '情节', reflection: '反思', plan: '计划' })[t] || t || '记忆'
-}
-
-/** 命中记忆类型标签色（预览命中） */
-function hitTypeTag(t) {
-  return ({ semantic: 'info', episodic: 'warning', reflection: 'danger', plan: 'success' })[t] || 'info'
-}
-
-/** 加载当前角色 L3 核心记忆（M3：静态基线只读 + 动态核心块列表） */
-async function loadCoreMemories() {
-  if (!currentChar.value) { coreBlocks.value = []; coreBaselineText.value = ''; return }
-  coreMemoryLoading.value = true
-  try {
-    const vo = await fetchCoreMemories(projectId, { characterId: currentChar.value.id })
-    coreBaselineText.value = vo?.baselineText || ''
-    coreBlocks.value = vo?.blocks || []
-  } catch (_) { coreBlocks.value = []; coreBaselineText.value = '' }
-  finally { coreMemoryLoading.value = false }
-}
-
-/** 打开核心块新增/编辑对话框（M3；编辑时预填，块键编辑态只读） */
-function openCoreBlockDialog(b = null) {
-  if (b) {
-    coreBlockDialog.editId = b.id
-    coreBlockDialog.form = {
-      blockKey: b.blockKey, blockName: b.blockName || '', content: b.content || '',
-      importance: b.importance || 3, editableByAgent: b.editableByAgent === 0 ? 0 : 1
-    }
-  } else {
-    coreBlockDialog.editId = null
-    coreBlockDialog.form = { blockKey: 'beliefs', blockName: '', content: '', importance: 3, editableByAgent: 1 }
-  }
-  coreBlockDialog.visible = true
-}
-
-/** 保存核心块（新建/编辑，M3；编辑走版本链 version+1） */
-async function saveCoreBlock() {
-  const f = coreBlockDialog.form
-  if (!f.blockKey || !f.blockKey.trim()) return ElMessage.warning('请选择/输入块键')
-  if (!f.content || !f.content.trim()) return ElMessage.warning('核心块内容不能为空')
-  savingCoreBlock.value = true
-  try {
-    if (coreBlockDialog.editId) {
-      await updateCoreBlock(projectId, coreBlockDialog.editId, {
-        blockName: f.blockName, content: f.content, importance: f.importance, editableByAgent: f.editableByAgent
-      })
-      ElMessage.success('核心块已更新（版本 +1）')
-    } else {
-      await createCoreBlock(projectId, {
-        characterRef: npcRef(currentChar.value.id), blockKey: f.blockKey.trim(),
-        blockName: f.blockName, content: f.content, importance: f.importance, editableByAgent: f.editableByAgent
-      })
-      ElMessage.success('核心块已创建（恒在注入上下文）')
-    }
-    coreBlockDialog.visible = false
-    await loadCoreMemories()
-  } catch (e) {
-    ElMessage.error(e.message || '保存核心块失败')
-  } finally { savingCoreBlock.value = false }
-}
-
-/** 删除核心块（M3，软删确认） */
-async function doDeleteCoreBlock(b) {
-  try {
-    await ElMessageBox.confirm(`确认删除核心块「${b.blockName || b.blockKey}」？删除后不再恒在注入。`, '删除确认', { type: 'warning' })
-  } catch (_) { return }
-  try {
-    await deleteCoreBlock(projectId, b.id)
-    ElMessage.success('核心块已删除')
-    await loadCoreMemories()
-  } catch (e) {
-    ElMessage.error(e.message || '删除核心块失败')
-  }
-}
-
-/** 手动归档核心块（M4：写归档原文冷存 + 软删，不再恒在注入但仍可检索/还原） */
-async function doArchiveCoreBlock(b) {
-  try {
-    await ElMessageBox.confirm(`确认归档核心块「${b.blockName || b.blockKey}」？将写入记忆归档（冷存储），不再恒在注入，但仍可检索/还原。`, '归档确认', { type: 'warning' })
-  } catch (_) { return }
-  try {
-    const r = await manualArchive(projectId, { sourceTable: 'actor_core_memory', ids: [b.id] })
-    ElMessage.success(`核心块已归档（${r.archived} 条）`)
-    await loadCoreMemories()
-  } catch (e) {
-    ElMessage.error(e.message || '归档核心块失败')
-  }
-}
-
-/** 打开 L2 记忆编辑对话框（M4 版本链：更新后新条 version+1，旧条软删+自动归档 superseded） */
-function openEditMemoryDialog(m) {
-  editMemoryDialog.editId = m.id
-  editMemoryDialog.form.content = m.content || ''
-  editMemoryDialog.form.importance = m.importance || 3
-  editMemoryDialog.visible = true
-}
-
-/** 保存 L2 记忆更新（M4 版本链） */
-async function saveEditMemory() {
-  const f = editMemoryDialog.form
-  if (!f.content || !f.content.trim()) return ElMessage.warning('记忆内容不能为空')
-  editMemoryDialog.saving = true
-  try {
-    await updateMemory(editMemoryDialog.editId, { projectId, content: f.content, importance: f.importance })
-    ElMessage.success('记忆已更新（版本 +1，旧版已归档）')
-    editMemoryDialog.visible = false
-    await loadMemories()
-  } catch (e) {
-    ElMessage.error(e.message || '更新记忆失败')
-  } finally { editMemoryDialog.saving = false }
-}
-
-/** 手动归档 L2 长期记忆（M4：写归档原文冷存 + 软删） */
-async function doArchiveMemory(m) {
-  try {
-    await ElMessageBox.confirm('确认归档该记忆？将写入记忆归档（冷存储），不再参与该角色记忆注入，但仍可检索/还原。', '归档确认', { type: 'warning' })
-  } catch (_) { return }
-  try {
-    const r = await manualArchive(projectId, { sourceTable: 'actor_memory', ids: [m.id] })
-    ElMessage.success(`记忆已归档（${r.archived} 条）`)
-    await loadMemories()
-  } catch (e) {
-    ElMessage.error(e.message || '归档记忆失败')
-  }
-}
-
-/** 核心块标准键显示名（M3） */
-function coreBlockKeyLabel(key) {
-  return { identity: '身份', personality: '性格', beliefs: '核心信念', values: '价值观', goals: '长期目标', relations: '关键关系' }[key] || key
-}
-
-/** 核心块标签色（M3：自定义=success / 标准=primary） */
-function coreBlockTag(b) {
-  return (b.blockKey || '').startsWith('custom:') ? 'success' : 'primary'
-}
-
-/** 加载当前角色 L1 工作记忆（M2：active 草稿/任务/上下文/感知，只读展示） */
-async function loadWorkingMemories() {
-  if (!currentChar.value) { workingMemories.value = []; return }
-  workingMemoryLoading.value = true
-  try {
-    const page = await fetchWorkingMemories(projectId, { characterId: currentChar.value.id, status: 'active', page: 1, size: 50 })
-    workingMemories.value = page.list || []
-  } catch (_) { workingMemories.value = [] }
-  finally { workingMemoryLoading.value = false }
-}
-
-/** L1 工作项类型显示名（M2） */
-function workingTypeLabel(w) {
-  const t = w.itemType || 'draft'
-  return { draft: '草稿', task: '任务', context: '上下文', perception: '感知' }[t] || t
-}
-
-/** L1 工作项类型标签色（M2：草稿=info / 任务=primary / 上下文=success / 感知=warning） */
-function workingTypeTag(w) {
-  const t = w.itemType || 'draft'
-  return { draft: 'info', task: 'primary', context: 'success', perception: 'warning' }[t] || 'info'
-}
-
-// ===== O1 记忆内核扩展：L1 短期模糊 =====
-
-/** 加载当前角色 L1 模糊状态（active 优先；含蒸馏/归档历史，上限 100） */
-async function loadFuzzStates() {
-  if (!currentChar.value) { fuzzStates.value = []; return }
-  fuzzLoading.value = true
-  try {
-    const list = await fetchFuzzStates(projectId, { characterRef: npcRef(currentChar.value.id) })
-    fuzzStates.value = Array.isArray(list) ? list : (list?.data || [])
-  } catch (_) { fuzzStates.value = [] }
-  finally { fuzzLoading.value = false }
-}
-
-/** 手动触发单条模糊（无视艾宾浩斯间隔立即执行一次，O1a 调试/冒烟）。 */
-async function doTriggerFuzz(f) {
-  fuzzTriggerId.value = f.memoryWorkingId
-  try {
-    const r = await triggerFuzz(projectId, { memoryWorkingId: f.memoryWorkingId })
-    ElMessage.success(r?.triggered ? `已模糊（fuzz_level 上升）` : '未触发（状态非 active）')
-    await loadFuzzStates()
-  } catch (e) {
-    ElMessage.error(e.message || '触发失败')
-  } finally { fuzzTriggerId.value = null }
-}
-
-/** 模糊度标签色（0.7+ 深 / 0.3+ 中 / 低清晰） */
-function fuzzLevelTag(f) { return f >= 0.7 ? 'danger' : f >= 0.3 ? 'warning' : 'success' }
-
-/** 模糊状态标签色（active=primary / distilled=success / archived=info） */
-function fuzzStatusTag(s) { return s === 'distilled' ? 'success' : s === 'archived' ? 'info' : 'primary' }
-
-/** 模糊状态显示名 */
-function fuzzStatusLabel(s) {
-  return { active: '模糊中', distilled: '已蒸馏 L2', archived: '已归档' }[s] || s || 'active'
-}
-
-// ===== O2 决策与协调（P1-1 前瞻推演 / P1-2 state delta / P1-3 冲突协商） =====
-
-/** 加载当前角色 O2 记录：前瞻推演 + 冲突协商 + 状态增量（npcRef 过滤；R 包裹解包） */
-async function loadDecisionCoord() {
-  if (!currentChar.value) { dcForesight.value = []; dcConflicts.value = []; dcDeltas.value = []; return }
-  dcLoading.value = true
-  const ref = npcRef(currentChar.value.id)
-  try {
-    const [f, c, d] = await Promise.all([
-      fetchForesightRecords(projectId, { npcRef: ref, limit: 20 }),
-      fetchConflictRecords(projectId, { npcRef: ref, limit: 20 }),
-      fetchStateDeltas(projectId, { npcRef: ref, limit: 20 })
-    ])
-    dcForesight.value = Array.isArray(f) ? f : (f?.data || [])
-    dcConflicts.value = Array.isArray(c) ? c : (c?.data || [])
-    dcDeltas.value = Array.isArray(d) ? d : (d?.data || [])
-  } catch (_) { dcForesight.value = []; dcConflicts.value = []; dcDeltas.value = [] }
-  finally { dcLoading.value = false }
-}
-
-/** 冲突处置显示名（P1-3 resolution code → 中文） */
-function dcResolutionLabel(r) {
-  return { takeover: '强占', negotiated: '协商让步', fallback_wait: '等待兜底' }[r] || r || '—'
-}
-
-/** 冲突处置标签色（强占=danger / 协商=warning / 等待兜底=info） */
-function dcResolutionTag(r) {
-  return { takeover: 'danger', negotiated: 'warning', fallback_wait: 'info' }[r] || 'info'
-}
-
-/** 前瞻候选 JSON → 多行「① action → consequence」文本（P1-1 展示） */
-function prettyCandidates(json) {
-  try {
-    const arr = JSON.parse(json || '[]')
-    if (!Array.isArray(arr)) return ''
-    return arr.map((c, i) => `${i + 1}. ${c.action || ''}${c.consequence ? ' → ' + c.consequence : ''}`).join('\n')
-  } catch (_) { return '' }
-}
-
-/** state delta changes_json → 可读摘要（P1-2：优先取 action/location 变化，其余字段逐一列出） */
-function dcActionOf(changesJson) {
-  try {
-    const obj = JSON.parse(changesJson || '{}')
-    const parts = []
-    for (const [k, v] of Object.entries(obj)) {
-      if (v && typeof v === 'object') {
-        const from = v.from, to = v.to
-        parts.push(`${k}: ${from === undefined ? '∅' : JSON.stringify(from)} → ${to === undefined ? '∅' : JSON.stringify(to)}`)
-      } else {
-        parts.push(`${k}: ${JSON.stringify(v)}`)
-      }
-    }
-    return parts.join('；') || '无变化'
-  } catch (_) { return changesJson || '无变化' }
-}
-
-/** 游戏秒 → D天 HH:00 文本（L1 复查时刻展示） */
-function gameSecondText(gs) {
-  if (gs == null || gs === '') return '—'
-  const day = Math.floor(gs / 86400)
-  const hour = Math.floor((gs % 86400) / 3600)
-  return `D${day} ${String(hour).padStart(2, '0')}:00`
-}
+/** 认知 LOD 档位中文名与标签色已随「概览」面板下沉到 CharacterOverviewPanel.vue（V2.0 §13.4） */
 
 /**
  * 右栏 Tab 切换回调：切到「记忆」Tab 时重新拉取记忆列表；切到「目标/计划」Tab 时拉取目标+当日计划。
@@ -1567,7 +912,8 @@ function gameSecondText(gs) {
  * @param name 切换到的 Tab 名称（overview/prompt/memory/goalplan）
  */
 function onInfoTabChange(name) {
-  if (name === 'memory') loadMemories()
+  // 记忆面板自带接口，只叫它重拉（面板未挂载时空转，等价于原 loadMemories 的无角色提前返回）
+  if (name === 'memory') memoryPanel.value?.reload()
   if (name === 'goalplan') loadGoalPlan()
   if (name === 'state') loadNpcState()
   if (name === 'personamask') loadPersonaMask()
@@ -1590,10 +936,10 @@ async function loadNpcState() {
 
 /** M3：状态展示工具——需求颜色/数值色调/心情/主导情绪/PAD */
 function stNeedColor(v) {
-  if (v == null) return '#9db8e8'
-  if (v < 30) return '#ff6b6b'
-  if (v < 60) return '#ffb84d'
-  return '#52d68a'
+  if (v == null) return 'var(--text-tertiary)'
+  if (v < 30) return 'var(--state-error)'
+  if (v < 60) return 'var(--state-warn)'
+  return 'var(--state-success)'
 }
 function stNeedTone(v) {
   if (v == null) return ''
@@ -1602,10 +948,10 @@ function stNeedTone(v) {
   return ''
 }
 function stMoodColor(v) {
-  if (v == null) return '#9db8e8'
-  if (v < 40) return '#ff6b6b'
-  if (v < 65) return '#ffb84d'
-  return '#52d68a'
+  if (v == null) return 'var(--text-tertiary)'
+  if (v < 40) return 'var(--state-error)'
+  if (v < 65) return 'var(--state-warn)'
+  return 'var(--state-success)'
 }
 function stEmotionLabel(e) {
   return ({
@@ -1618,8 +964,8 @@ function stPadPercent(v) {
   return Math.round(((Math.max(-1, Math.min(1, v)) + 1) / 2) * 100)
 }
 function stPadColor(v) {
-  if (v == null) return '#9db8e8'
-  return v >= 0 ? '#52d68a' : '#ff6b6b'
+  if (v == null) return 'var(--text-tertiary)'
+  return v >= 0 ? 'var(--state-success)' : 'var(--state-error)'
 }
 function stFmtPad(v) {
   if (v == null) return '—'
@@ -1750,28 +1096,6 @@ function planStateLabel(s) { return ({ walk: '赶路', stop: '驻足/劳作', ta
 /** 时间格式化（YYYY-MM-DD HH:mm） */
 function fmtTime(t) { return t ? String(t).slice(0, 16).replace('T', ' ') : '' }
 
-/** 删除单条记忆（软删） */
-async function doDeleteMemory(m) {
-  try {
-    await ElMessageBox.confirm(`确认删除该条${m.subtype === 'summary' ? '摘要' : '记忆'}？删除后不再注入后续对话。`, '删除确认', { type: 'warning' })
-    await deleteMemory(m.id)
-    ElMessage.success('已删除')
-    await loadMemories()
-  } catch (_) { /* 用户取消 */ }
-}
-
-/** 手动触发当前角色记忆抽取 */
-async function doExtractMemories() {
-  if (!currentChar.value) return
-  extracting.value = true
-  try {
-    const res = await extractCharacterMemories(currentChar.value.id)
-    ElMessage.success(`抽取完成，新增 ${res.added || 0} 条事实`)
-    await loadMemories()
-  } catch (e) { ElMessage.error(e.message || '抽取失败') }
-  finally { extracting.value = false }
-}
-
 /** 打开角色新增/编辑对话框（新增默认开启「保存后自动生成角色卡」） */
 function openCharDialog(row) {
   if (row) {
@@ -1845,6 +1169,9 @@ async function doRemoveChar(row) {
 
 /** 按角色 ID 生成角色档案（生成后刷新列表与当前选中档案） */
 async function generateOneById(id, label) {
+  // V2.0：重入保护。此前只靠按钮的 :loading 视觉禁用，空态改用 EmptyState 后按钮不再带 loading，
+  // 连点两次就会发出两次 AI 生成请求（真实计费）。守卫加在这里，两条入口都受保护。
+  if (generatingMap[id]) return
   generatingMap[id] = true
   try {
     await generateCharacterCard(id)
@@ -1969,34 +1296,6 @@ function viewVersion(v) {
   versionDetail.value = versionDetail.value?.version === v.version ? null : v
 }
 
-/** 重要度颜色映射 */
-function impTag(i) { return i >= 4 ? 'danger' : (i >= 3 ? 'warning' : 'info') }
-
-/** 记忆类型显示名（M1 起 type+subtype 取代 kind：semantic 摘要/事实、episodic 经历、reflection 反思、plan 计划） */
-function typeLabel(m) {
-  if (m.type === 'semantic') return m.subtype === 'summary' ? '摘要' : '事实'
-  if (m.type === 'episodic') return '经历'
-  if (m.type === 'reflection') return '反思'
-  if (m.type === 'plan') return '计划'
-  return '记忆'
-}
-
-/** 记忆类型标签色（摘要=primary / 事实=info / 经历=warning / 反思=danger / 计划=success） */
-function typeTag(m) {
-  if (m.type === 'semantic') return m.subtype === 'summary' ? 'primary' : 'info'
-  if (m.type === 'episodic') return 'warning'
-  if (m.type === 'reflection') return 'danger'
-  if (m.type === 'plan') return 'success'
-  return 'info'
-}
-
-/** 记忆条目样式类（M1 起按 type+subtype 映射到 CSS：summary/fact/observation 沿用 + reflection/plan 新增） */
-function memoryClass(m) {
-  if (m.type === 'semantic') return m.subtype === 'summary' ? 'summary' : 'fact'
-  if (m.type === 'episodic') return 'observation'
-  return m.type || 'fact'
-}
-
 /** 格式化 JSON 文本（G1b 预留的档案编辑器预填用） */
 function prettyJson(text) {
   if (!text) return ''
@@ -2054,14 +1353,7 @@ onMounted(async () => {
 .card-version { margin-right: 4px; }
 .info-tabs { flex: 1; min-height: 0; overflow-y: auto; }
 
-/* 概览 Tab */
-.ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 20px; margin-bottom: 16px; }
-.ov-item { display: flex; gap: 8px; align-items: center; }
-.ov-item .k { color: var(--text-secondary); font-size: 0.8rem; width: 64px; flex-shrink: 0; }
-.ov-item .v { color: var(--text-primary); font-size: 0.85rem; }
-.ov-detail { margin-bottom: 8px; }
-.ov-detail-label { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 6px; }
-.ov-detail-text { font-size: 0.88rem; color: var(--text-regular); line-height: 1.8; white-space: pre-wrap; word-break: break-word; background: var(--bg-layer-2); border-radius: 8px; padding: 12px; }
+/* 概览 Tab 的 .ov-* 样式已随面板迁移到 CharacterOverviewPanel.vue（V2.0 §13.4） */
 
 /* 结构化角色卡 */
 .persona-sections { display: flex; flex-direction: column; gap: 18px; }
@@ -2082,7 +1374,7 @@ onMounted(async () => {
 /* Prompt Tab */
 .prompt-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .prompt-hint { font-size: 0.78rem; color: var(--text-secondary); }
-.prompt-pre { margin: 0; padding: 14px; background: var(--bg-layer-2); border: 1px solid var(--border-light); border-radius: 8px; font-family: var(--font-mono, monospace); font-size: 0.78rem; line-height: 1.7; white-space: pre-wrap; word-break: break-word; max-height: calc(100vh - 320px); overflow-y: auto; }
+.prompt-pre { margin: 0; padding: 14px; background: var(--bg-layer-2); border: 1px solid var(--border-light); border-radius: 8px; font-family: var(--font-mono, monospace); font-size: 0.78rem; line-height: 1.7; white-space: pre-wrap; word-break: break-word; max-height: var(--panel-scroll-max, min(46vh, 520px)); overflow-y: auto; }
 
 /* 人格与面具 Tab（O6 G3） */
 .personamask-ops { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
@@ -2099,72 +1391,7 @@ onMounted(async () => {
 .pm-delta-down { color: var(--state-danger); }
 .pm-forbid { color: var(--state-danger); }
 
-/* 记忆 Tab */
-.memory-ops { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.memory-hint { font-size: 0.72rem; color: var(--text-secondary); }
-.memory-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 340px); overflow-y: auto; }
-.memory-item { border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 10px; }
-.memory-item.summary { background: var(--state-success-bg); }
-.memory-item.fact { background: var(--bg-layer-2); }
-.memory-item.observation { background: color-mix(in srgb, var(--state-warning) 8%, transparent); }
-.memory-item.reflection { background: color-mix(in srgb, var(--state-danger) 8%, transparent); }
-.memory-item.plan { background: color-mix(in srgb, var(--state-primary) 8%, transparent); }
-.memory-head { display: flex; align-items: center; gap: 6px; }
-.memory-op { opacity: 0; transition: opacity .15s; }
-.memory-item:hover .memory-op { opacity: 1; }
-.memory-del { margin-left: auto; opacity: 0; transition: opacity .15s; }
-.memory-item:hover .memory-del { opacity: 1; }
-.edit-memory-hint { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px; }
-.memory-content { font-size: 0.8rem; color: var(--text-primary); margin-top: 6px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-
-/* M2 L1 工作记忆（热缓冲） */
-.working-memory-sec { margin-top: 14px; border-top: 1px dashed var(--border-light); padding-top: 10px; }
-.working-memory-title { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
-.working-memory-list { display: flex; flex-direction: column; gap: 8px; max-height: 30vh; overflow-y: auto; }
-.working-memory-item { border: 1px dashed var(--border-light); border-radius: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--state-primary) 4%, transparent); }
-.working-memory-head { display: flex; align-items: center; gap: 6px; }
-.working-memory-time { font-size: 0.7rem; color: var(--text-placeholder); margin-left: auto; }
-.working-memory-content { font-size: 0.78rem; color: var(--text-primary); margin-top: 5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-
-/* O1 记忆内核扩展：L1 短期模糊（原版 vs 当前模糊版本对照） */
-.fuzz-original { font-size: 0.72rem; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; word-break: break-word; }
-.fuzz-original-label { color: var(--text-placeholder); }
-
-/* M5 记忆治理健康度（角色维度摘要卡片） */
-.memory-ops-right { display: flex; align-items: center; gap: 2px; }
-.memory-health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
-.health-item { border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 10px; background: var(--bg-layer-2); }
-.health-label { font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 4px; }
-.health-value { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
-.health-sub { font-size: 0.68rem; color: var(--text-secondary); line-height: 1.6; }
-
-/* M5 注入预览对话框 */
-.ip-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.ip-total { margin-left: auto; }
-.ip-body { max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-.ip-seg { border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 10px; }
-.ip-seg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.ip-key { font-size: 0.7rem; color: var(--state-primary); background: color-mix(in srgb, var(--state-primary) 8%, transparent); padding: 1px 6px; border-radius: 4px; }
-.ip-title { font-weight: 600; font-size: 0.78rem; color: var(--text-primary); }
-.ip-text { margin: 0; padding: 6px 8px; background: var(--bg-layer-2); border: 1px dashed var(--border-light); border-radius: 6px; font-size: 0.72rem; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono, Consolas, 'Courier New', monospace); }
-.ip-hits { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-.ip-hit { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: var(--text-secondary); flex-wrap: wrap; }
-.ip-hit-content { color: var(--text-primary); word-break: break-all; }
 .mono { font-family: var(--font-mono, Consolas, 'Courier New', monospace); }
-
-/* M3 L3 核心记忆（恒在：静态基线只读 + 动态核心块 CRUD） */
-.core-memory-sec { margin-top: 14px; border-top: 1px dashed var(--border-light); padding-top: 10px; }
-.core-memory-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.core-memory-title { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); }
-.core-memory-body { display: flex; flex-direction: column; gap: 8px; max-height: 34vh; overflow-y: auto; }
-.core-baseline { border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--state-success) 6%, transparent); }
-.core-baseline-title { font-size: 0.72rem; font-weight: 600; color: var(--state-success); margin-bottom: 5px; }
-.core-baseline-text { font-size: 0.76rem; color: var(--text-primary); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-.core-block-item { border: 1px solid var(--border-light); border-radius: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--state-warning) 5%, transparent); }
-.core-block-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.core-block-version { font-size: 0.7rem; color: var(--text-placeholder); }
-.core-block-ops { margin-left: auto; display: flex; align-items: center; }
-.core-block-content { font-size: 0.78rem; color: var(--text-primary); margin-top: 6px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
 /* 版本历史 */
 .version-hint { font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-layer-2); border: 1px dashed var(--border-light); border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; line-height: 1.6; }

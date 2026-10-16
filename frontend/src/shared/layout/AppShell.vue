@@ -20,7 +20,7 @@
   -->
   <div
     class="app-shell"
-    :class="{ 'is-fullbleed': fullbleed, 'is-sidebar-overlay': sidebarIsOverlay }"
+    :class="{ 'is-fullbleed': fullbleed, 'is-overlay-mode': shellMode === 'overlay' && showSidebar, 'is-sidebar-overlay': sidebarIsOverlay }"
     :style="shellVars"
   >
     <ShellTopbar
@@ -28,6 +28,7 @@
       :project-id="projectId"
       :project="project"
       :breadcrumb="breadcrumb"
+      :interface-key="interfaceKey"
       :brand-label="brandLabel"
       :show-back="showBack"
       :show-sidebar-toggle="showSidebar"
@@ -35,6 +36,7 @@
       @back="onBack"
       @toggle-sidebar="toggleSidebar"
       @open-command="layout.setCommandOpen(true)"
+      @switch-interface="switchInterface"
     >
       <template #actions><slot name="topbar-actions"></slot></template>
     </ShellTopbar>
@@ -51,6 +53,7 @@
             data-tour="sidebar"
             :project-id="projectId"
             :project="project"
+            :interface-key="interfaceKey"
             :is-icon-only="sidebarIsIconOnly"
           />
         </div>
@@ -85,6 +88,8 @@
     <GuidedTour />
     <!-- 全局唯一右键上下文菜单（各页/侧栏通过 openContextMenu 调用；这里只挂一次） -->
     <ContextMenu />
+    <!-- 全局项目级 AI 助手（浮窗 + 侧边栏；跨页面保持） -->
+    <AssistantWidget />
   </div>
 </template>
 
@@ -120,11 +125,12 @@ import QuickNavDrawer from './QuickNavDrawer.vue'
 import ShortcutHelpPanel from './ShortcutHelpPanel.vue'
 import ContextMenu from './ContextMenu.vue'
 import AiRuntimePanel from './AiRuntimePanel.vue'
+import AssistantWidget from '@/features/assistant/AssistantWidget.vue'
 import { useShellLayout, SIDEBAR_MARGIN } from './useShellLayout'
 import { useAiRuntime } from './useAiRuntime'
 import { useContextDrawer } from './useContextDrawer'
 import { matchShortcut, isEditableTarget } from './shortcuts'
-import { DOMAINS, PINNED_ITEMS, NAV_ITEMS, itemPath } from './navModel'
+import { DOMAINS, PINNED_ITEMS, NAV_ITEMS, DIALOGUE_ITEMS, DIALOGUE_SETTINGS_ITEMS, DRAWER_PANELS, itemPath, interfaceOfPath, interfaceInfo } from './navModel'
 import { registerCommands, unregisterCommandsByPrefix } from './commandRegistry'
 import { DENSITY_MODES } from '@/shared/store/layout'
 
@@ -163,21 +169,35 @@ const { effectiveSidebarWidth, sidebarIsIconOnly, toggleSidebar, afterNavigate, 
 /** AI 运行状态轮询（顶栏活动点 + AI 抽屉共用一份快照） */
 const aiRuntime = useAiRuntime(() => props.projectId)
 
-/** 抽屉声明（内容组件随 projectId 变化，故用 computed 包裹） */
-const drawerDefs = computed(() => [
-  { id: 'pinned', title: '主工作区', icon: 'ic_gallery_map_all', hint: '沙盘与对话', side: 'left', width: 300,
-    comp: QuickNavDrawer, compProps: { domainKey: 'pinned', projectId: props.projectId } },
-  { id: 'cast', title: '角色', icon: 'ic_public_contacts', hint: '角色卡 / 人群 / 关系 / 谱系', side: 'left', width: 320,
-    comp: QuickNavDrawer, compProps: { domainKey: 'cast', projectId: props.projectId } },
-  { id: 'mind', title: '记忆与知识', icon: 'ic_public_albums', hint: '项目记忆 / 归档 / 知识库', side: 'left', width: 320,
-    comp: QuickNavDrawer, compProps: { domainKey: 'mind', projectId: props.projectId } },
-  { id: 'world', title: '世界设定', icon: 'ic_public_worldclock', hint: '世界详情 / 演化 / 时间线', side: 'left', width: 320,
-    comp: QuickNavDrawer, compProps: { domainKey: 'world', projectId: props.projectId } },
-  { id: 'ai-runtime', title: 'AI 运行状态', icon: 'ic_public_spinner', hint: '推理中 / 最近调用 / 失败', side: 'right', width: 380,
-    comp: AiRuntimePanel, compProps: {} },
-  { id: 'help', title: '帮助与快捷键', icon: 'ic_public_file', hint: '上手教程与速查', side: 'right', width: 360,
-    comp: ShortcutHelpPanel, compProps: {} }
-])
+/** 当前所处界面（浮生 / 对谈）：由路由路径判定，切换界面即切换侧边栏 */
+const interfaceKey = computed(() => interfaceOfPath(route.path, props.projectId))
+
+/**
+ * 切换界面（浮生 ⇄ 对谈）：跳转到另一界面的落地页。
+ * <p>由左上角世界名右侧的切换按钮触发；两侧边栏完全独立，互不混排。</p>
+ */
+function switchInterface() {
+  const target = interfaceKey.value === 'dialogue' ? 'fusheng' : 'dialogue'
+  const landing = interfaceInfo(target).landing
+  if (props.projectId == null) return
+  router.push(itemPath(props.projectId, landing))
+}
+
+/** 抽屉声明（元数据唯一来源 = navModel.DRAWER_PANELS；此处只补「内容组件」映射，
+ *  这样顶栏「面板」下拉与抽屉层永远列的是同一批面板，不会各写一份而漂移） */
+const DRAWER_COMPONENTS = {
+  pinned: { comp: QuickNavDrawer, props: () => ({ domainKey: 'pinned', projectId: props.projectId, interfaceKey: interfaceKey.value }) },
+  cast: { comp: QuickNavDrawer, props: () => ({ domainKey: 'cast', projectId: props.projectId }) },
+  mind: { comp: QuickNavDrawer, props: () => ({ domainKey: 'mind', projectId: props.projectId }) },
+  world: { comp: QuickNavDrawer, props: () => ({ domainKey: 'world', projectId: props.projectId }) },
+  'ai-runtime': { comp: AiRuntimePanel, props: () => ({}) },
+  help: { comp: ShortcutHelpPanel, props: () => ({}) }
+}
+const drawerDefs = computed(() => DRAWER_PANELS.map(d => ({
+  ...d,
+  comp: DRAWER_COMPONENTS[d.id]?.comp,
+  compProps: DRAWER_COMPONENTS[d.id]?.props() || {}
+})))
 
 /** 固定抽屉造成的左右内缩量（多个同侧固定面板按各自宽度累加） */
 const pinnedLeftWidth = computed(() => drawerDefs.value
@@ -234,7 +254,7 @@ function onBack() {
 /** 注册系统命令（导航 + 界面开关）；每次 projectId 变化重新注册 */
 function registerSystemCommands() {
   const pid = props.projectId
-  const navCmds = [...PINNED_ITEMS, ...NAV_ITEMS].map(i => ({
+  const navCmds = [...PINNED_ITEMS, ...NAV_ITEMS, ...DIALOGUE_ITEMS, ...DIALOGUE_SETTINGS_ITEMS].map(i => ({
     id: `nav.${i.key}`,
     title: i.name,
     group: '导航',
@@ -259,7 +279,9 @@ function registerSystemCommands() {
   })
   const uiCmds = [
     { id: 'ui.command', title: '打开命令面板', group: '界面', icon: 'ic_public_search', hotkey: 'Ctrl+K', keywords: ['命令', '搜索'], run: () => layout.setCommandOpen(true) },
-    { id: 'ui.sidebar', title: layout.sidebarCollapsed ? '展开侧栏' : '收起侧栏', group: '界面', icon: 'ic_public_view_list', hotkey: 'Ctrl+B', keywords: ['侧栏', '折叠'], run: () => toggleSidebar() },
+    // 浮生 ⇄ 对谈界面切换（P0-1：两个独立界面的顶层入口）
+    { id: 'ui.interface', title: interfaceKey.value === 'dialogue' ? '切换到「浮生」界面（世界运行）' : '切换到「对谈」界面（与角色对谈）', group: '界面', icon: interfaceKey.value === 'dialogue' ? 'ic_public_worldclock' : 'ic_public_message', keywords: ['浮生', '对谈', '界面', '切换', '聊天'], run: () => switchInterface() },
+    { id: 'ui.sidebar', title: effectiveSidebarWidth.value <= 60 ? '展开侧栏' : '收起侧栏', group: '界面', icon: 'ic_public_view_list', hotkey: 'Ctrl+B', keywords: ['侧栏', '折叠'], run: () => toggleSidebar() },
     { id: 'ui.theme', title: '切换浅色 / 深色主题', group: '界面', icon: 'ic_public_brightness', hotkey: 'Ctrl+Shift+L', keywords: ['主题', '深色', '浅色'], run: () => themeApi.toggleMode() },
     ...DENSITY_MODES.map(d => ({
       id: `ui.density.${d.key}`, title: `信息密度：${d.name}`, group: '界面', icon: 'ic_public_view_list',
@@ -373,6 +395,26 @@ onBeforeUnmount(() => {
 
 /* 侧栏测量容器：保持原 flex 行为（不伸缩、按内容定宽），仅为固定面板提供「让位宽度」 */
 .shell-sidebar-slot { display: flex; flex-shrink: 0; min-width: 0; }
+
+/* ===== 覆盖式模式（<1024）：侧栏做成「滑入抽屉」，内容区占满 =====
+   侧栏脱离文档流浮在内容之上（z 高于遮罩）；收起时 --shell-side-w=0 → 宽度 0 自然不可见，
+   展开时从左侧滑入。旧实现没有这套定位，侧栏始终占 flex 位，内容被挤窄且遮罩无效。 */
+.app-shell.is-overlay-mode .shell-sidebar-slot {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  z-index: var(--z-sidebar, 30);
+}
+/* 贴左缘的抽屉观感：去左留白、右侧圆角、阴影作边缘（覆盖式下弃用 border，
+   否则收起（width 0）时左右 1px 边线会露出 2px 细条）；拖拽手柄在覆盖式下无意义，一并隐藏；
+   overflow:hidden 保证收起时导航文本不外溢 */
+.app-shell.is-overlay-mode :deep(.domain-sidebar) {
+  margin-left: 0;
+  border: 0;
+  border-radius: 0 var(--radius-lg, 16px) var(--radius-lg, 16px) 0;
+  box-shadow: var(--shadow-lv3);
+  overflow: hidden;
+}
+.app-shell.is-overlay-mode :deep(.side-resize) { display: none; }
 
 /* 内容区：唯一滚动容器 + 统一内边距（令牌驱动，随密度档变化）
    margin 由固定面板注入（--pinned-*-inset）：这就是「固定面板挤压内容区」的实现，

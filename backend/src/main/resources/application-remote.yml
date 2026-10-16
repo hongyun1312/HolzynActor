@@ -19,3 +19,8 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
+  # remote=MySQL 为预留远程托管 profile，schema 由
+  # docs/sql/V1.0__holzyn_actor_mysql_all_tables.sql 脚本维护；V1__baseline.sql 是
+  # H2 方言，不能打到 MySQL 上 → 此处显式关闭 Flyway，并保持原 ddl-auto=update 行为
+  flyway:
+    enabled: false

@@ -228,5 +228,49 @@ class CharacterServiceTest {
         // 回退：to 按名称「阿明」建幽灵节点
         assertEquals("ghost-阿明", g.relations().get(0).toKey());
     }
+
+    // ==================== UI V3.0：节点附加语义（只增不改契约） ====================
+
+    /**
+     * 附加语义（圈子/家族/档案速览）按角色 ID 挂到对应节点上——NPC 与普通型都可挂；
+     * 未提供附加语义的角色拿空对象（不是 null，前端无需判空）。
+     */
+    @Test
+    void buildGraphAttachesNodeMetaAdditively() {
+        ActorCharacter a = npc(1L, "沈守拙", "special", 4, 1);
+        ActorCharacter m = ordinary(9L, "王阿婆", "村中宗族", "接生婆");
+        CharacterRelationGraphVO.NodeMeta meta = new CharacterRelationGraphVO.NodeMeta(
+                "/uploads/avatar/shen.png", "男", 65, "老年", "青禾村沈氏宗族", "守脉堂主",
+                "守脉堂", 7L, 10L, "村中宗族", "family", "elder", "fam-1", "沈氏一族");
+
+        CharacterRelationGraphVO g = CharacterService.buildGraph(List.of(a), List.of(m), List.of(),
+                java.util.Map.of(), java.util.Map.of(1L, meta));
+
+        CharacterRelationGraphVO.NodeVO npcNode = g.nodes().stream()
+                .filter(n -> n.id().equals("npc-1")).findFirst().orElseThrow();
+        assertEquals("村中宗族", npcNode.meta().groupName());
+        assertEquals("沈氏一族", npcNode.meta().familyName());
+        assertEquals(65, npcNode.meta().age());
+        assertEquals(7L, npcNode.meta().locationId());
+        // 旧字段语义未变（只增不改）：普通型节点的 crowdName/occupation 原样保留
+        CharacterRelationGraphVO.NodeVO crowdNode = g.nodes().stream()
+                .filter(n -> n.id().equals("crowd-9")).findFirst().orElseThrow();
+        assertEquals("村中宗族", crowdNode.crowdName());
+        assertEquals("接生婆", crowdNode.occupation());
+        assertEquals(CharacterRelationGraphVO.NodeMeta.EMPTY, crowdNode.meta(),
+                "未提供附加语义的角色拿空对象（不是 null）");
+    }
+
+    /** 旧三参/四参重载行为不变：节点 meta 全为空对象（存量消费方零影响）。 */
+    @Test
+    void legacyBuildGraphOverloadsKeepEmptyMeta() {
+        ActorCharacter a = npc(1L, "林晚", "special", 5, 1);
+        CharacterRelationGraphVO g = CharacterService.buildGraph(List.of(a), List.of(), List.of());
+        assertEquals(CharacterRelationGraphVO.NodeMeta.EMPTY, g.nodes().get(0).meta());
+
+        CharacterRelationGraphVO g2 = CharacterService.buildGraph(List.of(a), List.of(), List.of(),
+                java.util.Map.of());
+        assertEquals(CharacterRelationGraphVO.NodeMeta.EMPTY, g2.nodes().get(0).meta());
+    }
 }
 

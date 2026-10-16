@@ -115,7 +115,22 @@ public class DebugDbService {
             // 宏观社会演化系统 /：宏观三表（快照/事件/入账流水，调试浏览器可见）
             "actor_world_macro_snapshot",
             "actor_world_macro_event",
-            "actor_world_macro_delta"
+            "actor_world_macro_delta",
+            // 项目级 AI 助手（M1~M5）：会话/消息/干预留痕三表（调试浏览器可见）
+            "actor_assistant_session",
+            "actor_assistant_message",
+            "actor_assistant_intervention",
+            // 对谈模式（M1 对谈地基）：会话/消息/玩家档案/玩家-角色关系四表（调试浏览器可见）
+            // 表名 actor_talk_*（设计偏差 2026-10-12：设计稿拟 actor_dialogue_*，但既有
+            // 「对话」模块已占用 actor_dialogue / actor_dialogue_message 等表，故改用 talk 前缀区分）
+            "actor_talk_session",
+            "actor_talk_message",
+            "actor_talk_player_profile",
+            "actor_talk_player_relation",
+            // 对谈模式（M4 记忆/世界书等价物，2026-10-13）：会话级世界书条目表（调试浏览器可见）
+            "actor_talk_worldbook",
+            // 对谈模式（M5 群聊，2026-10-13）：群聊成员表（场景化成员：在场 present + 拉人 manual，调试浏览器可见）
+            "actor_talk_group_member"
     );
 
     /** 敏感列黑名单（永不展示；名称不区分大小写） */

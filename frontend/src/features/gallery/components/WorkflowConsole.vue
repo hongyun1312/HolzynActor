@@ -96,28 +96,28 @@ defineExpose({ push, pushAll, setRunning, clear, lines })
 <style scoped>
 .wf-console {
   display: flex; flex-direction: column; height: 100%;
-  background: #10141c; border: 1px solid #2a3242; border-radius: 10px; overflow: hidden;
+  background: var(--bg-layer-2); border: 1px solid var(--border-l2); border-radius: 10px; overflow: hidden;
 }
 .wf-console-head {
   display: flex; align-items: center; gap: 8px; padding: 8px 14px;
-  background: #161c28; border-bottom: 1px solid #2a3242; flex-shrink: 0;
+  background: var(--bg-layer-3); border-bottom: 1px solid var(--border-l2); flex-shrink: 0;
 }
-.wf-console-title { font-size: 0.85rem; font-weight: 600; color: #e6ecf5; }
-.wf-console-sub { font-size: 0.72rem; color: #7a8aa5; }
+.wf-console-title { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+.wf-console-sub { font-size: 0.72rem; color: var(--text-tertiary); }
 .wf-console-ops { margin-left: auto; display: flex; }
-.wf-console-ops :deep(.el-button) { color: #9fb0c9; }
-.wf-console-ops :deep(.el-button:hover) { color: #fff; }
+.wf-console-ops :deep(.el-button) { color: var(--text-secondary); }
+.wf-console-ops :deep(.el-button:hover) { color: var(--text-primary); }
 .wf-console-body {
   flex: 1; overflow-y: auto; padding: 10px 14px; font-family: 'JetBrains Mono', 'HarmonyOS Sans SC', Consolas, monospace;
-  font-size: 12px; line-height: 1.7; color: #c6d2e2;
+  font-size: 12px; line-height: 1.7; color: var(--text-regular);
 }
-.wf-console-empty { color: #5a6a84; text-align: center; padding: 30px 0; font-family: inherit; }
+.wf-console-empty { color: var(--text-tertiary); text-align: center; padding: 30px 0; font-family: inherit; }
 .wf-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-all; }
-.wf-line-time { color: #4c5a73; flex-shrink: 0; }
-.wf-info { color: #c6d2e2; }
-.wf-warn { color: #e6b46b; }
-.wf-error { color: #ef7f7f; }
-.wf-success { color: #7fd8a4; }
+.wf-line-time { color: var(--text-tertiary); flex-shrink: 0; }
+.wf-info { color: var(--text-regular); }
+.wf-warn { color: var(--state-warn); }
+.wf-error { color: var(--state-error); }
+.wf-success { color: var(--state-success); }
 .wf-console-body::-webkit-scrollbar { width: 6px; }
-.wf-console-body::-webkit-scrollbar-thumb { background: #2a3242; border-radius: 3px; }
+.wf-console-body::-webkit-scrollbar-thumb { background: var(--border-l2); border-radius: 3px; }
 </style>

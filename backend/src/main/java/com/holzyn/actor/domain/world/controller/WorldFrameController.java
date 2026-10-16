@@ -38,7 +38,8 @@ import java.util.Map;
  * <p>接口集（主开发方案 §6.1， 交付读接口两个 + 紧急更新一个；world-info/packets 与
  * world-info/diffusion 读接口留 扩散物化后）：</p>
  * <ul>
- * <li>GET /world-frame —— 当前生效世界帧（active；无 → 404）；</li>
+ * <li>GET /world-frame —— 当前生效世界帧（<b>恒 200</b>；未生成 → {@code generated=false} + {@code hint}，
+ *     见 UI V2.0 §8.4）；</li>
  * <li>GET /world-frame/list?limit= —— 世界帧历史（game_day 降序，默认 30 上限 100）；</li>
  * <li>POST /world-frame/emergency —— 紧急世界帧更新（body={eventType?, location?, summary?}；
  * ≤1 次/游戏日，超限 400；就地更新当前 active 帧）。</li>
@@ -54,9 +55,13 @@ public class WorldFrameController {
     /**
      * 当前生效世界帧。
      *
+     * <p><b>契约（UI V2.0 §8.4）</b>：恒返回 200。首个游戏日 00:00 之前还没有世界帧，这是世界的
+     * 正常状态而非错误——此时 body 的 {@code generated=false}、{@code hint} 说明原因、其余字段为空。
+     * 改前此处 404，导致前端每次首访都在控制台留一条红色 4xx，且"未生成"与"接口失败"无从区分。</p>
+     *
      * @param projectId 项目 ID
      *
-     * @return 帧 VO（无 active 帧 404）
+     * @return 帧 VO（未生成时 {@code generated=false}）
      */
     @GetMapping
     public WorldFrameVO current(@PathVariable("id") Long projectId) {

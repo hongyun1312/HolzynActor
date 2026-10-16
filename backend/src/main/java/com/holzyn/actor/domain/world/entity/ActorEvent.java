@@ -91,6 +91,15 @@ public class ActorEvent {
     @Column(nullable = false, length = 30)
     private String source = "manual";
 
+    /**
+     * 决策来源（P0-03 决策源可追溯，VARCHAR(32) 存 {@code DecisionSource} 枚举名）：
+     * AI 真实决策 / AI_RETRY 重试决策 / FALLBACK_PROGRAMMATIC 程序化兜底 /
+     * BUDGET_EXHAUSTED 预算耗尽降级 / DECISION_MISSING 决策缺失。
+     * 行动事件（kind=action）由行动决策的来源打标；空值=旧数据/非决策来源事件。
+     */
+    @Column(name = "decision_source", length = 32)
+    private String decisionSource;
+
     /** 游戏时刻（小时数，自纪元起，可空） */
     @Column(name = "game_hour")
     private Long gameHour;

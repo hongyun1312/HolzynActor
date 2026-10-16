@@ -3,6 +3,7 @@ package com.holzyn.actor.domain.agent.runtime;
 import com.holzyn.actor.domain.agent.event.EventSpec;
 import com.holzyn.actor.domain.agent.event.WorldEventBus;
 import com.holzyn.actor.domain.agent.perception.PerceptionService;
+import com.holzyn.actor.domain.agent.runtime.entity.ActorDecisionRetry;
 import com.holzyn.actor.domain.npc.profile.entity.ActorAgentProfile;
 import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
 import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
@@ -26,6 +27,7 @@ import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -261,6 +263,16 @@ class WorldEngineTest {
         return c;
     }
 
+    /** 构造带 tick 队列状态的时钟行（P0-01 根治：已消费位置 / 授权前沿 / 显式丢弃累计 / 生产者锚点）。 */
+    private ActorWorldClock clockWithQueue(long committed, long frontier, long dropped, LocalDateTime anchor) {
+        ActorWorldClock c = clock(committed / 3600L, 0, 1, anchor);
+        c.setLastGameSecond(committed);
+        c.setLastGameHour(committed / 3600L);
+        c.setAuthorizedTargetSecond(frontier);
+        c.setDroppedGameSeconds(dropped);
+        return c;
+    }
+
     /** 构造引擎配置行 */
     private ActorWorldEngine engineConfig(int budget, int maxStep) {
         ActorWorldEngine e = new ActorWorldEngine();
@@ -303,7 +315,7 @@ class WorldEngineTest {
         verify(agentRuntime, never()).trigger(any(), any(), any());
         verify(clockRepository, never()).save(any(ActorWorldClock.class));
         // P0-6 配套：跳过的路径也不得写窄列更新（时钟一行都不动）
-        verify(clockRepository, never()).updateEnginePosition(any(), anyLong(), anyLong(), any(), any());
+        verify(clockRepository, never()).updateEnginePosition(any(), anyLong(), anyLong(), any(), anyLong(), anyLong(), any());
         verify(clockRepository, never()).updateEngineBase(any(), any());
     }
 
@@ -423,7 +435,7 @@ class WorldEngineTest {
         // P0-6（2026-09-27）：推进位置改走窄列更新 updateEnginePosition（不再整实体 save）
         ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Long> hourCap = ArgumentCaptor.forClass(Long.class);
-        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), hourCap.capture(), any(), any());
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), hourCap.capture(), any(), anyLong(), anyLong(), any());
         assertEquals(Long.valueOf(86400L), posCap.getValue(), "秒级推进位置=24h×3600");
         assertEquals(Long.valueOf(24L), hourCap.getValue(), "last_game_hour 兼容派生");
     }
@@ -447,7 +459,7 @@ class WorldEngineTest {
         // 秒级推进位置落库（窄列更新）：last_game_second=300（300/3600=0 小时）
         ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Long> hourCap = ArgumentCaptor.forClass(Long.class);
-        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), hourCap.capture(), any(), any());
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), hourCap.capture(), any(), anyLong(), anyLong(), any());
         assertEquals(Long.valueOf(300L), posCap.getValue(), "last_game_second=5 游戏分钟");
         assertEquals(Long.valueOf(0L), hourCap.getValue(), "last_game_hour 派生 0");
         // 感知周期：每 tick 状态惰性衰减追平到游戏秒（s=300）
@@ -481,7 +493,7 @@ class WorldEngineTest {
         // 秒级位置与小时派生（窄列更新）
         ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Long> hourCap = ArgumentCaptor.forClass(Long.class);
-        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), hourCap.capture(), any(), any());
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), hourCap.capture(), any(), anyLong(), anyLong(), any());
         assertEquals(Long.valueOf(86400L), posCap.getValue());
         assertEquals(Long.valueOf(24L), hourCap.getValue());
     }
@@ -572,7 +584,7 @@ class WorldEngineTest {
         verify(npcStateService, times(1)).advance(eq(1L), eq(300L));
         // 余数 70 游戏秒保留在 last_game_second（不取整丢弃；窄列更新提交）
         ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
-        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(), any());
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(), anyLong(), anyLong(), any());
         assertEquals(Long.valueOf(370L), posCap.getValue(), "余数保留，下次惰性补偿");
     }
 
@@ -632,11 +644,14 @@ class WorldEngineTest {
     }
 
     /**
-     * M2：决策机会失败 → 程序化兜底（不阻断推进）——每小时 trigger 抛异常时该角色每小时
-     * 走 programmaticUpdate（当前活动文本随时段变化 → 落库；推进仍 advanced）。
+     * P0-02 诚实化止血 (a)：决策机会失败 → <b>决策缺失</b>（不伪造新活动文本；current_activity
+     * 保持上一小时值不变），落台账 + 编年史显式「该时段无决策」，推进不阻断。
+     * <p>旧行为：catch 里 programmaticUpdate 写「在驻地歇息就寝」式伪造活动 + return 1 计成功——
+     * 伪造经历被下游感知/记忆/反思当真实经历吸收（审计 P0-02）。止血后：不伪造、显式留痕。</p>
      */
     @Test
-    void hourlyDecisionFailureFallsBackToProgrammatic() {        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+    void hourlyDecisionFailureRecordsMissingWithoutFabricating() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
         ActorWorldClock c = clock(0, 0, 1, now.minusHours(1));
         stubBase(now, c);
         ActorCharacter a = character(1, 4);
@@ -644,23 +659,27 @@ class WorldEngineTest {
         when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(1L, 0)).thenReturn(List.of(a));
         when(perceptionService.buildPerceptionText(anyLong(), anyString(), any())).thenReturn("【当前所见】测试感知");
         when(agentRuntime.trigger(any(), any(), any())).thenThrow(new RuntimeException("AI 不可用"));
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(engine, "decisionLedgerService", ledger);
 
         Map<String, Object> r = engine.advanceProject(1L, now);
         assertEquals("advanced", r.get("status"), "决策失败不阻断推进");
-        // 24 小时 × 1 角色：24 次尝试全部程序化兜底
+        // 24 游戏小时 × 1 角色：24 次决策机会全部决策缺失
         verify(agentRuntime, times(24)).trigger(eq(AgentTrigger.ENGINE_TICK), eq("npc:1"), any(DecisionContext.class));
-        // 程序化更新随时段变化至少落库 1 次（活动文本变化才写）
-        verify(characterRepository, atLeast(1)).save(any(ActorCharacter.class));
+        verify(ledger, times(24)).recordMissing(eq(1L), any(ActorCharacter.class), anyLong(), anyString());
+        // 不可污染性：不伪造新活动文本（不写 current_activity / actor_state / 角色实体）
+        verify(characterRepository, never()).save(any(ActorCharacter.class));
+        assertNull(a.getCurrentActivity(), "current_activity 保持上一小时值（初始为空）不变，不伪造");
+        // 显式缺失留痕：台账来源为 DECISION_MISSING（编年史由 DecisionLedgerService 内部写）
+        verify(ledger, times(24)).recordMissing(eq(1L), any(ActorCharacter.class), anyLong(), contains("AI 不可用"));
     }
 
     /**
-     * 治理批次 0 · 卡4-A（G-ENGINE-ACT-01，起始 FAIL）：引擎程序化决策同步写 actor_state。
-     * <p>现状错误值：programmaticUpdate 只写 profile.currentActivity 不写 actor_state → 普通 NPC
-     * 感知读方（resolveOwnState 普通分支）仍读旧值。断言引擎程序化决策后 setActivity 被调用且
-     * activityOf 读到引擎写的新活动文本（统一读 actor_state 方向，禁止改读 profile 偷懒）。</p>
+     * P0-02 止血 (a) 普通 NPC 侧：决策失败不再写 actor_state（旧卡4-A 路径只在伪造兜底时触发）；
+     * 决策缺失 → setActivity 零调用，current_activity 不变（读方取旧值，不出现「呆呆待着」的假活动）。
      */
     @Test
-    void programmaticUpdate_writesActorStateForCommonNpc() {
+    void hourlyDecisionFailureCommonNpcNoActorStateFabrication() {
         LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
         ActorWorldClock c = clock(0, 0, 1, now.minusHours(1));
         stubBase(now, c);
@@ -670,43 +689,39 @@ class WorldEngineTest {
         when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(1L, 0)).thenReturn(List.of(a));
         when(perceptionService.buildPerceptionText(anyLong(), anyString(), any())).thenReturn("【当前所见】测试感知");
         when(agentRuntime.trigger(any(), any(), any())).thenThrow(new RuntimeException("AI 不可用"));
-        // 注入作息运行态访问器（字段注入，不改构造器）——修复前 WorldEngine 无此字段 → 本测试先红
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(engine, "decisionLedgerService", ledger);
         ReflectionTestUtils.setField(engine, "npcActivityStateService", npcActivityStateService);
-        // 写侧 fake：setActivity 记录 → activityOf 可读回（模拟 actor_state 落库）
-        Map<String, com.holzyn.actor.domain.npc.state.service.NpcActivityStateService.ActivityUpdate> stateStore =
-                new java.util.HashMap<>();
-        org.mockito.Mockito.doAnswer(inv -> {
-            stateStore.put(inv.getArgument(1),
-                    new com.holzyn.actor.domain.npc.state.service.NpcActivityStateService.ActivityUpdate(
-                            inv.getArgument(2), inv.getArgument(3)));
-            return null;
-        }).when(npcActivityStateService).setActivity(anyLong(), anyString(), anyString(), anyString());
-        when(npcActivityStateService.activityOf(anyLong(), anyString())).thenAnswer(inv ->
-                stateStore.getOrDefault(inv.getArgument(1),
-                        new com.holzyn.actor.domain.npc.state.service.NpcActivityStateService.ActivityUpdate("idle", null)));
 
         engine.advanceProject(1L, now);
 
-        // ① setActivity 被调用（引擎程序化决策同步 actor_state）
-        ArgumentCaptor<String> refCap = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> stateCap = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> actCap = ArgumentCaptor.forClass(String.class);
-        verify(npcActivityStateService, atLeastOnce())
-                .setActivity(eq(1L), refCap.capture(), stateCap.capture(), actCap.capture());
-        assertEquals("npc:10", refCap.getAllValues().get(0), "同步对象为普通 NPC npc:10");
-        List<String> states = stateCap.getAllValues();
-        List<String> acts = actCap.getAllValues();
-        // 映射一致性：写的 state == toActivityState(写的 activity)（映射表唯一来源）
-        for (int i = 0; i < acts.size(); i++) {
-            assertEquals(com.holzyn.actor.domain.npc.state.service.NpcActivityStateService.toActivityState(acts.get(i)),
-                    states.get(i), "引擎活动文本→activity_state 映射一致（第 " + i + " 次）");
-        }
-        // ② activityOf 读到引擎写的新活动文本（读 actor_state，非 profile）
-        com.holzyn.actor.domain.npc.state.service.NpcActivityStateService.ActivityUpdate readBack =
-                npcActivityStateService.activityOf(1L, "npc:10");
-        assertEquals(acts.get(acts.size() - 1), readBack.lastAction(), "activityOf 读到引擎写的新活动文本");
-        assertEquals(states.get(states.size() - 1), readBack.state(), "activityOf 读到映射后的 activity_state");
+        // 决策缺失 → 不伪造 → actor_state 零写入（读方保留旧值，不出现假活动）
+        verify(npcActivityStateService, never()).setActivity(anyLong(), anyString(), anyString(), anyString());
+        verify(ledger, times(24)).recordMissing(eq(1L), any(ActorCharacter.class), anyLong(), anyString());
+        assertNull(a.getCurrentActivity(), "common NPC 决策失败同样不伪造活动文本");
     }
+
+    /**
+     * P0-03 度量基座：每轮推进持久化预算统计（BudgetGuard 消耗不随 endTick 消失）。
+     * <p>推进成功（无决策失败）后 DecisionLedgerService.persistTickStat 被调用——预算总量
+     * （5）与实际消耗（0，无 trigger 消费）落 actor_world_engine_tick_stat（修「预算耗尽只在
+     * 内存、endTick 即 remove」，审计 P0-03 修法 2）。</p>
+     */
+    @Test
+    void advancePersistsTickBudgetStat() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusHours(1));
+        stubBase(now, c);
+        when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(1L, 0)).thenReturn(List.of());
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(engine, "decisionLedgerService", ledger);
+
+        Map<String, Object> r = engine.advanceProject(1L, now);
+        assertEquals("advanced", r.get("status"));
+        // 本轮 0→86400 游戏秒，预算总量 5（engineConfig(5,24)）；实际消耗不固定（跨日事件润色可能消费）
+        verify(ledger, times(1)).persistTickStat(eq(1L), eq(0L), eq(86400L), eq(5), anyInt());
+    }
+
 
     /**
      * 跨日事件双通道（T-4）：机制草稿 → AI 润色（预算内）→ publish(kind=world/source=engine/幂等键按日) →
@@ -998,7 +1013,7 @@ class WorldEngineTest {
         verify(agentRuntime, never()).trigger(any(), any(), any());
         verify(clockRepository, never()).save(any(ActorWorldClock.class));
         // P0-6 配套：跳过的路径也不得写窄列更新（时钟一行都不动）
-        verify(clockRepository, never()).updateEnginePosition(any(), anyLong(), anyLong(), any(), any());
+        verify(clockRepository, never()).updateEnginePosition(any(), anyLong(), anyLong(), any(), anyLong(), anyLong(), any());
         verify(clockRepository, never()).updateEngineBase(any(), any());
     }
 
@@ -1157,11 +1172,333 @@ class WorldEngineTest {
         Map<String, Object> r = engine.advanceProject(1L, now);
         assertEquals("advanced", r.get("status"));
         ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
-        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(), any());
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(), anyLong(), anyLong(), any());
         assertEquals(Long.valueOf(600L), posCap.getValue(),
                 "单轮推进收敛到 2 tick=600 游戏秒（不快进补完整 240 游戏小时）");
         verify(npcStateService, times(2)).advance(eq(1L), anyLong());
         verify(agentRuntime, never()).trigger(any(), any(), any());
+    }
+
+    // ==================== P0-01 根治：tick 任务队列（世界时间不得静默丢弃） ====================
+
+    /**
+     * P0-01 根治核心：被封顶截掉的游戏秒<b>显式留在授权前沿（tick 队列）里</b>，而非无条件推进基准到 now、
+     * 也不靠「基准+已消费量」的隐式累加器。
+     * 10 真实小时回补（rate=24 → 864000 游戏秒），屏障封顶 2 tick=600 游戏秒：
+     * 推进位置=600，授权前沿=864000（未消费的 863400 游戏秒全部在队列里，下一轮起逐轮消费）；
+     * 生产者锚点=now（墙钟时刻被本次授权消费干净，不再把余量藏在基准差值里）。
+     * 若按 P0-01 缺陷现场（基准=now、余量丢弃），863400 游戏秒将永久丢失。
+     */
+    @Test
+    void advanceKeepsUnconsumedTimeInQueueFrontier() {
+        ReflectionTestUtils.setField(engine, "tickQueueCapacityGameSeconds", 1_000_000L); // 容量放大，聚焦「不丢时间」
+        TickBarrier barrier = new TickBarrier();
+        ReflectionTestUtils.setField(barrier, "maxCatchUpTicks", 2);
+        ReflectionTestUtils.setField(engine, "tickBarrier", barrier);
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusHours(10));
+        stubBase(now, c);
+
+        Map<String, Object> r = engine.advanceProject(1L, now);
+        assertEquals("advanced", r.get("status"));
+        ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> frontCap = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> dropCap = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<LocalDateTime> baseCap = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), baseCap.capture(),
+                frontCap.capture(), dropCap.capture(), any());
+        assertEquals(Long.valueOf(600L), posCap.getValue(), "本轮消费 2 tick=600 游戏秒");
+        assertEquals(Long.valueOf(864000L), frontCap.getValue(),
+                "授权前沿=全部流逝（未消费的 863400 游戏秒显式留在队列，不静默丢弃）");
+        assertEquals(Long.valueOf(0L), dropCap.getValue(), "容量内：零丢弃");
+        assertEquals(now, baseCap.getValue(), "生产者锚点=now（墙钟时刻被本次授权消费干净，无截断残差）");
+        // 可观测：当前积压被显式记录（非静默丢弃）
+        Map<String, Object> m = engine.timeBacklogSnapshot(1L);
+        assertNotNull(m, "时间回补统计应可查询");
+        assertEquals(Long.valueOf(863400L), m.get("currentBacklogGameSeconds"),
+                "当前积压 = 864000 − 600 = 863400 游戏秒（= 授权前沿 − 已消费位置）");
+        assertEquals(Long.valueOf(863400L), m.get("peakBacklogGameSeconds"), "峰值积压=首轮积压");
+        assertEquals(Long.valueOf(0L), m.get("droppedGameSeconds"), "容量内：显式丢弃累计为 0");
+    }
+
+    /**
+     * P0-01 验收标准 1：多轮收敛——单轮被屏障封顶（24 tick=7200 游戏秒）后，
+     * 未消费的 tick 显式留在授权前沿，后续轮次从队列逐轮消费，最终 last_game_second 收敛到
+     * 起始 + elapsed（无丢失）。elapsed=21600（rate=24，锚点=now−900 真实秒），三轮后恰追到 21600。
+     */
+    @Test
+    void backlogCarriedToNextRoundUntilConverged() {
+        TickBarrier barrier = new TickBarrier(); // 默认 maxCatchUpTicks=24 → 7200 游戏秒/轮
+        ReflectionTestUtils.setField(engine, "tickBarrier", barrier);
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        long totalElapsed = 21600L;
+
+        // 第 1 轮：生产 21600 → 队列；消费 7200；已消费位置=7200、授权前沿=21600、锚点=now
+        ActorWorldClock c1 = clock(0, 0, 1, now.minusSeconds(900));
+        stubBase(now, c1);
+        Map<String, Object> r1 = engine.advanceProject(1L, now);
+        assertEquals("advanced", r1.get("status"));
+        ArgumentCaptor<Long> posCap1 = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> frontCap1 = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<LocalDateTime> baseCap1 = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap1.capture(), anyLong(), baseCap1.capture(),
+                frontCap1.capture(), anyLong(), any());
+        assertEquals(Long.valueOf(7200L), posCap1.getValue(), "第 1 轮消费 24 tick=7200 游戏秒");
+        assertEquals(Long.valueOf(21600L), frontCap1.getValue(), "授权前沿=全部流逝（余量 14400 留在队列）");
+        assertEquals(now, baseCap1.getValue(), "生产者锚点=now");
+        Mockito.clearInvocations(clockRepository);
+
+        // 第 2 轮：无新流逝（锚点=now 且 now 不变）→ 队列 14400，消费 7200 → 已消费位置=14400
+        ActorWorldClock c2 = clockWithQueue(7200, 21600, 0L, now);
+        stubBase(now, c2);
+        Map<String, Object> r2 = engine.advanceProject(1L, now);
+        assertEquals("advanced", r2.get("status"));
+        ArgumentCaptor<Long> posCap2 = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap2.capture(), anyLong(), any(), anyLong(), anyLong(), any());
+        assertEquals(Long.valueOf(14400L), posCap2.getValue(), "第 2 轮消费 7200 → 14400");
+        Mockito.clearInvocations(clockRepository);
+
+        // 第 3 轮：队列 7200，消费 7200 → 21600（追平），本轮积压=0
+        ActorWorldClock c3 = clockWithQueue(14400, 21600, 0L, now);
+        stubBase(now, c3);
+        Map<String, Object> r3 = engine.advanceProject(1L, now);
+        assertEquals("advanced", r3.get("status"));
+        ArgumentCaptor<Long> posCap3 = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap3.capture(), anyLong(), any(), anyLong(), anyLong(), any());
+        assertEquals(Long.valueOf(totalElapsed), posCap3.getValue(),
+                "三轮后引擎位置收敛到 起始+elapsed（世界时间不再被静默丢弃）");
+
+        Map<String, Object> m = engine.timeBacklogSnapshot(1L);
+        assertNotNull(m);
+        assertEquals(Long.valueOf(0L), m.get("currentBacklogGameSeconds"), "追平后积压为 0");
+        assertEquals(Long.valueOf(14400L), m.get("peakBacklogGameSeconds"), "峰值积压=第 1 轮 14400");
+        assertEquals(Long.valueOf(2L), m.get("deferredRounds"), "第 1、2 轮有积压，第 3 轮追平");
+        assertEquals(Long.valueOf(0L), m.get("droppedGameSeconds"), "容量内：零丢弃");
+    }
+
+    /**
+     * P0-01 验收标准 2：长循环追平——1 真实小时（rate=24 → 86400 游戏秒）回补，
+     * 每轮仅消费 2 tick=600 游戏秒（maxCatchUpTicks=2），连续多轮从队列消费直到追平，
+     * 断言最终引擎位置收敛到 起始 + elapsed 且无任何显式丢弃（100+ 轮后无时间丢失）。
+     */
+    @Test
+    void backlogDrainsOverManyRoundsWithoutDroppingTime() {
+        TickBarrier barrier = new TickBarrier();
+        ReflectionTestUtils.setField(barrier, "maxCatchUpTicks", 2);
+        ReflectionTestUtils.setField(engine, "tickBarrier", barrier);
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        long totalElapsed = 86400L; // 1 真实小时 × rate=24
+
+        long pos = 0L;
+        long frontier = 0L; // 第 1 轮起：生产 86400 后固定为 86400（后续轮次无新流逝）
+        LocalDateTime anchor = now.minusSeconds(3600);
+        long currentBacklog = -1L;
+        long lastDropped = -1L;
+        int round = 0;
+        for (; round < 300; round++) {
+            ActorWorldClock c = clockWithQueue(pos, frontier, 0L, anchor);
+            stubBase(now, c);
+            Map<String, Object> r = engine.advanceProject(1L, now);
+            assertEquals("advanced", r.get("status"), "第 " + (round + 1) + " 轮应推进");
+            ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
+            ArgumentCaptor<Long> frontCap = ArgumentCaptor.forClass(Long.class);
+            ArgumentCaptor<Long> dropCap = ArgumentCaptor.forClass(Long.class);
+            verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(),
+                    frontCap.capture(), dropCap.capture(), any());
+            pos = posCap.getValue();
+            frontier = frontCap.getValue();
+            lastDropped = dropCap.getValue();
+            anchor = now; // 第 1 轮后生产者锚点=now（now 固定 → 后续无新流逝，仅消费队列）
+            currentBacklog = (Long) engine.timeBacklogSnapshot(1L).get("currentBacklogGameSeconds");
+            if (pos == totalElapsed && currentBacklog == 0L) {
+                break;
+            }
+            Mockito.clearInvocations(clockRepository);
+        }
+        assertTrue(round > 1 && round < 300, "应在有限轮次内追平，实际轮数=" + (round + 1));
+        assertEquals(totalElapsed, pos, "引擎位置最终收敛到 起始+elapsed（所有游戏秒都被消费，无静默丢弃）");
+        assertEquals(0L, currentBacklog, "追平后积压为 0");
+        assertEquals(0L, lastDropped, "容量内：全程零显式丢弃");
+        Map<String, Object> m = engine.timeBacklogSnapshot(1L);
+        assertTrue((Long) m.get("deferredRounds") > 1, "多轮积压后才追平，deferredRounds=" + m.get("deferredRounds"));
+        assertEquals(Long.valueOf(85800L), m.get("peakBacklogGameSeconds"),
+                "峰值积压=首轮 86400−600=85800 游戏秒（初始缺口，此后单调回落）");
+    }
+
+    /**
+     * 未封顶路径语义保持：无屏障时（单轮消费上限=maxStep 86400 游戏秒），3600 游戏秒一次性全部消费——
+     * 生产者锚点=now、积压=0、丢弃=0，与原正常推进语义等价；根治只改变被封顶时的行为（余量进队列）。
+     */
+    @Test
+    void advanceUncappedDrainsFullyLeavesNoBacklog() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusSeconds(150)); // 150 真实秒×24=3600 游戏秒
+        stubBase(now, c);
+
+        Map<String, Object> r = engine.advanceProject(1L, now);
+        assertEquals("advanced", r.get("status"));
+        ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<LocalDateTime> baseCap = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), baseCap.capture(), anyLong(), anyLong(), any());
+        assertEquals(Long.valueOf(3600L), posCap.getValue(), "未封顶：3600 游戏秒全部消费");
+        assertEquals(now, baseCap.getValue(), "生产者锚点=now（墙钟时刻被本次授权消费干净）");
+        Map<String, Object> m = engine.timeBacklogSnapshot(1L);
+        assertEquals(Long.valueOf(0L), m.get("currentBacklogGameSeconds"), "未封顶且全部消费 → 积压为 0");
+        assertEquals(Long.valueOf(0L), m.get("droppedGameSeconds"), "未封顶且全部消费 → 丢弃为 0");
+    }
+
+    /**
+     * 亚 tick 累计显式落库：不足一个 tick（elapsed=24 < 300 游戏秒）时状态=pending，
+     * 但流逝不再丢失——授权前沿推进 24 并落库（updateEngineFrontier）、锚点刷新为 now，
+     * 下一轮扫描从队列继续累计（任意 rate 都能自洽，慢速率表现为 tick 更稀疏而非丢时间）。
+     */
+    @Test
+    void subTickElapsedPersistsInQueueFrontierNotLost() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusSeconds(1)); // 1 真实秒×24=24 游戏秒 < 300
+        stubBase(now, c);
+
+        Map<String, Object> r = engine.advanceProject(1L, now);
+        assertEquals("pending", r.get("status"), "不足一个 tick → pending（不空转）");
+        verify(clockRepository).updateEngineFrontier(eq(1L), eq(24L), eq(now));
+        verify(clockRepository, never()).updateEnginePosition(any(), anyLong(), anyLong(), any(), anyLong(), anyLong(), any());
+        verify(npcStateService, never()).advance(anyLong(), anyLong());
+        // 亚 tick 余量已进队列（frontier=24），不因本 pending 轮而丢失
+        Map<String, Object> m = engine.timeBacklogSnapshot(1L);
+        assertNotNull(m);
+        assertEquals(Long.valueOf(24L), m.get("currentBacklogGameSeconds"), "亚 tick 余量显式留在队列");
+    }
+
+    /**
+     * 容量溢出：授权前沿不得超过「已消费位置 + 容量」——超出部分显式计入 droppedGameSeconds
+     * （显式丢弃并记录，WARN 可追溯），容量内的部分仍全部消费，世界不静默丢时间也不无限膨胀队列。
+     * 2 真实小时回补（rate=24 → 172800 游戏秒），容量=3600：丢弃 169200，前沿=3600，全部消费。
+     */
+    @Test
+    void capacityOverflowDropsAndRecordsExplicitly() {
+        ReflectionTestUtils.setField(engine, "tickQueueCapacityGameSeconds", 3600L);
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusHours(2));
+        stubBase(now, c);
+
+        Map<String, Object> r = engine.advanceProject(1L, now);
+        assertEquals("advanced", r.get("status"));
+        ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> frontCap = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> dropCap = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(),
+                frontCap.capture(), dropCap.capture(), any());
+        assertEquals(Long.valueOf(3600L), posCap.getValue(), "容量内的部分全部消费");
+        assertEquals(Long.valueOf(3600L), frontCap.getValue(), "前沿被钳制到 已消费位置+容量");
+        assertEquals(Long.valueOf(169200L), dropCap.getValue(), "超出容量部分显式丢弃并记录（172800−3600）");
+        Map<String, Object> m = engine.timeBacklogSnapshot(1L);
+        assertEquals(Long.valueOf(169200L), m.get("droppedGameSeconds"), "显式丢弃累计落库口径一致");
+        assertEquals(Long.valueOf(0L), m.get("currentBacklogGameSeconds"), "容量内已全部消费 → 积压 0");
+        assertEquals(Long.valueOf(3600L), m.get("committedGameSecond"), "已消费位置快照");
+    }
+
+    /**
+     * 稳态产销：每扫描轮墙钟生产恰好一个 tick（12.5 真实秒 × rate=24 = 300 游戏秒），
+     * 世界每轮消费一个 tick——锚点=now 的 producer 语义保证亚秒残差不累积（now 每次前移）。
+     */
+    @Test
+    void steadyStateProducesAndConsumesOneTickPerScan() {
+        LocalDateTime now1 = LocalDateTime.of(2026, 8, 21, 12, 0);
+        LocalDateTime now2 = now1.plusSeconds(12).plusNanos(500_000_000L); // +12.5 真实秒
+
+        // 第 1 轮：锚点=now1−12.5s → 生产 300，消费 300
+        ActorWorldClock c1 = clock(0, 0, 1, now1.minusSeconds(12).minusNanos(500_000_000L));
+        stubBase(now1, c1);
+        Map<String, Object> r1 = engine.advanceProject(1L, now1);
+        assertEquals("advanced", r1.get("status"));
+        ArgumentCaptor<Long> posCap1 = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap1.capture(), anyLong(), any(), anyLong(), anyLong(), any());
+        assertEquals(Long.valueOf(300L), posCap1.getValue(), "第 1 轮消费 1 tick=300 游戏秒");
+        Mockito.clearInvocations(clockRepository);
+
+        // 第 2 轮：锚点=now1（上轮落库）→ 生产 300（now2−now1），消费 300 → 600
+        ActorWorldClock c2 = clockWithQueue(300, 300, 0L, now1);
+        stubBase(now2, c2);
+        Map<String, Object> r2 = engine.advanceProject(1L, now2);
+        assertEquals("advanced", r2.get("status"));
+        ArgumentCaptor<Long> posCap2 = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap2.capture(), anyLong(), any(), anyLong(), anyLong(), any());
+        assertEquals(Long.valueOf(600L), posCap2.getValue(), "第 2 轮消费 300 → 600（稳态每轮 1 tick）");
+        Map<String, Object> m = engine.timeBacklogSnapshot(1L);
+        assertEquals(Long.valueOf(0L), m.get("currentBacklogGameSeconds"), "稳态：每轮产销平衡，积压恒 0");
+        assertEquals(Long.valueOf(0L), m.get("droppedGameSeconds"), "稳态：零丢弃");
+    }
+
+    /**
+     * 重启重建：授权前沿/丢弃量持久化在时钟行——重启后引擎直接从持久化状态继续，
+     * 队列积压（frontier−committed）逐轮消费，不依赖墙钟差重算、不重复消费（无 double-simulate）。
+     */
+    @Test
+    void restartReconstructsQueueFromPersistedFrontier() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        // 模拟重启中间态：已消费 3600、授权前沿 7200、显式丢弃 1200、锚点=重启时刻
+        ActorWorldClock c = clockWithQueue(3600, 7200, 1200L, now);
+        stubBase(now, c);
+
+        Map<String, Object> r = engine.advanceProject(1L, now);
+        assertEquals("advanced", r.get("status"));
+        ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> dropCap = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(), anyLong(),
+                dropCap.capture(), any());
+        assertEquals(Long.valueOf(7200L), posCap.getValue(), "重启后从持久化队列继续：3600→7200（不重复、不丢）");
+        assertEquals(Long.valueOf(1200L), dropCap.getValue(), "显式丢弃累计跨重启保持");
+        // 3600 游戏秒 = 12 tick：恰消费一次（无 double-simulate）
+        verify(npcStateService, times(12)).advance(eq(1L), anyLong());
+        Map<String, Object> m = engine.timeBacklogSnapshot(1L);
+        assertEquals(Long.valueOf(0L), m.get("currentBacklogGameSeconds"), "队列追平 → 积压 0");
+    }
+
+    /**
+     * 外部时钟（Unity）路径同队列模型：上报目标推进授权前沿，本轮按上限消费；
+     * 未消费余量留在队列（不再依赖 Unity 重新上报才自愈）；超长拨钟同样按容量显式丢弃并记录。
+     */
+    @Test
+    void externalClockReportFeedsQueueAndConverges() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now);
+        stubBase(now, c);
+
+        // 目标 1800：前沿=1800，消费 1800（< 单轮上限）→ 追平
+        Map<String, Object> r1 = engine.advanceProjectExternal(1L, 1800L);
+        assertEquals("advanced", r1.get("status"));
+        ArgumentCaptor<Long> posCap1 = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> frontCap1 = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap1.capture(), anyLong(), any(),
+                frontCap1.capture(), anyLong(), any());
+        assertEquals(Long.valueOf(1800L), posCap1.getValue(), "外部目标 1800 全部消费");
+        assertEquals(Long.valueOf(1800L), frontCap1.getValue(), "授权前沿=上报目标");
+        Mockito.clearInvocations(clockRepository);
+
+        // 目标 2700：已消费 1800 → 前沿 2700，消费 900
+        ActorWorldClock c2 = clockWithQueue(1800, 1800, 0L, now);
+        stubBase(now, c2);
+        Map<String, Object> r2 = engine.advanceProjectExternal(1L, 2700L);
+        assertEquals("advanced", r2.get("status"));
+        ArgumentCaptor<Long> posCap2 = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap2.capture(), anyLong(), any(), anyLong(), anyLong(), any());
+        assertEquals(Long.valueOf(2700L), posCap2.getValue(), "增量 900 消费 → 2700");
+        Mockito.clearInvocations(clockRepository);
+
+        // 超长拨钟（目标 1_000_000）＋容量 3600：显式丢弃并记录
+        ReflectionTestUtils.setField(engine, "tickQueueCapacityGameSeconds", 3600L);
+        ActorWorldClock c3 = clockWithQueue(2700, 2700, 0L, now);
+        stubBase(now, c3);
+        Map<String, Object> r3 = engine.advanceProjectExternal(1L, 1_000_000L);
+        assertEquals("advanced", r3.get("status"));
+        ArgumentCaptor<Long> posCap3 = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> frontCap3 = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Long> dropCap3 = ArgumentCaptor.forClass(Long.class);
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap3.capture(), anyLong(), any(),
+                frontCap3.capture(), dropCap3.capture(), any());
+        assertEquals(Long.valueOf(6300L), posCap3.getValue(), "前沿钳制到 2700+3600，容量内全部消费");
+        assertEquals(Long.valueOf(6300L), frontCap3.getValue(), "授权前沿=已消费位置+容量");
+        assertEquals(Long.valueOf(993700L), dropCap3.getValue(), "超出容量部分显式丢弃（1_000_000−6300）");
     }
 
     /**
@@ -1185,7 +1522,7 @@ class WorldEngineTest {
         Map<String, Object> r = engine.advanceProject(1L, now);
         assertEquals("advanced", r.get("status"), "超时放行：世界不被慢依赖冻结");
         ArgumentCaptor<Long> posCap = ArgumentCaptor.forClass(Long.class);
-        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(), any());
+        verify(clockRepository).updateEnginePosition(eq(1L), posCap.capture(), anyLong(), any(), anyLong(), anyLong(), any());
         assertEquals(Long.valueOf(3600L), posCap.getValue(), "时钟照常推进到目标");
         String summary = String.valueOf(r.get("summary"));
         assertTrue(summary.contains("屏障等待"), "摘要记录屏障等待（可观测）：" + summary);
@@ -1521,6 +1858,202 @@ class WorldEngineTest {
         assertFalse(budgetGuard.hasBatchWindow(1L), "批次全部完成后 batch 预算窗口应关闭（无泄漏）");
         // 引擎 tick 窗口独立于 batch 窗口：推进结束后 tick 窗口照常关闭
         assertEquals(-1, budgetGuard.budgetTotal(1L), "引擎 tick 预算窗口照常关闭（与 batch 命名空间互不干扰）");
+    }
+
+    // ==================== P0-02 根治：决策重试（可重试性） ====================
+
+    /**
+     * P0-02 根治（可重试性）：决策失败 → 先入队重试作业（不立即落缺失、不伪造活动文本）。
+     * <p>旧止血行为：失败 → 立即 recordMissing（缺失留痕）。根治后：失败 → 入队
+     * {@code actor_decision_retry}（PENDING，指数退避）——该角色的这一小时在上游时间推进后
+     * <b>补算回填</b>，入队成功期间不落缺失（时间可以等作业）。</p>
+     */
+    @Test
+    void decisionFailureEnqueuesRetryInsteadOfMissingImmediately() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusHours(1));
+        stubBase(now, c);
+        ActorCharacter a = character(1, 4);
+        a.setLocation("城东市场");
+        when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(1L, 0)).thenReturn(List.of(a));
+        when(perceptionService.buildPerceptionText(anyLong(), anyString(), any())).thenReturn("【当前所见】测试感知");
+        when(agentRuntime.trigger(any(), any(), any())).thenThrow(new RuntimeException("AI 不可用"));
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(engine, "decisionLedgerService", ledger);
+        DecisionRetryService retryService = Mockito.mock(DecisionRetryService.class);
+        when(retryService.enqueue(anyLong(), anyLong(), anyString(), any(), anyLong(), anyString()))
+                .thenReturn(true);
+        ReflectionTestUtils.setField(engine, "decisionRetryService", retryService);
+
+        Map<String, Object> r = engine.advanceProject(1L, now);
+
+        assertEquals("advanced", r.get("status"), "决策失败入队重试不阻断推进");
+        // 24 游戏小时 × 1 角色：24 次失败全部入队重试（含原定时刻）
+        verify(retryService, times(24)).enqueue(eq(1L), eq(1L), eq("npc:1"), any(), anyLong(), anyString());
+        // 不可污染性：入队成功期间不落缺失、不伪造活动文本
+        verify(ledger, never()).recordMissing(anyLong(), any(ActorCharacter.class), anyLong(), anyString());
+        verify(characterRepository, never()).save(any(ActorCharacter.class));
+        assertNull(a.getCurrentActivity(), "current_activity 保持上一小时值不变，不伪造");
+    }
+
+    /**
+     * P0-02 根治回退：重试未启用/入队失败（返回 false）→ 退回止血 (a) 的显式缺失留痕。
+     * <p>保证「重试能力缺席时世界仍有诚实记录」——入队是增强，缺失留痕是底线。</p>
+     */
+    @Test
+    void decisionFailureRetryUnavailableFallsThroughToMissing() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusHours(1));
+        stubBase(now, c);
+        ActorCharacter a = character(1, 4);
+        a.setLocation("城东市场");
+        when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(1L, 0)).thenReturn(List.of(a));
+        when(perceptionService.buildPerceptionText(anyLong(), anyString(), any())).thenReturn("【当前所见】测试感知");
+        when(agentRuntime.trigger(any(), any(), any())).thenThrow(new RuntimeException("AI 不可用"));
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(engine, "decisionLedgerService", ledger);
+        DecisionRetryService retryService = Mockito.mock(DecisionRetryService.class);
+        when(retryService.enqueue(anyLong(), anyLong(), anyString(), any(), anyLong(), anyString()))
+                .thenReturn(false);
+        ReflectionTestUtils.setField(engine, "decisionRetryService", retryService);
+
+        engine.advanceProject(1L, now);
+
+        // 入队被拒 → 24 次决策缺失留痕（底线保持）
+        verify(ledger, times(24)).recordMissing(eq(1L), any(ActorCharacter.class), anyLong(), contains("AI 不可用"));
+        verify(characterRepository, never()).save(any(ActorCharacter.class));
+        assertNull(a.getCurrentActivity(), "回退路径同样不伪造活动文本");
+    }
+
+    /**
+     * P0-02 验收 3（可重试性）：第一次调用必失败、第二次成功 → 重试作业重跑决策并
+     * <b>回填到原定 gameSecond</b>（ctx.retry()=true + gameSecond=原定时刻），作业收口
+     * SUCCEEDED，全程不落缺失、不伪造。
+     * <p>「时间可以等作业」语义：世界在上游时间推进后补算该小时的决策，而不是停下来或编造。</p>
+     */
+    @Test
+    void decisionFailureRetriesAndBackFillsToOriginalGameSecond() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusHours(1));
+        stubBase(now, c);
+        // 1 小时窗口（maxStepHours=1 → drainCap=3600 游戏秒 → 单小时边界，决策点确定性）+ 关预热
+        when(engineRepository.findByProjectId(1L)).thenReturn(Optional.of(engineConfig(5, 1)));
+        ReflectionTestUtils.setField(engine, "lookaheadEnabled", false);
+        ActorCharacter a = character(1, 4);
+        a.setLocation("城东市场");
+        when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(1L, 0)).thenReturn(List.of(a));
+        when(characterRepository.findById(1L)).thenReturn(Optional.of(a));
+        when(perceptionService.buildPerceptionText(anyLong(), anyString(), any())).thenReturn("【当前所见】测试感知");
+        // 第一次调用必失败、第二次起成功（Mockito 连续打桩：首个抛异常、后续复用最后一个打桩）
+        when(agentRuntime.trigger(any(), any(), any()))
+                .thenThrow(new RuntimeException("AI 不可用"))
+                .thenReturn(AgentResult.success(AgentTrigger.ENGINE_TICK, "npc:1", null, List.of("thinking"), "ok"));
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(engine, "decisionLedgerService", ledger);
+
+        // 真实 DecisionRetryService + mock 仓库（内存态保存，供到点扫描回读）
+        ActorDecisionRetryRepository retryRepo = Mockito.mock(ActorDecisionRetryRepository.class);
+        List<ActorDecisionRetry> saved = new ArrayList<>();
+        Mockito.doAnswer(inv -> {
+            ActorDecisionRetry row = inv.getArgument(0);
+            if (row.getId() == null) {
+                row.setId(100L + saved.size());
+            }
+            saved.add(row);
+            return row;
+        }).when(retryRepo).save(any(ActorDecisionRetry.class));
+        when(retryRepo.findByProjectIdAndCharacterIdAndGameSecond(eq(1L), eq(1L), anyLong()))
+                .thenReturn(Optional.empty());
+        when(retryRepo.countByProjectIdAndStatus(eq(1L), eq("PENDING"))).thenReturn(0L);
+        when(retryRepo.claim(anyLong(), any())).thenReturn(1);
+        when(retryRepo.findByProjectIdAndStatusAndNextRetryAtLessThanEqualOrderByNextRetryAtAsc(
+                eq(1L), eq("PENDING"), any()))
+                .thenAnswer(inv -> saved.stream().filter(j -> "PENDING".equals(j.getStatus())).toList());
+        DecisionRetryService retryService = new DecisionRetryService(retryRepo);
+        ReflectionTestUtils.setField(retryService, "retryEnabled", true);
+        ReflectionTestUtils.setField(retryService, "initialBackoffMs", 0L); // 立即到点，便于确定性排空
+        ReflectionTestUtils.setField(engine, "decisionRetryService", retryService);
+
+        // 第一轮：小时边界决策失败 → 入队（不落缺失）
+        Map<String, Object> r1 = engine.advanceProject(1L, now);
+        assertEquals("advanced", r1.get("status"));
+        verify(ledger, never()).recordMissing(anyLong(), any(ActorCharacter.class), anyLong(), anyString());
+        assertEquals(1, saved.size(), "1 个决策点入队 1 个重试作业");
+        assertEquals(Long.valueOf(3600L), saved.get(0).getGameSecond(), "入队保存原定时刻");
+
+        // 第二轮：扫描排空到点作业 → 重跑成功 → 作业收口 SUCCEEDED
+        engine.advanceProject(1L, now);
+        ArgumentCaptor<DecisionContext> retryCtxCap = ArgumentCaptor.forClass(DecisionContext.class);
+        verify(agentRuntime, atLeast(2)).trigger(eq(AgentTrigger.ENGINE_TICK), eq("npc:1"),
+                retryCtxCap.capture());
+        DecisionContext retryCtx = retryCtxCap.getAllValues().stream()
+                .filter(DecisionContext::retry).findFirst().orElse(null);
+        assertNotNull(retryCtx, "重试重跑应带 retry 标记（决策循环据此打标 AI_RETRY）");
+        assertEquals(Long.valueOf(3600L), retryCtx.gameSecond(), "重试回填到原定 gameSecond（验收 3）");
+        assertEquals(Long.valueOf(1L), retryCtx.projectId());
+        verify(ledger, never()).recordMissing(anyLong(), any(ActorCharacter.class), anyLong(), anyString());
+        assertTrue(saved.stream().anyMatch(j -> "SUCCEEDED".equals(j.getStatus())
+                        && j.getGameSecond() == 3600L),
+                "重试成功作业收口 SUCCEEDED（决策点最终以 AI/AI_RETRY 落台账）");
+        assertNull(a.getCurrentActivity(), "全程不伪造活动文本");
+    }
+
+    /**
+     * P0-02 根治收口：重试耗尽（max-attempts=0，首次重试即超过上限）→ 作业 ABANDONED +
+     * 显式决策缺失留痕（编年史「该时段无记录」），不伪造、不无限重试。
+     */
+    @Test
+    void decisionRetryExhaustionRecordsExplicitMissing() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 21, 12, 0);
+        ActorWorldClock c = clock(0, 0, 1, now.minusHours(1));
+        stubBase(now, c);
+        when(engineRepository.findByProjectId(1L)).thenReturn(Optional.of(engineConfig(5, 1)));
+        ReflectionTestUtils.setField(engine, "lookaheadEnabled", false);
+        ActorCharacter a = character(1, 4);
+        a.setLocation("城东市场");
+        when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(1L, 0)).thenReturn(List.of(a));
+        when(characterRepository.findById(1L)).thenReturn(Optional.of(a));
+        when(perceptionService.buildPerceptionText(anyLong(), anyString(), any())).thenReturn("【当前所见】测试感知");
+        when(agentRuntime.trigger(any(), any(), any())).thenThrow(new RuntimeException("AI 不可用"));
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(engine, "decisionLedgerService", ledger);
+
+        ActorDecisionRetryRepository retryRepo = Mockito.mock(ActorDecisionRetryRepository.class);
+        List<ActorDecisionRetry> saved = new ArrayList<>();
+        Mockito.doAnswer(inv -> {
+            ActorDecisionRetry row = inv.getArgument(0);
+            if (row.getId() == null) {
+                row.setId(100L + saved.size());
+            }
+            saved.add(row);
+            return row;
+        }).when(retryRepo).save(any(ActorDecisionRetry.class));
+        when(retryRepo.findByProjectIdAndCharacterIdAndGameSecond(eq(1L), eq(1L), anyLong()))
+                .thenReturn(Optional.empty());
+        when(retryRepo.countByProjectIdAndStatus(eq(1L), eq("PENDING"))).thenReturn(0L);
+        when(retryRepo.claim(anyLong(), any())).thenReturn(1);
+        when(retryRepo.findByProjectIdAndStatusAndNextRetryAtLessThanEqualOrderByNextRetryAtAsc(
+                eq(1L), eq("PENDING"), any()))
+                .thenAnswer(inv -> saved.stream().filter(j -> "PENDING".equals(j.getStatus())).toList());
+        DecisionRetryService retryService = new DecisionRetryService(retryRepo);
+        ReflectionTestUtils.setField(retryService, "retryEnabled", true);
+        ReflectionTestUtils.setField(retryService, "maxAttempts", 0); // 首次重试即耗尽
+        ReflectionTestUtils.setField(retryService, "initialBackoffMs", 0L);
+        ReflectionTestUtils.setField(engine, "decisionRetryService", retryService);
+
+        // 第一轮：失败入队（不落缺失）
+        engine.advanceProject(1L, now);
+        verify(ledger, never()).recordMissing(anyLong(), any(ActorCharacter.class), anyLong(), anyString());
+        assertEquals(1, saved.size());
+
+        // 第二轮：排空 → 重跑仍失败 → 重试耗尽 → ABANDONED + 显式缺失留痕（原定时刻）
+        engine.advanceProject(1L, now);
+        verify(ledger, times(1)).recordMissing(eq(1L), any(ActorCharacter.class), eq(3600L),
+                contains("决策重试耗尽"));
+        assertTrue(saved.stream().anyMatch(j -> "ABANDONED".equals(j.getStatus())
+                        && j.getGameSecond() == 3600L),
+                "耗尽作业收口 ABANDONED（决策点落显式缺失，比编造更接近真实）");
+        assertNull(a.getCurrentActivity(), "耗尽路径同样不伪造活动文本");
     }
 
     /**

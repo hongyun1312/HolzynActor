@@ -30,9 +30,14 @@
     </template>
 
     <div v-if="!card" class="ped-empty">
-      <el-empty description="该角色尚未生成 11 维档案，请先「AI 生成角色档案」">
-        <el-button type="primary" :loading="generating" @click="regenerate">AI 生成角色档案</el-button>
-      </el-empty>
+      <EmptyState
+        size="page"
+        icon="ic_public_albums"
+        title="该角色还没有 11 维档案"
+        desc="档案是编辑与版本回滚的前提，先让 AI 依据角色设定生成一版。"
+        primary-text="AI 生成角色档案"
+        @primary="regenerate"
+      />
     </div>
 
     <template v-else>
@@ -234,7 +239,7 @@
       <!-- 版本历史抽屉 -->
       <el-drawer v-model="versionsOpen" title="版本历史（只增不改）" size="420px" append-to-body>
         <div v-if="versions.length === 0" class="ped-empty">
-          <el-empty description="暂无历史版本（存量角色在版本表落地前只有当前版）" />
+          <EmptyState size="inline" title="还没有历史版本——版本表落地前创建的角色只有当前版" />
         </div>
         <el-timeline v-else>
           <el-timeline-item
@@ -294,6 +299,8 @@ import {
   generateCharacterCard,
   restoreCharacterCard
 } from '../../../shared/api/character'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 
 const props = defineProps({
   /** 对话框可见性（v-model:visible） */

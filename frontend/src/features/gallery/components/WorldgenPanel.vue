@@ -153,13 +153,19 @@
           </div>
         </div>
 
-        <div v-if="previewLoading && !preview" class="pv-empty tech-card">
-          <el-empty description="正在加载产物预览…" />
-        </div>
+        <!-- V2.0 §5.6：加载态与空态分开表达——加载用 v-loading（进度感），
+             不再用「空态框里写正在加载」这种自相矛盾的写法。 -->
+        <div v-if="previewLoading && !preview" v-loading="true" class="pv-empty tech-card" />
         <div v-else-if="!preview" class="pv-empty tech-card">
-          <el-empty description="预览暂不可用（可能因某维度被跳过而不完整）">
-            <el-button size="small" @click="loadPreview">重新加载预览</el-button>
-          </el-empty>
+          <EmptyState
+            size="page"
+            tone="warn"
+            icon="ic_public_ring"
+            title="预览暂不可用"
+            desc="可能某个维度被跳过导致产物不完整，或该任务的数据已被清理。"
+            primary-text="重新加载预览"
+            @primary="loadPreview"
+          />
         </div>
         <template v-else>
           <!-- 核心定调：6 个 essence 定调句 -->
@@ -265,6 +271,8 @@ import {
 } from '@/shared/api'
 import WorkflowConsole from './WorkflowConsole.vue'
 import PageHeader from '@/shared/layout/PageHeader.vue'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 
 const router = useRouter()
 
@@ -792,7 +800,8 @@ const emit = defineEmits(['open-settings'])
 </script>
 
 <style scoped>
-.worldgen-panel { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+/* V2.0 批次二：1100/820 硬编码 → 全站栅格令牌（新建项目向导内的面板，取正文/表单档） */
+.worldgen-panel { max-width: var(--page-w-content, 1200px); margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 /* 页头（size="sm"）样式由全局类提供 */
 .status-tag { margin-left: 8px; vertical-align: middle; }
 .api-warn { }
@@ -800,7 +809,7 @@ const emit = defineEmits(['open-settings'])
 .block-card { padding: 18px 22px; }
 .block-title { font-weight: 700; color: var(--text-primary); margin-bottom: 12px; }
 .block-tip { font-size: 0.75rem; color: var(--text-tertiary); font-weight: 400; margin-left: 8px; }
-.gen-form { max-width: 820px; }
+.gen-form { max-width: var(--page-w-form, 720px); }
 .mode-tip { font-size: 0.72rem; color: var(--text-tertiary); line-height: 1.6; margin-top: 4px; max-width: 620px; }
 
 /* ===== 节点列表 ===== */
@@ -849,7 +858,7 @@ const emit = defineEmits(['open-settings'])
 .preview-title { font-weight: 700; color: var(--text-primary); font-size: 0.95rem; }
 .preview-tip { font-size: 0.72rem; color: var(--text-tertiary); font-weight: 400; margin-left: 8px; }
 .preview-ops { display: flex; gap: 8px; }
-.pv-empty { padding: 20px 0; }
+.pv-empty { padding: 20px 0; min-height: 120px; }
 .pv-card { padding: 16px 20px; }
 .pv-title { font-weight: 700; color: var(--text-primary); margin-bottom: 10px; font-size: 0.88rem; }
 .pv-essence { font-size: 0.85rem; color: var(--text-regular); line-height: 1.7; padding: 2px 0; }

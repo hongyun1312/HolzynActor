@@ -315,6 +315,10 @@ holzyn:
       tick-game-minutes: ${HOLOZYN_ACTOR_WORLD_TICK_GAME_MINUTES:5}
       # 单次补算封顶（游戏秒：防长时间离线后雪崩）
       max-catch-up-seconds: ${HOLOZYN_ACTOR_WORLD_MAX_CATCH_UP_SECONDS:86400}
+      # tick 队列容量（游戏秒，P0-01 根治：墙钟授权前沿的有界上限，即「可完整回补的离线时长上限」；
+      # 默认 7 游戏天——rate=24 覆盖约 7 真实小时离线、rate=4 约 42 真实小时；溢出部分显式计入
+      # dropped_game_seconds 并 WARN，不再静默丢弃）
+      tick-queue-capacity-game-seconds: ${HOLOZYN_ACTOR_WORLD_TICK_QUEUE_CAPACITY_GAME_SECONDS:604800}
       # 每 tick AI 预算缺省值（角色行动 + 世界事件润色；用尽程序化不冻结；每项目可单独覆盖）
       max-ai-calls: ${HOLOZYN_ACTOR_WORLD_MAX_AI_CALLS:5}
       # 跨日世界事件「AI 润色」通道开关（false=仅机制生成草稿零 AI 成本）
@@ -351,6 +355,24 @@ holzyn:
         enabled: ${HOLOZYN_ACTOR_WORLD_LOOKAHEAD_ENABLED:true}
         # 预热提前量（游戏分钟；rate=4 时 15 游戏分钟 = 3.75 真实分钟，远大于扇出 p95 88s）
         game-minutes: ${HOLOZYN_ACTOR_WORLD_LOOKAHEAD_GAMEMINUTES:15}
+      # 决策重试作业（P0-02 根治 · 可重试性）：AI 决策失败 → 入队可重试作业（指数退避），
+      # 引擎扫描到点重跑决策并回填到原定 gameSecond（时间可以等作业，世界不停下来也不编造）。
+      # max 档（AI 强度）不限重试次数（调用方按档位判定）；其余档位按 retry-max-attempts 上限，
+      # 达到上限 → ABANDONED + 显式决策缺失留痕（比编造更接近真实）
+      decision:
+        retry-enabled: ${HOLOZYN_ACTOR_WORLD_DECISION_RETRY_ENABLED:true}
+        # 单作业重试次数上限（非 max 档；0/-1=不限）
+        retry-max-attempts: ${HOLOZYN_ACTOR_WORLD_DECISION_RETRY_MAX_ATTEMPTS:8}
+        # 首次重试退避（毫秒，墙钟；每次 × retry-backoff-factor，封顶 retry-max-backoff-ms）
+        retry-initial-backoff-ms: ${HOLOZYN_ACTOR_WORLD_DECISION_RETRY_INITIAL_BACKOFF_MS:15000}
+        # 退避增长因子（每次 × factor；≤1=固定间隔）
+        retry-backoff-factor: ${HOLOZYN_ACTOR_WORLD_DECISION_RETRY_BACKOFF_FACTOR:2.0}
+        # 退避封顶（毫秒）
+        retry-max-backoff-ms: ${HOLOZYN_ACTOR_WORLD_DECISION_RETRY_MAX_BACKOFF_MS:300000}
+        # 每项目待重试作业容量上限（有界队列：溢出即按决策缺失留痕，不无限堆积）
+        retry-max-pending: ${HOLOZYN_ACTOR_WORLD_DECISION_RETRY_MAX_PENDING:500}
+        # 崩溃残留认领中作业的过期回收窗口（毫秒；认领后超期未收口视为认领方已死，回收重排）
+        retry-stale-ms: ${HOLOZYN_ACTOR_WORLD_DECISION_RETRY_STALE_MS:600000}
       # 世界常识摘要（V2.0 段 1A 稳定世界观注入源）：worldgen 落库/手动保存世界观后依最新
       # 设定 AI 生成/更新 300-500 字精炼常识；本段为定期兜底扫描（有世界观但常识缺失/
       # 世界观已更新的项目补生成；0=禁用扫描）
@@ -487,11 +509,11 @@ holzyn:
       # LLM-as-Judge：独立云端模型（与生成模型不同家族，规避 self-preference 偏见）
       judge:
         base-url: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_BASE_URL:https://ark.cn-beijing.volces.com/api/coding/v3}
-        # ⚠️ 开源发布版不内置真实 key；请通过环境变量 HOLOZYN_ACTOR_EVALUATION_JUDGE_API_KEY 配置你自己的密钥
+        # ⚠️ key 含在配置中为开发便利；judge 是离线批跑（长跑热路径不调用），换 key 不影响世界推进
         api-key: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_API_KEY:}
         model: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_MODEL:deepseek-v4-flash}
         provider-label: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_PROVIDER_LABEL:ark-coding-v3}
-        # 超时（秒，与 AI 层同口径；2026-10-02 随 AI 层调大——同一自托管网关重活生成可达 200s+）
+        # 超时（秒，与 AI 层同口径；随 AI 层调大——自托管网关重活生成可达 200s+）
         timeout-read-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_READ_SECONDS:300}
         timeout-connect-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_CONNECT_SECONDS:30}
         timeout-request-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_REQUEST_SECONDS:320}

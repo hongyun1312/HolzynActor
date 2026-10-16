@@ -17,6 +17,7 @@ import com.holzyn.actor.domain.npc.dialogue.entity.ActorConversationMember;
 import com.holzyn.actor.domain.npc.dialogue.repository.ActorConversationMemberRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -36,6 +37,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -682,6 +686,54 @@ class AgentRuntimeTest {
         verify(decisionService, never()).generateDecision(any(), any(), any(), anyBoolean());
         verify(decisionService, times(1)).generateProgrammaticDecision(any());
         assertEquals(-1, budgetGuard.budgetTotal(100L), "tick 窗口未被误开/误扣");
+    }
+
+    /**
+     * P0-02 验收 3（可重试性）：重试补算的决策（ctx.retry()=true）成功 → 决策点打标
+     * {@code AI_RETRY}（可追溯「这条 AI 决策经过重试」）——台账来源为 AI_RETRY（聚合属 AI），
+     * 且 action_json 随计划 JSON 透传该标记（下游动作日志/记忆/事件/编年史同源打标）。
+     */
+    @Test
+    void engineTickRetryContextTagsDecisionAsAiRetry() {
+        when(decisionService.generateDecision(any(), any(), any(), anyBoolean())).thenReturn(decision());
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(runtime, "decisionLedgerService", ledger);
+        DecisionContext ctx = DecisionContext.builder()
+                .projectId(100L).userId(1L).gameSecond(3600L).retry(true).build();
+
+        AgentResult result = runtime.trigger(AgentTrigger.ENGINE_TICK, "npc:1", ctx);
+
+        assertTrue(result.success());
+        // 台账：来源 AI_RETRY、gameSecond=原定时刻（回填到历史位置）
+        verify(ledger, times(1)).record(eq(100L), eq(1L), eq("npc:1"), eq(3600L),
+                eq(DecisionSource.AI_RETRY), eq("按日常习惯活动"), eq("engine_tick"));
+        // 下游透传：行动计划 action_json 携带 _decisionSource=AI_RETRY（AgentActionService
+        // 据此写动作日志/事件/记忆的 decision_source 列）
+        ArgumentCaptor<ActorActionPlan> planCap = ArgumentCaptor.forClass(ActorActionPlan.class);
+        verify(planRepository, atLeastOnce()).save(planCap.capture());
+        assertTrue(planCap.getAllValues().stream()
+                        .anyMatch(p -> p.getActionJson() != null && p.getActionJson().contains("\"AI_RETRY\"")),
+                "action_json 应透传 _decisionSource=AI_RETRY，实际=" + planCap.getAllValues());
+    }
+
+    /**
+     * 非重试路径不打标 AI_RETRY：常规 ENGINE_TICK 决策（ctx.retry()=false）→ 台账来源保持
+     * 决策链原生标记（此处 mock 未打标 → 视为 AI，不升级为 AI_RETRY）。
+     */
+    @Test
+    void engineTickWithoutRetryKeepsOriginalSource() {
+        when(decisionService.generateDecision(any(), any(), any(), anyBoolean())).thenReturn(decision());
+        DecisionLedgerService ledger = Mockito.mock(DecisionLedgerService.class);
+        ReflectionTestUtils.setField(runtime, "decisionLedgerService", ledger);
+        DecisionContext ctx = DecisionContext.builder()
+                .projectId(100L).userId(1L).gameSecond(7200L).build();
+
+        runtime.trigger(AgentTrigger.ENGINE_TICK, "npc:1", ctx);
+
+        // 常规路径不升级为 AI_RETRY；决策链产物未打标（mock 直返 Map）→ 传 null 来源，
+        // 由 DecisionLedgerService.record 兜底视为 AI（台账完整性：未打标不丢行）
+        verify(ledger, times(1)).record(eq(100L), eq(1L), eq("npc:1"), eq(7200L),
+                isNull(), eq("按日常习惯活动"), eq("engine_tick"));
     }
 
     /**

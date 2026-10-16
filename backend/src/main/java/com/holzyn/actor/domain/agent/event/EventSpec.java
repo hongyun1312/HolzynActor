@@ -90,6 +90,14 @@ public class EventSpec {
     private Long gameHour;
 
     /**
+     * 决策来源（P0-03 决策源可追溯，VARCHAR(32) 存 {@code DecisionSource} 枚举名）：
+     * AI 真实决策 / AI_RETRY 重试决策 / FALLBACK_PROGRAMMATIC 程序化兜底 /
+     * BUDGET_EXHAUSTED 预算耗尽降级 / DECISION_MISSING 决策缺失。
+     * 行动事件（kind=action）由行动决策打标；非决策来源事件留空。
+     */
+    private String decisionSource;
+
+    /**
      * 幂等键（如 plan:{planId} / crowd:{projectId}:{gameHour} / evolution:{evolutionId}；
      * 发布前按 project_id+source_key 去重，防重复发布，修）
      */

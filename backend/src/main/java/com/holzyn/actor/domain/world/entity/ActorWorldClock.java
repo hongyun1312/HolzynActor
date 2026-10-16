@@ -99,11 +99,36 @@ public class ActorWorldClock {
     private Integer worldRunning;
 
     /**
-     * 引擎最近一次真正推进的真实时刻（B3 回补基准，替代「活跃窗口」判定；
-     * 引擎按自此刻起的真实流逝换算游戏小时数逐步推进，null=尚未推进）
+     * 引擎<b>生产者锚点</b>（P0-01 根治后语义；原 B3 回补基准，替代「活跃窗口」判定）。
+     * <p>tick 队列模型下墙钟只作生产者：本列=「上次把真实流逝换算成游戏秒授权进前沿」的真实时刻，
+     * 引擎按自此刻起的真实流逝 × rate 把授权前沿往后推（有界），已消费位置只由消费 tick 前进；
+     * 配置侧「暂停恢复/重新打开/校准」会把它重置为当前真实时刻（不补冻结/关闭期的流逝）。
+     * null=尚未推进</p>
      */
     @Column(name = "last_engine_run_at")
     private LocalDateTime lastEngineRunAt;
+
+    /**
+     * tick 队列<b>授权前沿</b>（游戏秒，P0-01 根治新增）。
+     * <p>范围式任务队列：tick 粒度均匀（tick-game-minutes×60，默认 300 游戏秒），队列实质 =
+     * 区间 {@code [lastGameSecond, authorizedTargetSecond)}——每个 300 游戏秒槽位即一个待消费
+     * tick（job）。墙钟/Unity 只作为「本次允许消费多少 tick」的生产者把前沿往后推（有界，容量见
+     * {@code holzyn.actor.world.tick-queue-capacity-game-seconds}），<b>游戏秒是唯一权威</b>：
+     * 已消费位置 {@code lastGameSecond} 只由「消费 tick」前进，不再由墙钟差推导。未消费的 tick
+     * 留在队列里逐轮消费；溢出（离线超过容量）时超出部分计入 {@code droppedGameSeconds}
+     * （显式丢弃并记录，不再静默丢失）。null=尚未授权（首次推进/存量行，视为=lastGameSecond 无积压）。</p>
+     */
+    @Column(name = "authorized_target_second")
+    private Long authorizedTargetSecond;
+
+    /**
+     * 显式丢弃的游戏秒累计（P0-01 根治新增；默认 0）。
+     * <p>队列溢出（容量上限）时被显式丢弃、未进入世界历史的部分——把 P0-01 的「被截掉的时间」
+     * 从隐式丢失变为显式计数：每次溢出累加本计数，供调试面板/告警/评测（对齐 P0-03 的
+     * decision_source 度量基座）观测；正常稳态恒为 0，非 0 即 WARN 且可追溯丢弃量。</p>
+     */
+    @Column(name = "dropped_game_seconds", nullable = false)
+    private Long droppedGameSeconds = 0L;
 
     /** 最近推进摘要（供前端展示） */
     @Column(name = "last_summary", length = 500)
@@ -133,6 +158,7 @@ public class ActorWorldClock {
         // 新建时钟行默认「持续运行」开（新项目无人值守自转前提）；存量行不经过此处保持 NULL（视为关）
         if (worldRunning == null) worldRunning = 1;
         if (lastEngineRunAt == null) lastEngineRunAt = now;
+        if (droppedGameSeconds == null) droppedGameSeconds = 0L;
     }
 
     /**

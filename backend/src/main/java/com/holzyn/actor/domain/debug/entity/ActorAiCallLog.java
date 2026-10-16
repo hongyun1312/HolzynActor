@@ -47,7 +47,9 @@ import java.time.LocalDateTime;
  * 现有摘要列（system_prompt/user_prompt/response/token 等）保留供索引查询。</p>
  * <p>埋点位置：AiProviderRouter.chatCompletion / chatCompletionStream 统一入口（全部业务调用必经），
  * 由 AiCallTraceService 异步写库（虚拟线程，写库失败仅告警不阻断主流程）。</p>
- * <p>保留策略：<b>无滚动保留</b>。</p>
+ * <p>保留策略：<b>滚动保留</b>（P1-5 数据膨胀最小治理）——创建时间早于
+ * {@code holzyn.actor.debug.ai-log.retention.days}（默认 7 天）的历史记录由
+ * {@code AiCallLogRetentionService} 定时批量删除，文件副本同步清理；0=关闭滚动删除。</p>
  */
 @Data
 @Entity

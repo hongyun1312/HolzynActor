@@ -109,6 +109,16 @@ public class ActorWorldChronicle {
     @Column(length = 20)
     private String source = SOURCE_DAILY;
 
+    /**
+     * 决策来源（P0-03 决策源可追溯，VARCHAR(32) 存 {@code DecisionSource} 枚举名）：
+     * AI 真实决策 / AI_RETRY 重试决策 / FALLBACK_PROGRAMMATIC 程序化兜底 /
+     * BUDGET_EXHAUSTED 预算耗尽降级 / DECISION_MISSING 决策缺失。
+     * 引擎决策缺失记录（{@code DecisionSource.DECISION_MISSING}，显式「该时段无决策」）
+     * 经本列标记；空值=世界视角提炼（对话/每日批量等非逐角色决策来源）。
+     */
+    @Column(name = "decision_source", length = 32)
+    private String decisionSource;
+
     /** 标签列表 */
     @Column(columnDefinition = "TEXT")
     private String tags;

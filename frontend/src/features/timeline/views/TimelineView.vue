@@ -48,7 +48,13 @@
     <!-- 主体 · 竖轴时间线 -->
     <div class="tl-body" v-loading="loading">
       <div v-if="nodes.length === 0" class="tl-empty">
-        <el-empty description="暂无时间线节点——世界事件 / 角色行动 / 记忆里程碑将在此汇聚（可手动新增或 AI 识别事件）" />
+        <EmptyState
+          size="page"
+          icon="ic_public_clock"
+          title="时间线上还没有节点"
+          desc="世界事件、角色行动与记忆里程碑都会汇聚到这里，形成这个世界的编年史。"
+          :points="['世界推进时自动新增', '可手动补录事件', '也可让 AI 从记忆里识别事件']"
+        />
       </div>
       <div v-else class="tl-axis-wrap">
         <!-- 竖轴 -->
@@ -128,6 +134,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchProjectTimeline, createProjectEvent, aiGenerateProjectEvent, fetchWorldClock, worldEventsStreamUrl } from '@/shared/api'
 import { createSubscription, SSE_EVENTS } from '@/shared/sse/sseClient'
 import PageHeader from '@/shared/layout/PageHeader.vue'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 
 const route = useRoute()
 const projectId = Number(route.params.id)
@@ -318,7 +326,8 @@ onBeforeUnmount(() => {
 .tl-node.kind-manual::after { background: #909399; box-shadow: 0 0 0 2px #909399; }
 .tl-node.kind-system::after { background: #909399; box-shadow: 0 0 0 2px #909399; }
 .tl-node.kind-roleplay::after { background: #409eff; box-shadow: 0 0 0 2px #409eff; }
-.tl-card { border: 1px solid var(--border-light); border-radius: 10px; padding: 10px 14px; transition: box-shadow .2s, border-color .2s; max-width: 680px; }
+/* V2.0 批次二：680 硬编码 → 长文阅读列令牌（时间线卡片承载事件正文，与正文列同源，CJK 40 字/行） */
+.tl-card { border: 1px solid var(--border-light); border-radius: 10px; padding: 10px 14px; transition: box-shadow .2s, border-color .2s; max-width: var(--prose-measure, 40em); }
 .tl-card:hover { box-shadow: var(--card-shadow); border-color: var(--brand-primary); }
 .tl-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .src-tag { margin-left: 0; }

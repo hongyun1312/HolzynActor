@@ -14,7 +14,7 @@
 <template>
   <div class="pa-panel" :class="{ 'is-compact': compact }">
     <!-- 无档案：不构造空面板（调用方可能已给出"去生成"入口） -->
-    <el-empty v-if="!card" description="该角色尚未生成角色档案（11 维）" />
+    <EmptyState v-if="!card" size="inline" title="该角色还没有 11 维档案" />
 
     <template v-else>
       <!-- 顶部：角色名 + 档案版本 + 来源 + 更新时间 -->
@@ -71,12 +71,16 @@
             <span class="pa-dim-meta" :title="KIND_NOTES[d.kind] || ''">{{ d.shards }} · {{ d.kind }}</span>
           </header>
           <div class="pa-dim-body">
-            <template v-if="d.hasContent">
-              <div v-for="(row, i) in d.rows" :key="i" class="pa-line">
-                <span v-if="row.label" class="pa-line-label">{{ row.label }}</span>
-                <span class="pa-line-value">{{ row.value }}</span>
-              </div>
-            </template>
+            <!-- V2.0：改用公共 DefinitionList（标签定宽右对齐 + 值列对齐 + 长值阅读宽度/CJK 40 字/行 +
+                 超长值折叠）。此前这里是本页自写的 .pa-line 行，与角色概览的标签值网格、
+                 其它页的定义行各写一套，导致同类数据在不同页面的对齐与行长不一致。 -->
+            <DefinitionList
+              v-if="d.hasContent"
+              :items="d.rows"
+              :label-width="compact ? '56px' : '88px'"
+              prose
+              :clamp-lines="8"
+            />
             <div v-else class="pa-empty">{{ DIM_EMPTY_TEXT }}</div>
 
             <!-- 降级：服务端渲染文本缺失时，给出该维档案原始 JSON（不做前端二次渲染，避免与后端渲染规则漂移） -->
@@ -113,6 +117,10 @@
  */
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+// V2.0：维内「标签 → 值」行改用公共定义列表组件（统一对齐与阅读宽度）
+import DefinitionList from '@/shared/components/DefinitionList.vue'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 import {
   DIM_EMPTY_TEXT,
   buildArchive,

@@ -86,3 +86,110 @@ export function inRegion(x, z, region) {
 export function radiusMeters(radius) {
   return (Number(radius) || 0) * METERS_PER_GRID
 }
+
+/* ============================================================
+   2D 世界地图「内容自适应投影」（2026-10-14 第 65 次修复）
+   背景：地图原先固定把「整个场景 500×500 格」投影到画布 5%~95%，
+   而青禾村的实际内容只占中心约 260×415 格（= 场景的 52%×83% 里的
+   一小块，村落本体甚至只占 ±40 格）——于是：
+   ① 所有区域/住所/角色被压在画布中段一小片区域里（实测截图：10 个
+      区域名 + 12 个角色名 + 7 个住所全部叠在一起，完全不可读）；
+   ② 画布是纵向 596×816，正方形 viewBox 触发等比留白，上下各空一条。
+   修法：先算「内容包围盒」，再把包围盒等比铺满画布（保比例、居中、留边），
+   即真实地图软件的 fit-to-content 行为。以下为纯函数（零依赖、可单测）。
+   ============================================================ */
+
+/** 内容包围盒的最小跨度（格）：内容过小/只有一个点时避免被放大到失真 */
+export const MIN_CONTENT_SPAN = 90
+
+/** 各类元素的外扩量（格）：圆点/字形自身也有体积，不能被画布边缘裁切 */
+const PAD_REGION_MIN = 6
+const PAD_PLACEMENT = 6
+const PAD_HOME = 9
+const PAD_NPC = 6
+const PAD_ROAD = 4
+
+/** 数值安全转换（非有限值返回 null，便于调用方跳过） */
+function num(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * 计算地图内容包围盒（中心化坐标域）。
+ *
+ * @param {object} src 各类元素：{ regions, placements, homes, npcs, roads, movements, sceneSize }
+ * @returns {{minX:number,maxX:number,minZ:number,maxZ:number}|null} null=无任何内容
+ */
+export function computeContentBounds(src = {}) {
+  const size = validSceneSize(src.sceneSize)
+  const half = size / 2
+  let minX = Infinity; let maxX = -Infinity; let minZ = Infinity; let maxZ = -Infinity
+
+  const grow = (x, z, pad = 0) => {
+    if (x == null || z == null) return
+    minX = Math.min(minX, x - pad); maxX = Math.max(maxX, x + pad)
+    minZ = Math.min(minZ, z - pad); maxZ = Math.max(maxZ, z + pad)
+  }
+
+  // 区域圆：圆心 ± 半径（半径过小时给一个最小可视外扩）
+  for (const r of src.regions || []) {
+    const cx = num(r?.centerX); const cz = num(r?.centerZ)
+    if (cx == null || cz == null) continue
+    const rad = Math.max(Number(r?.radius) || 0, PAD_REGION_MIN)
+    grow(cx, cz, rad)
+  }
+  for (const p of src.placements || []) grow(num(p?.posX), num(p?.posZ), PAD_PLACEMENT)
+  for (const h of src.homes || []) grow(num(h?.posX), num(h?.posZ), PAD_HOME)
+  for (const n of src.npcs || []) grow(num(n?.posX), num(n?.posZ), PAD_NPC)
+  for (const rd of src.roads || []) {
+    for (const pt of rd?.path || []) {
+      if (!Array.isArray(pt)) continue
+      grow(num(pt[0]), num(pt[1]), PAD_ROAD)
+    }
+  }
+  for (const m of src.movements || []) {
+    grow(num(m?.fromX), num(m?.fromZ), PAD_ROAD)
+    grow(num(m?.toX), num(m?.toZ), PAD_ROAD)
+  }
+
+  if (!Number.isFinite(minX)) return null
+  // 钳制到场景内（数据异常时不让视图飞出场景）
+  return {
+    minX: Math.max(-half, minX), maxX: Math.min(half, maxX),
+    minZ: Math.max(-half, minZ), maxZ: Math.min(half, maxZ)
+  }
+}
+
+/**
+ * 内容自适应投影（fit-to-content）。
+ * <p>把内容包围盒等比铺进 viewBox（保留边距、居中），返回线性投影参数：</p>
+ * <pre>screenX = x0 + coord * scale；screenZ = z0 + coord * scale</pre>
+ * <p>等比（单一 scale）= 世界不变形；minSpan 保证内容极少时不会放大到失真。</p>
+ *
+ * @param {{minX,maxX,minZ,maxZ}|null} bounds 内容包围盒（null → 退化为整场景）
+ * @param {number} vbW viewBox 宽（用户单位）
+ * @param {number} vbH viewBox 高（用户单位）
+ * @param {object} [opts] { sceneSize, padding（0~0.3 边距比例）, minSpan }
+ * @returns {{scale:number,x0:number,z0:number,cx:number,cz:number}}
+ */
+export function fitProjection(bounds, vbW, vbH, opts = {}) {
+  const size = validSceneSize(opts.sceneSize)
+  const half = size / 2
+  // 5% 边距：既让内容尽量铺满画布（大厂地图观感），又给标签光晕留出余量
+  const padding = Number.isFinite(opts.padding) ? opts.padding : 0.05
+  const minSpan = Number.isFinite(opts.minSpan) ? opts.minSpan : MIN_CONTENT_SPAN
+
+  const bb = bounds || { minX: -half, maxX: half, minZ: -half, maxZ: half }
+  const cx = (bb.minX + bb.maxX) / 2
+  const cz = (bb.minZ + bb.maxZ) / 2
+  const w = Math.max(bb.maxX - bb.minX, minSpan)
+  const h = Math.max(bb.maxZ - bb.minZ, minSpan)
+
+  const usableW = Math.max(1, vbW * (1 - padding * 2))
+  const usableH = Math.max(1, vbH * (1 - padding * 2))
+  const scale = Math.min(usableW / w, usableH / h)
+
+  return { scale, cx, cz, x0: vbW / 2 - cx * scale, z0: vbH / 2 - cz * scale }
+}
+

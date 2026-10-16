@@ -12,11 +12,33 @@
 
 server:
   # 后端服务端口（前端 Vite 代理 /api、/uploads 指向此端口）
-  port: 8080
+  # 单一事实来源：默认 18080 —— 长期固定端口。
+  # 2026-10-14（v1.1.0-beta.1）由 8080 迁移而来：8080 是 Tomcat/Jenkins/各类脚手架与
+  # 本机其他 Java 项目的默认端口，极易被占用（本机即被另一个项目长期监听），
+  # 故改用非 IANA 注册、主流软件不占用的 18080，并作为后期长期端口。
+  # 覆盖方式（优先级从高到低）：--server.port=xxxx > 环境变量 HOLZYN_ACTOR_SERVER_PORT > 此处默认值。
+  # 注意：桌面安装包（Setup/Portable）不使用本默认值——Electron 主进程用随机空闲端口并
+  #       经 SERVER_PORT 环境变量下发（见 desktop/main.js），与开发者本机实例互不冲突。
+  port: ${HOLZYN_ACTOR_SERVER_PORT:18080}
   servlet:
     encoding:
       charset: UTF-8
       force: true
+  # 响应压缩（UI V2.0 §8.3 首屏实测发现）：前端产物由本服务直接提供（static/index.html +
+  # assets/*.js），而 Tomcat 默认**不压缩**——实测同一个包，经本服务首屏 JS 为 1540.8 KB，
+  # 经带压缩的静态服务器只有 519.3 KB（相差约 3 倍，全部是 gzip 的差别）。
+  # 桌面端走 localhost 时影响很小，但本仓库的 static 产物同时用于 web / JAR 部署方式
+  # （见 .gitignore 注释），那条路径上是实打实的带宽与首屏时间。
+  # 刻意**不写 mime-types**：走 Spring Boot 默认表（已含 text/html、text/css、
+  # text/javascript、application/javascript、application/json、application/xml）。
+  # 10-15 实测教训：自己列清单时漏掉 `text/javascript`（现代 Tomcat 给 .js 的 Content-Type
+  # 就是 text/javascript，不是 application/javascript），结果 JS 一个都没被压缩，且没有任何报错。
+  # 默认表不含 woff2（font/woff2）——字体本身已压缩，正好不需要处理。
+  # SSE（text/event-stream）不在默认表内，不会被压缩，因此不影响沙盘实时流。
+  compression:
+    enabled: true
+    # 小响应不值得付压缩开销（本服务的 /api 大多是小 JSON）
+    min-response-size: 4096
 
 # Spring AI 版本（banner.txt 占位符解析用，与 backend/pom.xml 保持一致）
 spring-ai:
@@ -46,9 +68,20 @@ spring:
       max-request-size: 20MB
   jpa:
     hibernate:
-      ddl-auto: update
+      # U3（2026-10-15）：schema 演进由 Flyway 版本化迁移接管（db/migration/*.sql），
+      # ddl-auto 收敛为 none（以迁移为准）：既有库经 baseline-on-migrate 标记为 V1 后原样运行，
+      # 全新库由 V1__baseline.sql 建全表；JPA 不再自动改表，避免「validate 误伤历史库 → 启动失败 → 回滚」。
+      ddl-auto: none
     show-sql: false
     open-in-view: false
+  # U3（2026-10-15）：Flyway 版本化迁移（H2 主库；remote=MySQL profile 已在 application-remote.yml 关闭）
+  flyway:
+    enabled: true
+    # 既有库（由历史 ddl-auto=update 建出、无 flyway_schema_history）自动打基线到 V1，
+    # 不执行 V1__baseline.sql；仅后续 V2+ 迁移在其上执行 → 玩家数据 0 风险、绝不因基线重建而丢库
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
     properties:
       hibernate:
         # 本地 H2 方言（远程 MySQL 由 application-remote.yml 覆盖为 MySQLDialect）
@@ -73,12 +106,26 @@ holzyn:
       file: ${HOLOZYN_ACTOR_LOG_FILE:logs/holzyn-actor.log}
     # 默认 AI 供应商（OpenAI 兼容服务；为空=按 DB actor_model_provider 配置）
     default-provider: ${HOLOZYN_ACTOR_DEFAULT_PROVIDER:}
+    # ---- 调试 / AI 调用日志（P1-5 数据膨胀最小治理）----
+    debug:
+      ai-log:
+        # 滚动保留：把 actor_ai_call_log（及 data/ai-call-logs/ 文件副本）按保留期滚动删除，
+        # 阻断"只增不删"的无限膨胀（本表多个 LONGTEXT 列是主库体积增长的最大来源）。
+        # 落地：AiCallLogRetentionService（@Scheduled，独立调度，失败仅告警）。
+        retention:
+          # 总开关（false=整项关闭，不删 DB 行也不删文件副本）
+          enabled: ${HOLOZYN_ACTOR_DEBUG_AI_LOG_RETENTION_ENABLED:true}
+          # 保留天数（0=关闭滚动删除，回退"无保留策略"旧行为；默认 7 天）
+          days: ${HOLOZYN_ACTOR_DEBUG_AI_LOG_RETENTION_DAYS:7}
+          # 定时维护间隔（毫秒，默认 6 小时，对齐记忆归档/知识生命周期维护周期；
+          # fixedDelay 首次执行在应用启动后立即触发一次，升级后首启即收口历史超期数据）
+          maintenance-interval-ms: ${HOLOZYN_ACTOR_DEBUG_AI_LOG_RETENTION_INTERVAL_MS:21600000}
     # ---- AI 接入层（对话/检索/向量/缓存/护栏/路由/NanoJev）----
     ai:
       # 向量库文件根目录（默认空=数据目录下 <data-dir>/vector-store/<projectId>/embeddings.json）
       vector-store-dir: ${HOLOZYN_ACTOR_VECTOR_STORE_DIR:}
       # HTTP 调用超时（防网络悬挂的 AI 调用永久阻塞引擎线程）。
-      # ⚠️ 2026-10-02 实测：自托管网关（llm.example.com）重活（story-engine/persona_bootstrap/worldgen 大 prompt）
+      # ⚠️ 实测：自托管网关重活（story-engine/persona_bootstrap/worldgen 大 prompt）
       # 生成可达 200s+，原 120s/130s 读超时把慢请求掐断→story-plan 失败、建档反复重试。调大默认值：
       # read=300s（socket 读）、request=320s（整次硬上限，须 > read）。
       timeout-read-seconds: ${HOLOZYN_ACTOR_AI_TIMEOUT_READ_SECONDS:300}
@@ -233,12 +280,21 @@ holzyn:
           social_willingness: { temperature: 0.5, max-tokens: 2048 }
           space_decision: { temperature: 0.5, max-tokens: 2048 }
           space_trigger: { temperature: 0.5, max-tokens: 2048 }
+          # 对谈五场景（2026-10-13 第 61 轮真实冒烟抓修）：此前未在 scenes 登记 → 落 default-tier 4096，
+          # SceneRouter「路由优先」把 PromptSpec 的 max-tokens（300/160/…）覆盖成 4096 → 回复过长 →
+          # 上下文膨胀 → 生成超上游 ~60s 流式时限 → Stream failed。显式固化输出上限（温度对齐 PromptSpecRegistry；
+          # dialogue_reply 再收紧到 260 配合模板「回复务必简短 1~2 句话」软约束）。
+          dialogue_reply: { temperature: 0.7, max-tokens: 260 }
+          dialogue_greeting: { temperature: 0.8, max-tokens: 160 }
+          dialogue_group_reply: { temperature: 0.7, max-tokens: 300 }
+          dialogue_summary: { temperature: 0.4, max-tokens: 300 }
+          dialogue_consolidation: { temperature: 0.3, max-tokens: 512 }
       # NanoJev 并行决策模型（System One 判定层：输入 state+questions、输出完整概率分布、零解码）
       # ⚠️ 唯一可用入口 = POST /v1/nanojev/evaluate；chat/completions 传 model=nanojev 会静默回退 35B
       nanojev:
         # 判定调用总开关（默认 false：未配置 base-url 前一律禁用，调用方回退 Qwen/程序化，fail-closed）
         enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_ENABLED:false}
-        # evaluate 网关 Base URL（已含 /v1；外网=https://llm.example.com:14443/v1，内网=http://127.0.0.1:9100/v1）
+        # evaluate 网关 Base URL（已含 /v1）
         base-url: ${HOLOZYN_ACTOR_AI_NANOJEV_BASE_URL:}
         # NanoJev 专用 API Key（空=沿用当前 chat provider Key；非空=专用。env 正确形态 HOLOZYN_ACTOR_AI_NANOJEV_APIKEY）
         api-key: ${HOLOZYN_ACTOR_AI_NANOJEV_API_KEY:}

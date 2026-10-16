@@ -216,7 +216,8 @@ watch(() => files.value.length, () => { if (apiReady.value === null) checkApiRea
 </script>
 
 <style scoped>
-.file-parse-panel { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+/* V2.0 批次二：1100 硬编码 → 全站栅格令牌 */
+.file-parse-panel { max-width: var(--page-w-content, 1200px); margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 /* 页头（size="sm"）样式由全局类提供 */
 /* 扩写开关条 */
 .expand-bar { display: flex; align-items: center; gap: 10px; padding: 12px 18px; }

@@ -37,7 +37,7 @@ import java.util.Map;
  * <p>握手拦截器：从 URI 路径解析 projectId 写入会话属性（{@link UnityWsHandler#ATTR_PROJECT_ID}），
  * 处理器据此做项目校验/注册/激活。</p>
  * <p>跨域：本地单用户应用 + Unity 原生客户端（C# ClientWebSocket 无 Origin 头）+ 调试前端
- * dev（5175 跨源连接 8080），放开 Origin 模式（不做浏览器跨站防护场景；如需公网暴露须收紧）。</p>
+ * dev（5175 跨源连接 18080），放开 Origin 模式（不做浏览器跨站防护场景；如需公网暴露须收紧）。</p>
  */
 @Configuration
 @EnableWebSocket

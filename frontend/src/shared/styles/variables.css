@@ -10,14 +10,17 @@
 /* ===== HarmonyOS Sans SC 字体（2026-08-18 接入，华为鸿蒙字体）
    来源：docs/public/HarmonyOS-Sans.zip（HarmonyOS Sans Fonts License Agreement：
    可随软件打包使用，需保留版权声明，不可修改字体、不可单独转售）。
-   字重：Thin 100 / Light 300 / Regular 400 / Medium 500 / Bold 700 / Black 900。
-   font-display: swap —— 字体异步加载，就绪前用系统字体兜底，不阻塞首屏。 */
-@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Thin.ttf') format('truetype'); font-weight: 100; font-style: normal; font-display: swap; }
-@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Light.ttf') format('truetype'); font-weight: 300; font-style: normal; font-display: swap; }
-@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
-@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Medium.ttf') format('truetype'); font-weight: 500; font-style: normal; font-display: swap; }
-@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
-@font-face { font-family: 'HarmonyOS Sans SC'; src: url('../../assets/fonts/HarmonyOS_Sans_SC_Black.ttf') format('truetype'); font-weight: 900; font-style: normal; font-display: swap; }
+
+   ⚠️ V2.0（批次一）已改为 **unicode-range 分片 woff2**：
+   - 改造前：6 个未压缩 TTF 直接 @font-face，构建产物实测 49,518 kB；本项目正文是 AI 运行时
+     生成的（任意汉字都可能出现），无法静态子集化，只能走分片路线；
+   - 改造后：72 个 woff2 分片（4 字重 × 18 片，合计 17.2 MB），**首屏通常只下载 1–2 片（约 31 KB）**，
+     生僻字命中后续片，永不缺字；
+   - @font-face 清单在 `fonts.css`（由 `frontend/scripts/build-font-subsets.py` 生成，
+     原始 TTF 保留在 `frontend/assets/fonts-src/`，不进入打包产物）。
+   - 字重收敛为 **400 / 500 / 700 / 900**：全仓实测 100/300 无任何使用（仅旧 @font-face 声明），
+     600/800 由 CSS 就近匹配到 500/700/900，渲染结果与改造前一致。
+   font-display: swap —— 分片异步加载，就绪前用系统字体兜底，不阻塞首屏。 */
 
 :root {
   /* ===== 字体（正文/UI 用 HarmonyOS Sans SC；代码等宽字体保留原栈） ===== */
@@ -114,6 +117,83 @@
   --primary: var(--accent);
   --font-mono: var(--dsw-font-family-code);
 
+  /* ============================================================
+     旧版变量别名（P0-3 主题贯通）
+     背景：AI 助手侧边栏/卡片与部分页面此前引用 --color-primary / --bg-panel /
+     --text-main 等「从未定义」的变量，永远回退到硬编码浅色 hex —— 深色主题下
+     仍是浅色，与全局主题脱节。此处把它们统一映射到真实令牌：助手等历史组件
+     无需改动即可跟随深浅主题与可换肤主色。
+     ============================================================ */
+  --color-primary: var(--accent);
+  --color-success: var(--state-success);
+  --color-warning: var(--state-warn);
+  --color-danger: var(--state-error);
+  --bg-panel: var(--bg-layer-1);
+  --bg-elev: var(--bg-layer-1);
+  --bg-input: var(--bg-layer-3);
+  --text-strong: var(--text-primary);
+  --text-main: var(--text-regular);
+  --text-dim: var(--text-tertiary);
+  /* 同批遗漏：对谈/对话/角色页共 15 处引用 --state-primary，而它从未定义。
+     危害不是「回退到硬编码」而是 CSS 的 invalid-at-computed-value-time：
+     color-mix(...var(--state-primary)...) 整条声明作废 →
+     background 变 transparent（发送按钮白底白图标 = 看不见）、
+     border-color 回退 currentColor（会话选中态出现莫名黑框）。
+     此处映射到可换肤主色，一次性修复全部 15 处。 */
+  --state-primary: var(--accent);
+
+  /* ============================================================
+     新首页（世界地图 · 双主角并置）专用令牌（P0-3 主题贯通）
+     背景：M4 新首页原是「地图仪表盘」式深色定制皮肤（#0b1220 深蓝黑）——
+     浅色主题下核心首页仍是深色，Ctrl+Shift+L 主题切换在最关键页面无效。
+     现改为令牌驱动：浅/深主题各自取值，主色沿用 --accent 体系。
+     用法：首页各组件一律引用 --hm-*，不再硬编码 hex。
+     ============================================================ */
+  --hm-page-bg: #eef2f9;                     /* 页面底（浅） */
+  --hm-panel: rgba(255, 255, 255, 0.9);      /* 面板底（毛玻璃） */
+  --hm-panel-strong: #ffffff;                /* 详情卡底 */
+  --hm-border: rgba(90, 125, 205, 0.28);     /* 面板描边 */
+  --hm-border-soft: rgba(90, 125, 205, 0.16);/* 细分隔线 */
+  --hm-border-strong: rgba(90, 125, 205, 0.45); /* 强调描边 */
+  --hm-text: #1f2a44;                        /* 主文字 */
+  --hm-text-soft: #3a4660;                   /* 较浅正文 */
+  --hm-text-dim: #5a6b8f;                    /* 次级文字 */
+  --hm-text-faint: #8794b0;                  /* 弱文字 */
+  --hm-gold: #b8860b;                        /* 强调金（特殊NPC/住所） */
+  --hm-gold-soft: #a97f16;                   /* 浅金文字 */
+  --hm-blue: #4a6fae;                        /* 人群蓝 */
+  --hm-green: #1f9d5b;                       /* 在线/成功 */
+  --hm-red: #d64545;                         /* 危险 */
+  --hm-red-soft: #e05a5a;                    /* 浅红文字 */
+  --hm-amber: #c97f12;                       /* 警告/实时 */
+  --hm-orange: #cf6b3a;                      /* 事件橙 */
+  --hm-map-bg-0: #e3ecf9;                    /* 地图渐变浅端 */
+  --hm-map-bg-1: #ccd9ee;                    /* 地图渐变深端 */
+  --hm-map-fill: rgba(90, 125, 205, 0.10);   /* 区域填充 */
+  --hm-map-stroke: rgba(90, 125, 205, 0.55); /* 区域描边 */
+  --hm-road: rgba(110, 130, 160, 0.4);       /* 道路（兼容旧引用） */
+  --hm-building: rgba(110, 130, 160, 0.55);  /* 建筑 */
+  --hm-home: rgba(184, 134, 11, 0.55);       /* 住所 */
+  --hm-home-stroke: rgba(184, 134, 11, 0.9); /* 住所描边 */
+  --hm-trail: #b8860b;                       /* 移动轨迹 */
+  /* ===== 地图制图（第 65 次：村落地图专业化配色）===== */
+  --hm-grid: rgba(90, 125, 205, 0.10);            /* 底图比例网格 */
+  --hm-region-settlement: rgba(198, 156, 74, 0.16);      /* 聚落面 */
+  --hm-region-settlement-stroke: rgba(176, 132, 44, 0.65);
+  --hm-region-nature: rgba(96, 156, 106, 0.14);          /* 山地/林地 */
+  --hm-region-nature-stroke: rgba(74, 132, 88, 0.55);
+  --hm-region-water: rgba(74, 130, 205, 0.18);           /* 水域 */
+  --hm-region-water-stroke: rgba(56, 110, 186, 0.62);
+  --hm-region-realm: rgba(120, 130, 155, 0.10);          /* 疆域 */
+  --hm-region-realm-stroke: rgba(110, 122, 150, 0.48);
+  --hm-road-casing: rgba(146, 124, 88, 0.42);            /* 路基 */
+  --hm-road-fill: rgba(214, 199, 170, 0.95);             /* 路面 */
+  --hm-farm: #5f8f52;                                    /* 农田 */
+  --hm-npc-ring: rgba(255, 255, 255, 0.95);              /* 角色圆点描边（压在任何底色上都可辨） */
+  --hm-building-stroke: rgba(255, 255, 255, 0.7);
+  --hm-dot: #5a6b8f;                         /* 未点亮状态点 */
+  --hm-season-text: #3a4660;                 /* 季节徽标文字 */
+
   /* ===== Element Plus 覆盖（浅色）===== */
   --el-color-primary: var(--accent);
   --el-color-primary-light-3: color-mix(in srgb, var(--accent) 70%, #fff);
@@ -153,16 +233,59 @@
   --shell-side-w-collapsed: 56px;      /* 收起后的图标窄栏宽度 */
   --shell-drawer-w: 360px;             /* 顶部图标抽屉宽度 */
   --shell-context-w: 360px;            /* 右侧上下文抽屉宽度 */
-  --shell-bp-sm: 1024px;               /* 断点：< 此值 → 覆盖式 */
-  --shell-bp-md: 1440px;               /* 断点：< 此值 → 自动收窄 */
+  /* ===== V2.0 断点唯一三档（全仓唯一事实来源）=====
+     与 useShellLayout.js 的 BREAKPOINT_SMALL(=--bp-md) / BREAKPOINT_MEDIUM(=--bp-lg) 同源；
+     CSS 侧任何页面/组件都不得再写非档位值的 @media (max-width: Npx)。
+     见 docs/设计文档/HolzynActor_界面布局与IA人性化重构_方案_V2.0.md §5.1 */
+  --bp-md: 1024px;                     /* < 此值 → 单栏 + 覆盖式侧栏（兜底档，不做精雕） */
+  --bp-lg: 1440px;                     /* < 此值 → 侧栏图标导轨 + 页内右栏转抽屉 */
+  --bp-xl: 1920px;                     /* 宽屏：内容列不再随之变宽（居中留白） */
+  /* 兼容别名（V1.0 命名）：值统一指向 --bp-*，避免出现第二个事实来源 */
+  --shell-bp-sm: var(--bp-md);
+  --shell-bp-md: var(--bp-lg);
   --sb-inset-left: 276px;              /* 沙盘 3D 向左延伸量（JS 写入实测值 = 左留白 12 + 侧栏宽 264） */
 
   /* ===== 内容区（替换各页 11 处互不相同的 max-width）===== */
   --content-pad-x: 24px;
   --content-pad-y: 20px;
-  --content-max-w: 1440px;             /* 居中列宽度上限（data-content-mode=wide 时不生效） */
   --content-gap: 16px;
   --page-header-gap: 16px;             /* 页头标题与右侧操作区的最小间距 */
+
+  /* ===== V2.0 页面栅格：四档预置（见方案 §5.2）=====
+     用法：页面用 <PageShell width="form|content|wide|fullbleed">；PageShell 只需把
+     --content-max-w 本地覆写为下列某一档，历史页面里已有的 var(--content-max-w) 即自动生效。
+     「页面级内联 max-width」在 V2.0 中归零，统一由本组令牌与 PageShell 承载。 */
+  --page-w-form: 720px;                /* 表单/向导/账户/设置单页 */
+  --page-w-content: 1200px;            /* 正文/详情/列表（默认档） */
+  --page-w-wide: 1440px;               /* 数据/图谱/表格/画布容器 */
+  /* 默认档：未使用 PageShell 的历史页面仍取 1440，行为与 V1.0 一致（零回归） */
+  --content-max-w: var(--page-w-wide);
+  /* 页面左右留白：唯一来源指向内容区内边距（随密度档 18/24/28 变化） */
+  --page-gutter: var(--content-pad-x, 24px);
+
+  /* ===== V2.0 长文阅读列（关键修正）=====
+     审计文档写的「60–75 字符/行」是拉丁文口径；WCAG 1.4.8 对 CJK 明确为每行最多 40 字。
+     本产品正文为中文，故长文段落一律约束到 --prose-measure（≈640px），而不是 1200px 通栏。 */
+  --prose-measure: 40em;               /* CJK 40 字/行 */
+  --prose-leading: 1.75;               /* 长文行高（比正文 1.6 更松，长段更易读） */
+
+  /* ===== V2.0 页内工具条（旗舰页控件收敛）===== */
+  --toolbar-h: 44px;                   /* 工具条高度（含内边距） */
+  --toolbar-gap: 8px;                  /* 工具条内控件间距 */
+  --toolbar-group-gap: 12px;           /* 工具条内分组间距（视觉分层的唯一手段） */
+
+  /* ===== V2.0 统一焦点环（修 7 处裸 outline:none；WCAG 2.4.7 / 1.4.11）=====
+     用实心主色而非半透明 --accent-border：焦点指示需要与相邻色达到 3:1 对比度。
+     双层 box-shadow 版（--focus-ring）用于圆角/输入框等轮廓观感突兀的场景。 */
+  --focus-ring: 0 0 0 2px var(--bg-nav), 0 0 0 4px var(--accent);
+  --focus-ring-inset: inset 0 0 0 2px var(--accent);
+
+  /* ===== V2.0 面板内滚动区高度上限（消除 calc(100vh − Npx) 魔法高度）=====
+     背景：改造前 5 处页面/组件用 `calc(100vh - 140/260/300/320/340/500px)` 表示"这里最高到哪"，
+     这些数字把「顶栏高度 + 外壳内边距 + 当前密度档」硬编码进去了 —— 改顶栏或切密度就会失配
+     （本项目已因此出现过内容被截断/留白过大）。这里只表达意图，不再耦合外壳几何。 */
+  --panel-scroll-max: min(46vh, 520px);   /* 面板内长文/列表的滚动上限 */
+  --canvas-h-embedded: min(52vh, 620px);  /* 嵌在标签页里的画布高度（无确定高度父级时使用） */
 
   /* ===== 页内双栏（4 个自带左栏的页面统一取这两个令牌）=====
      背景：角色页 300px / 对话页 260px / 演化页 260px / 行动时间线 230px 各自硬编码，观感不齐。
@@ -227,8 +350,15 @@ html[data-density="comfortable"] {
   --content-pad-y: 24px;
 }
 
-/* ===== 内容宽度模式 ===== */
-html[data-content-mode="wide"] { --content-max-w: none; }
+/* ===== 内容宽度模式 =====
+     「全宽」模式下三档页面宽度全部失效（含 PageShell 的本地覆写），
+     fullbleed 页（沙盘/拓扑画布）本就不受限宽影响。 */
+html[data-content-mode="wide"] {
+  --page-w-form: none;
+  --page-w-content: none;
+  --page-w-wide: none;
+  --content-max-w: none;
+}
 
 /* ===== 深色主题（DSH 同款）===== */
 [data-theme="dark"] {
@@ -275,6 +405,52 @@ html[data-content-mode="wide"] { --content-max-w: none; }
   /* 语义色浅底（深色：改为深色底，避免深色主题下提醒卡片/标签仍是浅色刺眼） */
   --state-danger-bg: color-mix(in srgb, var(--state-error) 16%, transparent);
   --state-success-bg: color-mix(in srgb, var(--state-success) 14%, transparent);
+
+  /* 新首页专用令牌（深色：保留 M4 地图仪表盘的深蓝黑观感，与全局深色一致） */
+  --hm-page-bg: #0b1220;
+  --hm-panel: rgba(13, 20, 36, 0.85);
+  --hm-panel-strong: rgba(13, 20, 36, 0.94);
+  --hm-border: rgba(120, 160, 255, 0.25);
+  --hm-border-soft: rgba(120, 160, 255, 0.18);
+  --hm-border-strong: rgba(120, 160, 255, 0.4);
+  --hm-text: #e8f0ff;
+  --hm-text-soft: #cfe0ff;
+  --hm-text-dim: #9db8e8;
+  --hm-text-faint: #6b7fa8;
+  --hm-gold: #ffd45c;
+  --hm-gold-soft: #ffe9a8;
+  --hm-blue: #8fb1ff;
+  --hm-green: #52d68a;
+  --hm-red: #ff6b6b;
+  --hm-red-soft: #ff8f8f;
+  --hm-amber: #ffb84d;
+  --hm-orange: #ff8f6b;
+  --hm-map-bg-0: #152238;
+  --hm-map-bg-1: #0b1220;
+  --hm-map-fill: rgba(77, 159, 255, 0.10);
+  --hm-map-stroke: rgba(120, 160, 255, 0.55);
+  --hm-road: rgba(160, 180, 210, 0.4);
+  --hm-building: rgba(200, 210, 235, 0.55);
+  --hm-home: rgba(255, 212, 92, 0.55);
+  --hm-home-stroke: rgba(255, 212, 92, 0.9);
+  --hm-trail: #ffd45c;
+  /* ===== 地图制图（深色）===== */
+  --hm-grid: rgba(120, 160, 255, 0.10);
+  --hm-region-settlement: rgba(255, 212, 92, 0.13);
+  --hm-region-settlement-stroke: rgba(255, 212, 92, 0.50);
+  --hm-region-nature: rgba(120, 220, 160, 0.12);
+  --hm-region-nature-stroke: rgba(110, 210, 155, 0.45);
+  --hm-region-water: rgba(90, 165, 255, 0.16);
+  --hm-region-water-stroke: rgba(120, 185, 255, 0.50);
+  --hm-region-realm: rgba(160, 175, 205, 0.09);
+  --hm-region-realm-stroke: rgba(150, 170, 205, 0.42);
+  --hm-road-casing: rgba(0, 0, 0, 0.55);
+  --hm-road-fill: rgba(150, 168, 196, 0.70);
+  --hm-farm: #7fc48a;
+  --hm-npc-ring: rgba(11, 18, 32, 0.95);
+  --hm-building-stroke: rgba(11, 18, 32, 0.7);
+  --hm-dot: #5a6b85;
+  --hm-season-text: #eaf3ff;
 
   /* Element Plus 覆盖（深色） */
   --el-bg-color: var(--bg-layer-1);

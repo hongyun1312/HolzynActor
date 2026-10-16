@@ -562,6 +562,16 @@ public class ReflectionService {
         if (all.isEmpty()) {
             return List.of();
         }
+        // P0-02 隔离（不吸收兜底数据学习）：反思证据排除程序化兜底/预算耗尽降级/决策缺失产出的记忆
+        // （FALLBACK_PROGRAMMATIC/BUDGET_EXHAUSTED/DECISION_MISSING）——不得把「系统编的经历」
+        // 当作角色真实经历归因（审计 P0-02 影响面 2；空值=旧数据视为 AI，不隔离）
+        all = all.stream()
+                .filter(m -> com.holzyn.actor.domain.agent.runtime.DecisionSources.isAbsorbableByLearning(
+                        com.holzyn.actor.domain.agent.runtime.DecisionSources.parse(m.getDecisionSource())))
+                .collect(java.util.stream.Collectors.toList());
+        if (all.isEmpty()) {
+            return List.of();
+        }
         // staleness 标记（依赖 AgentMemoryService 内部逻辑不可达 → 用世界时钟换算简化判定：
         // 高重要 + 距上次访问超 N 游戏日）
         Long nowGameHour = worldClockService.gameHourAt(projectId, java.time.LocalDateTime.now());

@@ -1,48 +1,90 @@
-# ---- Java / Maven ----
-backend/target/
-*.class
-*.jar
-!.mvn/wrapper/maven-wrapper.jar
-
-# ---- Node / Vite ----
+# ---- HolzynActor 模块 ----
+# 构建/运行产物（合�?static 产物保留入库，对�?web �?JAR 部署方式�?
+backend/target/*
+# 2026-09-28 决定：jar 不再入库（克隆后本地 mvn package 即可），其余 target 产物仍忽略
 frontend/node_modules/
 frontend/dist/
 debug-frontend/node_modules/
 debug-frontend/dist/
-
-# ---- 本地数据与上传（H2 数据库/上传文件不入库；首次启动自动创建）----
-data/
+workspace/out/
+# 运行日志与上�?
+backend/*.log
+backend/*.err
+backend/uploads/
 uploads/
+# 本地数据库（H2 文件库）：2026-09-28 决定主库 data/holzyn-actor.mv.db 不再入库（数据随运行环境，克隆零数据启动）；
+# 仅忽�?H2 瞬态文件（文件�?跟踪日志/临时库）与旧 backend/data 目录
+data/holzyn-actor.mv.db
+data/*.lock.db
+data/*.trace.db
+data/*.lock
+data/*.mv.db.lock
+data/*.temp.mv.db
+# AI 调用详情 JSON 文件输出�?026-08-24：detail_json 同步�?<data-dir>/ai-call-logs/，运行时产物不入库）
+data/ai-call-logs/
+# 工作流世界观生成检查点�?026-09-03 M2 冒烟补登：data/worldgen/<project>/<task>/ 运行时产物不入库�?
+data/worldgen/
+# LangChain4j 向量库（2026-09-05 AI 接入层重�?M3：data/vector-store/<project>/embeddings.json 运行时产物不入库�?
+# 克隆即用不携带，重启从库内旧 embedding 列一次性导入）
+data/vector-store/
 backend/data/
-*.mv.db
-*.mv.db.trace
-*.trace.db
-*.lock.db
-
-# ---- 构建进 jar 的前端产物（由 build.bat 从 frontend/dist 同步生成，不入库）----
-backend/src/main/resources/static/
-
-# ---- 环境与密钥（禁止入库）----
+frontend/*.log
+frontend/*.err
+# 环境文件
+*.local
+# 本地环境变量（含 AES 加密密钥/远程库地址，禁止入库）
 .env
-.env.local
-.env.*.local
 backend/.env
+# 浏览器回归验证脚本依赖与输出
+tests/browser-verify/node_modules/
+tests/browser-verify/*.log
+tests/browser-verify/*.png
 
-# ---- 日志 / 临时产物 ----
-*.log
+
+# ???/???????????
+backend/last-registered-user.txt
+backend/test.txt
+docs/test.txt
+
+# ????/????????????? tests/e2e ? tests/browser-verify ? node_modules?
+node_modules/
 *.pid
-logs/
+
+# IDE ??????????
+.idea/
+*.class
+tests/cfr-tmp/
+
+# 冒烟测试产物（本地运行调试，不入库）
+backend/run-smoke.bat
+backend/smoke-run.log
+backend/smoke-run.err.log
+backend/smoke.pid
+frontend/run-smoke-frontend.bat
+frontend/smoke-frontend.log
+frontend/smoke.pid
+# 主人测试/临时文件目录
+putin_docs/
+# 长跑评测工作区（提示�?工具脚本/长跑产物；本地评测用，测试产物不入库�?026-09-21 起忽略）
+测试/
+# 鸿蒙字体/图标素材源包（约 52MB，解压产物已入库 assets，源 zip 不入库）
+docs/public/
+
 backend/logs/
-tmp/
+# O6 G1a�?026-09-21）：G1 之前的旧世界数据库本地归档（数据备份用，体积大不入库�?
+# 2026-09-28 起基线库不再随仓（克隆后本地初始化）；
+data/archive/
+# AI ��־����Ŀ¼ logs/��HOLOZYN_ACTOR_LOG_FILE ���в������⣩
+logs/
+
+# 开发脚本临时产物（glb_bounds/map_check 等输出）
+/tmp/
 __pycache__/
 
-# ---- IDE / 系统 ----
-.idea/
-*.iml
-.vscode/
-.DS_Store
-Thumbs.db
 # ---- 桌面端（Electron）----
 desktop/node_modules/
 desktop/release/
 packaging/runtime/
+
+# ---- 本地恢复临时目录（不入库）----
+.restore_tmp/

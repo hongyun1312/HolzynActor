@@ -43,6 +43,18 @@ public interface ActorMesoMembershipRepository extends JpaRepository<ActorMesoMe
     /** 某角色活跃所属关系 */
     List<ActorMesoMembership> findByProjectIdAndActorRefAndStatus(Long projectId, String actorRef, String status);
 
+    /**
+     * 某项目全部「指定状态」成员关系（UI V3.0 关系工作台新增：一次批量取全项目在组成员，
+     * 用于按世界内核真实归属给关系拓扑节点分圈，避免逐角色查询的 N+1）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param status 状态（active 在组 / left 离开 / expelled 被逐）
+     *
+     * @return 成员关系列表（按 id 升序，结果确定性）
+     */
+    List<ActorMesoMembership> findByProjectIdAndStatusOrderByIdAsc(Long projectId, String status);
+
     /** 幂等查（uk 约束） */
     Optional<ActorMesoMembership> findByGroupIdAndActorRef(Long groupId, String actorRef);
 

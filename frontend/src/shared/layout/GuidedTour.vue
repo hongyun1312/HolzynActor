@@ -71,8 +71,14 @@ const TOUR_STEPS = [
   {
     target: '[data-tour="pinned-nav"]',
     title: '主工作区固定在顶部',
-    desc: '「世界地图」与「对话」是最高频的两个入口，固定在侧栏最上方，任何页面都能一键回到。',
+    desc: '「世界地图」与「对话」是浮生界面最高频的两个入口，固定在侧栏最上方，任何页面都能一键回到。',
     placement: 'right'
+  },
+  {
+    target: '[data-tour="interface-switch"]',
+    title: '浮生 ⇄ 对谈：两个独立界面',
+    desc: '左上角世界名右侧可在「浮生」（世界运行 · 角色 · 记忆 · 观测 · 设置）与「对谈」（与角色对谈 · 世界静止）两个界面间切换，各自拥有完全独立的侧边栏。',
+    placement: 'bottom'
   },
   {
     target: '[data-tour="topbar-icons"]',

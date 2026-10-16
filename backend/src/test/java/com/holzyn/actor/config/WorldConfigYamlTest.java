@@ -59,6 +59,23 @@ class WorldConfigYamlTest {
     }
 
     @Test
+    @DisplayName("P0-01 根治：tick 队列容量默认 604800（7 游戏天）且可被环境变量覆盖")
+    void tickQueueCapacityResolvesAndOverridable() throws IOException {
+        // 键路径以生产读取方式为准：WorldEngine @Value 读 holzyn.actor.world.tick-queue-capacity-game-seconds
+        assertEquals(604800, Integer.parseInt(strAt(env(), "holzyn.actor.world.tick-queue-capacity-game-seconds")),
+                "默认 604800=7 游戏天（rate=24 覆盖约 7 真实小时离线）");
+        System.setProperty("HOLOZYN_ACTOR_WORLD_TICK_QUEUE_CAPACITY_GAME_SECONDS", "86400");
+        try {
+            assertEquals(86400, Integer.parseInt(strAt(env(), "holzyn.actor.world.tick-queue-capacity-game-seconds")),
+                    "环境变量未覆盖 tick-queue-capacity-game-seconds");
+        } finally {
+            System.clearProperty("HOLOZYN_ACTOR_WORLD_TICK_QUEUE_CAPACITY_GAME_SECONDS");
+        }
+        assertEquals(604800, Integer.parseInt(strAt(env(), "holzyn.actor.world.tick-queue-capacity-game-seconds")),
+                "清理后应回到默认 604800");
+    }
+
+    @Test
     @DisplayName("P0-1：dispatch-wait-seconds 默认 1100（180→1100 收口），且可被环境变量覆盖")
     void dispatchWaitSecondsResolvedAndOverridable() throws IOException {
         // 键路径以生产读取方式为准：WorldEngine @Value 读 holzyn.actor.world.dispatch-wait-seconds

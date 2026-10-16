@@ -17,13 +17,15 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import * as echarts from 'echarts'
 
 /**
  * ECharts 轻量封装。
  * - 传入 option（响应式）自动 setOption
  * - ResizeObserver 自适应容器
  * - 卸载释放 GPU/实例
+ * - **echarts 按需加载**（V2.0 §8.3）：静态 `import 'echarts'` 会让每个引用本组件的页面
+ *   首屏无条件下载约 1.1 MB（gzip 361 KB）——实测沙盘直落就吃掉了 360 KB。
+ *   改为首次真正要画时再 `import()`：首屏不含 echarts，图表页只多一次带缓存的异步请求。
  */
 const props = defineProps({
   option: { type: Object, required: true },
@@ -33,14 +35,24 @@ const props = defineProps({
 const el = ref(null)
 let chart = null
 let resizeObserver = null
+/** echarts 模块命名空间（动态 import 的结果，全局共用一次加载） */
+let echartsLib = null
+
+async function ensureEcharts() {
+  if (!echartsLib) echartsLib = await import('echarts')
+  return echartsLib
+}
 
 function render() {
   if (!chart) return
   chart.setOption(props.option, true)
 }
 
-onMounted(() => {
-  chart = echarts.init(el.value, null, { renderer: 'canvas' })
+onMounted(async () => {
+  const ec = await ensureEcharts()
+  // 异步等待期间组件可能已卸载（快速切页）：此时不得再 init，否则画布泄漏
+  if (!el.value || !ec) return
+  chart = ec.init(el.value, null, { renderer: 'canvas' })
   render()
   resizeObserver = new ResizeObserver(() => chart && chart.resize())
   resizeObserver.observe(el.value)

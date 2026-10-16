@@ -288,7 +288,7 @@
               <el-icon><HIcon name="Delete" /></el-icon>
             </el-button>
           </div>
-          <el-empty v-if="!fieldDictDialog.rows[grp.field].length" description="暂无，可「新增」或「AI 拟定」" :image-size="40" />
+          <EmptyState v-if="!fieldDictDialog.rows[grp.field].length" size="inline" title="这一组还没有词条——可「新增」或让 AI 拟定" />
         </div>
       </div>
       <template #footer>
@@ -461,6 +461,8 @@ import {
   fetchWorldLocations
 } from '@/shared/api'
 import PageHeader from '@/shared/layout/PageHeader.vue'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 
 const props = defineProps({ projectId: { type: [String, Number], default: null } })
 const route = useRoute()

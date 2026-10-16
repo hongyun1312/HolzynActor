@@ -66,7 +66,7 @@
               </div>
               <div class="lg-tree-hint">点击任意节点切换聚焦视角（重新加载该角色三代家族树）</div>
             </template>
-            <el-empty v-else description="该角色暂无谱系信息（未登记婚姻/亲子边）" :image-size="60" />
+            <EmptyState v-else size="inline" title="该角色暂无谱系信息（未登记婚姻/亲子边）" />
           </el-card>
 
           <!-- 谱系边明细 -->
@@ -108,7 +108,7 @@
                 </template>
               </el-table-column>
             </el-table>
-            <el-empty v-else description="暂无谱系边" :image-size="50" />
+            <EmptyState v-else size="inline" title="暂无谱系边——登记婚姻 / 亲子关系后出现" />
           </el-card>
         </el-col>
 
@@ -166,12 +166,12 @@
               </div>
               <div v-else class="sub-text">（无表观印记——出生后 90 游戏日内父母经历创伤/饥荒/孤寂/丰裕才会留下）</div>
             </template>
-            <el-empty v-else description="选择角色查看基因档案" :image-size="60" />
+            <EmptyState v-else size="inline" title="选择左侧角色可查看基因档案" />
           </el-card>
         </el-col>
       </el-row>
     </template>
-    <el-empty v-else description="请选择角色" />
+    <EmptyState v-else size="page" icon="ic_public_albums" title="请选择一位角色" desc="左侧列出本项目的全部角色；选中后查看三代家族树、谱系边与基因档案。" />
   </div>
 </template>
 
@@ -185,6 +185,8 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { fetchCharacters, fetchLineageTree, fetchGenome } from '@/shared/api'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 
 const route = useRoute()
 const projectId = computed(() => Number(route.params.id))

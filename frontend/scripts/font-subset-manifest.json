@@ -1,0 +1,16 @@
+{
+  "weights": {
+    "400": {
+      "files": 33,
+      "bytes": 4539632,
+      "firstSliceBytes": 31384
+    },
+    "700": {
+      "files": 33,
+      "bytes": 4613728,
+      "firstSliceBytes": 33816
+    }
+  },
+  "sliceCount": 33,
+  "totalBytes": 9153360
+}

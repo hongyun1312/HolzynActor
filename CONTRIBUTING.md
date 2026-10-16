@@ -29,13 +29,13 @@ build.bat
 
 :: 2) 运行（本地 H2 数据库自动创建在 <仓库>\data）
 run.bat
-:: 浏览器打开 http://localhost:8080（首次建库自动注入示例世界「青禾村」）
+:: 浏览器打开 http://localhost:18080（首次建库自动注入示例世界「青禾村」）
 
 :: 桌面端（可选）：一键构建安装包
 desktop\build-desktop.bat
 ```
 
-开发联调：后端 `mvn -f backend/pom.xml spring-boot:run`；前端 `cd frontend && npm run dev`（Vite 代理 /api → 8080）。
+开发联调：后端 `mvn -f backend/pom.xml spring-boot:run`；前端 `cd frontend && npm run dev`（Vite 代理 /api → 18080）。
 
 ## 仓库结构
 

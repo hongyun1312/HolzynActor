@@ -402,6 +402,59 @@ public class PromptTemplateService implements ApplicationRunner {
      */
     public static final String CODE_NANOJEV_AB_JUDGE = "nanojev_ab_judge";
 
+    /**
+     * 项目级 AI 助手·工具决策（assistant_tool，jsonMode 结构化输出）——
+     * 助手工具循环的「模型选工具」一步：输出 {"tool_calls":[...]} 或 {"no_tool":true}。
+     */
+    public static final String CODE_ASSISTANT_TOOL = "assistant_tool";
+
+    /**
+     * 项目级 AI 助手·最终回答（assistant_chat，PLAIN_TEXT 流式正文）——
+     * 工具结果回喂后的最终回答（叙事/事实双模式），正文直接输出、无 JSON 外壳。
+     */
+    public static final String CODE_ASSISTANT_CHAT = "assistant_chat";
+
+    /**
+     * 对谈·单聊回复（dialogue_reply，PLAIN_TEXT 流式正文）——
+     * 对谈模式的单聊回复（与「浮生」同级的世界静止聊天）。上下文装配见
+     * DialogueContextAssembler（L0 稳定 system + L1 动态 user）；本模板为版本留痕
+     * 与「设置-提示词模板」可见（对齐 assistant_* 先例）。
+     */
+    public static final String CODE_DIALOGUE_REPLY = "dialogue_reply";
+
+    /**
+     * 对谈·AI 动态开场白（dialogue_greeting，PLAIN_TEXT 正文）——
+     * 新会话角色第一句话（≤80 字，第一人称不代答）。同上为版本留痕模板。
+     */
+    public static final String CODE_DIALOGUE_GREETING = "dialogue_greeting";
+
+    /**
+     * 对谈·超窗自动摘要（dialogue_summary，PLAIN_TEXT 正文）——
+     * M4 长对话滚动窗口：超窗前段折叠为 AI 摘要（与既有摘要合并，≤300 字），
+     * 缓存到会话 summary 字段，装配时以【对话摘要】注入。运行时由
+     * DialogueSummaryService 组装（既有摘要 + 新增超窗批），本模板为版本留痕模板。
+     */
+    public static final String CODE_DIALOGUE_SUMMARY = "dialogue_summary";
+
+    /**
+     * 对谈·群聊逐角色回复（dialogue_group_reply，PLAIN_TEXT 流式正文）——
+     * M5 群聊：每回应独立 AI 调用、复用单聊流式正文形态（设计 §6.4 串行流式；
+     * 实施抓修：设计稿 §8.3 拟 DIALOG_JSON 整轮契约，M5 编排决策为确定性全员依次 +
+     * 逐角色独立调用 → PLAIN_TEXT 流式正文，DIALOG_JSON 留待 AI 编排模式扩展）。
+     * 上下文装配见 DialogueContextAssembler.composeGroup（本人卡 + 场景段 + 【对家】+ 群聊历史），
+     * 本模板为版本留痕模板。
+     */
+    public static final String CODE_DIALOGUE_GROUP_REPLY = "dialogue_group_reply";
+
+    /**
+     * 对谈·沉淀（dialogue_consolidation，SCHEMA_JSON）——
+     * M6 沉淀收尾：从会话最近对话中抽取每位对谈角色的关系 delta（好感/信任/阶段/备注/状态摘要）
+     * 与 NPC 记忆要点（与玩家的活动/共识/承诺）。运行时由 DialogueConsolidationService 组装
+     * （会话角色清单 + 当前关系 + 最近对话窗），jsonMode=true 只输出 relations 数组；
+     * 本模板为版本留痕与「设置-提示词模板」可见。
+     */
+    public static final String CODE_DIALOGUE_CONSOLIDATION = "dialogue_consolidation";
+
     /** 内置模板归属用户标记 */
     private static final long BUILTIN_USER_ID = 0L;
 
@@ -3577,6 +3630,122 @@ public class PromptTemplateService implements ApplicationRunner {
                 —— 世界设定 ——
                 {{world_setting}}
                 """, "你是世界设定提炼师，把下方世界设定浓缩成一段 300-500 字的常识性叙述，只输出正文。"));
+        // ===== 项目级 AI 助手（2026-10-10 第 50 次 · M1+M2 基础对话 + 世界/角色/宏观讲解 + 双模式）=====
+        // assistant_tool：工具决策一步（jsonMode 结构化）——模型判断是否需要查询数据并声明工具调用；
+        // 运行时由 AssistantChatService 动态组装 system prompt（含工具清单 JSON 与模式约束），
+        // 本模板为版本留痕与「设置-提示词模板」可见（对齐 PromptSpecRegistry 登记 assistant_tool）。
+        map.put(CODE_ASSISTANT_TOOL, new BuiltinDef("项目级 AI 助手-工具决策（结构化）",
+                """
+                你是 HolzynActor 的项目级 AI 助手「世界与你之间的对话入口」的工具决策器。
+                根据【可用工具】判断是否需要查询数据：需要 → 只输出 JSON：{"tool_calls":[{"name":"工具名","arguments":{参数}}]}；
+                不需要（闲聊/已有足够信息）→ 只输出 JSON：{"no_tool":true}。不要输出任何其他文字。
+                如果前一轮的工具结果已包含所需数据，请直接输出 {"no_tool":true} 并据此作答，不要重复调用已查询过的工具。
+                工具清单由运行时注入（world_overview/character_state/location_overview/character_profile/
+                macro_overview/recent_events/project_guide/search_world_knowledge/search_project_docs）。
+                """, "你是项目级 AI 助手的工具决策器：判断是否需要查询世界/知识/文档数据，只输出 JSON 工具调用声明。"));
+        // assistant_chat：最终回答（PLAIN_TEXT 流式正文）——工具结果回喂后按当前模式（叙事/事实）组织回答。
+        map.put(CODE_ASSISTANT_CHAT, new BuiltinDef("项目级 AI 助手-最终回答（叙事/事实双模式）",
+                """
+                你是 HolzynActor 的项目级 AI 助手「世界与你之间的对话入口」。
+                【零 OOC 铁律】你是元层工具：不进入世界叙事体系，角色不感知你；你只读查询、绝不修改世界状态。
+                【叙事模式】以世界叙事组织语言，事实为骨、文学为肉：数值必须来自工具结果，不得编造；
+                角色用词与其性格一致；时间用游戏时间；数据缺失明确说「暂无相关记录」。
+                【严格事实模式】逐项引用数据源、输出结构化字段与数值并标注来源；不输出精确坐标。
+                直接输出回答正文（不输出 JSON 外壳，末尾不附加「来源：」清单）。
+                """, "你是项目级 AI 助手：按当前模式（叙事/事实）直接输出回答正文，事实为骨、文学为肉、零 OOC。"));
+        // ===== 对谈模式（2026-10-12 第 54 次 · M1 对谈地基）=====
+        // dialogue_reply：单聊回复（PLAIN_TEXT 流式正文）——「像真人一样」的促膝长谈；
+        // 运行时由 DialogueContextAssembler 动态组装（L0 稳定 system + L1 动态 user），
+        // 本模板为版本留痕与「设置-提示词模板」可见（对齐 assistant_* 先例）。
+        map.put(CODE_DIALOGUE_REPLY, new BuiltinDef("对谈-单聊回复（流式正文）",
+                """
+                你是{{character_name}}，正在与{{player_name}}促膝长谈。世界已静止于此刻。
+                【角色铁律】你是{{character_name}}，绝不能跳出角色。以第一人称说话，只说自己想说的话：
+                1. 不替其他角色（或玩家）发言、不代答、不转述或标注其他角色的台词；
+                2. 只回复这一轮，不要替对方做决定，不要跳出角色。
+                【世界观】{{world_context}}
+                【我的身份与处境】{{identity_context}}
+                【与{{player_name}}的关系】{{relation_context}}
+                【冻结时刻】{{frozen_context}}
+                【相关记忆】{{memory_context}}
+                【对话历史】
+                {{history}}
+                【本轮】{{player_name}}对你说：{{user_message}}
+                请直接以{{character_name}}的口吻回复正文（第一人称，像真人一样自然回应）：
+                1. 【回复克制·务必简短】像真人聊天一样，一般 1~2 句话（约 60~120 字），动作/神态描写从简或省略，
+                不要展开长篇、不要复述前文；确有要事再稍长；
+                2. 不要输出任何 JSON 外壳、不要标注角色名、不要替{{player_name}}说话。
+                """, "你是对谈中的角色：以第一人称自然回应玩家，回复务必简短（1~2 句话）、像真人促膝长谈，绝不跳出角色。"));
+        // dialogue_greeting：AI 动态开场白（PLAIN_TEXT 正文）——新会话角色第一句话（≤80 字）。
+        map.put(CODE_DIALOGUE_GREETING, new BuiltinDef("对谈-AI 动态开场白",
+                """
+                你是{{character_name}}，正在与{{player_name}}促膝长谈。世界已静止于此刻。
+                【角色铁律】你是{{character_name}}，绝不能跳出角色。以第一人称说话，只说自己想说的话。
+                【世界观】{{world_context}}
+                【我的身份与处境】{{identity_context}}
+                【与{{player_name}}的关系】{{relation_context}}
+                【冻结时刻】{{frozen_context}}
+                【场景】{{player_name}}来到了你身边，想与你聊聊天。
+                请以{{character_name}}的口吻说一句开场白（第一人称，不超过 80 字，自然亲切，像真人见面打招呼），
+                不要输出任何 JSON 外壳、不要标注角色名。
+                """, "你是对谈中的角色：对来到身边的玩家说一句自然亲切的开场白（第一人称，≤80 字）。"));
+        // dialogue_summary（M4 长对话滚动窗口自动摘要）：超窗前段折叠为 AI 摘要——
+        // 忠实浓缩前情（关键事实/约定/承诺/情绪），与既有摘要合并；本模板为版本留痕与
+        // 「设置-提示词模板」可见（对齐 dialogue_reply/greeting 先例），运行时由
+        // DialogueSummaryService 组装输入（既有摘要 + 新增超窗批）。
+        map.put(CODE_DIALOGUE_SUMMARY, new BuiltinDef("对谈-超窗自动摘要",
+                """
+                你是对谈摘要记录员：把对话内容浓缩成简洁的中文摘要（保留关键事实、约定、承诺与情绪变化），
+                作为后续对话的前置记忆使用。只输出摘要正文，不要任何前后缀或解释。
+                【既有摘要】{{existing_summary}}
+                【新增对话】{{new_messages}}
+                请输出合并既有摘要后的完整摘要（≤300 字）。
+                """, "你是对谈摘要记录员：把超窗对话浓缩成简洁中文摘要（≤300 字），只输出摘要正文。"));
+        // dialogue_group_reply（M5 群聊逐角色回复）：每回应独立 AI 调用、复用单聊流式正文形态
+        // （实施抓修：设计稿 §8.3 拟 DIALOG_JSON 整轮契约 → PLAIN_TEXT 流式正文，见常量注释）。
+        // 运行时由 DialogueGroupChatService 装配（composeGroup），本模板为版本留痕与
+        // 「设置-提示词模板」可见（对齐 dialogue_reply/greeting 先例）。
+        map.put(CODE_DIALOGUE_GROUP_REPLY, new BuiltinDef("对谈-群聊逐角色回复（流式正文）",
+                """
+                你是{{character_name}}，正身处一场在场多人的对谈。世界已静止于此刻。
+                【角色铁律】你是{{character_name}}，绝不能跳出角色。以第一人称说话，只说自己想说的话：
+                1. 不替其他角色（或玩家）发言、不代答、不转述或标注其他角色的台词；
+                2. 只回复这一轮，不要替对方做决定，不要跳出角色。
+                【世界观】{{world_context}}
+                【我的身份与处境】{{identity_context}}
+                【与{{player_name}}的关系】{{relation_context}}
+                【场景】{{scene_context}}
+                【相关记忆】{{memory_context}}
+                【对家】{{counterpart_context}}
+                【对话历史】
+                {{history}}
+                【本轮】{{player_name}}对大家说：{{user_message}}
+                请以{{character_name}}的口吻回应（第一人称，像真人一样自然、简短地接话，一般一两句话、尽量不超过 100 字），
+                可以回应{{player_name}}，也可以接刚才其他角色的话，但不要替其他角色或{{player_name}}说话，
+                不要输出任何 JSON 外壳、不要标注角色名。
+                """, "你是群聊中的角色：像真人一样简短自然地接话（可回应玩家，也可回应其他角色），绝不跳出角色。"));
+        // dialogue_consolidation（M6 沉淀收尾）：关系 delta + 记忆要点抽取——
+        // 「沉淀时写什么」是克制的严谨判定：关系变化宁缺毋滥（无明显变化用 0）、记忆要点只写
+        // 明确发生的活动/共识/承诺（1~3 条）。运行时由 DialogueConsolidationService 组装
+        // （会话角色清单 + 当前关系 + 最近对话窗），jsonMode=true 只输出 relations 数组；
+        // 本模板为版本留痕与「设置-提示词模板」可见。
+        map.put(CODE_DIALOGUE_CONSOLIDATION, new BuiltinDef("对谈-沉淀（关系 delta + 记忆要点）",
+                """
+                你是对谈沉淀记录员：从玩家与对谈角色的对话中，为每位对谈角色判定关系变化与值得记住的记忆要点。
+                【对谈角色】
+                {{characters_context}}
+                【玩家】{{player_name}}
+                【最近对话】
+                {{recent_dialog}}
+                【任务】
+                从这段对话中，为每位对谈角色抽取关系变化与记忆要点，只输出 JSON：
+                {"relations":[{"character_ref":"角色引用","affinity_delta":整数,"trust_delta":整数,"stage":"新关系阶段或保持","note":"备注或省略","state_summary":"跨会话关系状态摘要(≤80字)","memory_points":["要点1","要点2"]}]}
+                约束：
+                1. affinity_delta/trust_delta 为 -20~20 的整数，无明显变化用 0，不要臆测或大幅波动；
+                2. stage 无变化则不填（保持现状）；note/state_summary 无内容可省略；
+                3. memory_points 只写明确发生的与玩家的活动/共识/承诺（每条 ≤60 字，1~3 条），宁缺毋滥；
+                4. 无实质变化时 relations 可为空数组；只输出 JSON，不要任何其他文字。
+                """, "你是对谈沉淀记录员：克制地判定每位对谈角色的关系变化与记忆要点，只输出 JSON。"));
         return map;
     }
 

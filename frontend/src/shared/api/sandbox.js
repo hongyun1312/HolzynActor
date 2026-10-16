@@ -27,20 +27,6 @@ import http from './http'
 export const fetchSandboxOverview = (projectId) => http.get(`/api/projects/${projectId}/sandbox/overview`)
 
 /**
- * 沙盘场景列表（只读）。
- *
- * @param {number|string} projectId 项目 ID
- */
-export const fetchSandboxScenes = (projectId) => http.get(`/api/projects/${projectId}/sandbox/scenes`)
-
-/**
- * NPC 沙盘状态列表（只读，读取前同步状态行）。
- *
- * @param {number|string} projectId 项目 ID
- */
-export const fetchSandboxStates = (projectId) => http.get(`/api/projects/${projectId}/sandbox/states`)
-
-/**
  * 记录「上次所在项目」（应用启动直达上次项目；只写不清，返回画廊不清空）。
  *
  * @param {number|string} projectId 项目 ID
@@ -115,102 +101,6 @@ export const sandboxInterveneClock = (projectId, data) =>
  */
 export const sandboxSwitchWeather = (projectId, condition) =>
   http.post(`/api/projects/${projectId}/sandbox/weather`, { condition })
-
-// ==================== S3：资产摆放（actor_scene_placement CRUD） ====================
-
-/**
- * 资产摆放-按场景列表（附资产登记表解析：资产名/分类/GLB 路径）。
- *
- * @param {number|string} projectId 项目 ID
- *
- * @param {number|string} sceneId 场景 ID
- */
-export const fetchScenePlacements = (projectId, sceneId) =>
-  http.get(`/api/projects/${projectId}/sandbox/scenes/${sceneId}/placements`)
-
-/**
- * 资产摆放-创建（asset_id 必填；位置/缩放/朝向可缺省）。
- *
- * @param {number|string} projectId 项目 ID
- *
- * @param {number|string} sceneId 场景 ID
- * scaleX?: number, scaleY?: number, scaleZ?: number,
- * rotX?: number, rotY?: number, rotZ?: number, sortOrder?: number}} data 摆放请求
- */
-export const createScenePlacement = (projectId, sceneId, data) =>
-  http.post(`/api/projects/${projectId}/sandbox/scenes/${sceneId}/placements`, data)
-
-/**
- * 资产摆放-更新（仅覆盖非空字段）。
- *
- * @param {number|string} projectId 项目 ID
- *
- * @param {number|string} placementId 摆放记录 ID
- *
- * @param {object} data 同创建（可只传需修改字段）
- *
- * @returns {Promise<object>} 更新后 ScenePlacementVO
- */
-export const updateScenePlacement = (projectId, placementId, data) =>
-  http.put(`/api/projects/${projectId}/sandbox/placements/${placementId}`, data)
-
-/**
- * 资产摆放-删除。
- *
- * @param {number|string} projectId 项目 ID
- *
- * @param {number|string} placementId 摆放记录 ID
- */
-export const deleteScenePlacement = (projectId, placementId) =>
-  http.delete(`/api/projects/${projectId}/sandbox/placements/${placementId}`)
-
-// ==================== S3 补全：资产数据包 + 场景预设 ====================
-
-/**
- * 资产数据包列表（扫描 uploads/scene-assets/ 下全部 manifest）。
- *
- * @param {number|string} projectId 项目 ID
- */
-export const fetchSandboxPacks = (projectId) => http.get(`/api/projects/${projectId}/sandbox/packs`)
-
-/**
- * 资产清单（含全局内置包 project_id=0 与项目级；可按 packId 过滤）。
- *
- * @param {number|string} projectId 项目 ID
- *
- * @param {string} [packId] 可选：数据包 ID 过滤
- */
-export const fetchSandboxAssets = (projectId, packId) =>
-  http.get(`/api/projects/${projectId}/sandbox/assets`, { params: { packId } })
-
-/**
- * 导入资产数据包（manifest → actor_sandbox_asset 登记，project_id=0 全局；幂等可重跑）。
- *
- * @param {number|string} projectId 项目 ID
- *
- * @param {string} packId 数据包 ID（目录名，如 sandbox-xianxia-v1）
- */
-export const importSandboxAssets = (projectId, packId) =>
-  http.post(`/api/projects/${projectId}/sandbox/assets/import`, { packId })
-
-/**
- * 内置场景预设列表（classpath:scene-presets/*.json）。
- *
- * @param {number|string} projectId 项目 ID
- */
-export const fetchSandboxPresets = (projectId) => http.get(`/api/projects/${projectId}/sandbox/presets`)
-
-/**
- * 应用内置场景预设到指定场景（校验 → 写 layout_json + 重建摆放表；幂等可重跑）。
- *
- * @param {number|string} projectId 项目 ID
- *
- * @param {number|string} sceneId 场景 ID
- *
- * @param {string} presetName 预设名（如 qinghe-village-v1）
- */
-export const applySandboxPreset = (projectId, sceneId, presetName) =>
-  http.post(`/api/projects/${projectId}/sandbox/scenes/${sceneId}/preset`, { presetName })
 
 // ====================：NPC 内部状态（actor_npc_state 读接口） ====================
 

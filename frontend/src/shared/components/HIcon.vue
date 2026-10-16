@@ -73,6 +73,11 @@ const innerSvg = computed(() => {
   viewBox.value = vb ? vb[1] : '0 0 24 24'
   const uid = `h${++uidSeed}`
   return m[2]
+    // 剔除源 SVG 自带的 <title>/<desc>：它们是「Public/ic_public_xxx」这类路径样文本，
+    // 经 v-html 渲染成原生 tooltip，悬停任何带图标的按钮都会冒出来、盖过按钮自身的
+    // title（功能名）。图标语义已由外层按钮 title / aria-label 承担，这里直接移除。
+    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/gi, '')
+    .replace(/<desc\b[^>]*>[\s\S]*?<\/desc>/gi, '')
     // 给所有 id / 引用加实例后缀，避免多图标共存时引用错乱。
     // ⚠ 关键：xlink:href 与 href 必须在同一条正则里处理（(xlink:href|href)）。
     // 若分两条写，第二条 /href="#..."/ 会命中已改写的 xlink:href="#...-h1" 中的 href 子串，

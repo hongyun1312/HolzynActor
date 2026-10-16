@@ -31,7 +31,7 @@ import java.nio.file.Paths;
  * <p>职责：把 {@code /uploads/**} URL 映射到上传根目录（{@code holzyn.actor.upload-dir}，
  * 默认仓库根 uploads/，由 {@code DataDirResolver} 统一重定向），使资产数据包
  * （uploads/scene-assets/&lt;pack&gt;/models/*.glb 等）可直接经 HTTP 加载——
- * 前端 dev 经 Vite 代理 {@code /uploads → 8080}，生产 jar 形态同源直接访问。</p>
+ * 前端 dev 经 Vite 代理 {@code /uploads → 18080}，生产 jar 形态同源直接访问。</p>
  * <p>背景：世界沙盘 S5 设计「文生 3D 资产目录接入（uploads/scene-assets + actor_scene_asset）」；
  * 本轮 S3 补全先把资产目录服务化（GLB 运行时读取，不打进 jar，jar 体积保持 ~193MB）。</p>
  * <p>注意：uploads/ 已在 .gitignore（运行时资产不入库）；zip 数据包（data/sandbox-xianxia-v1.zip）

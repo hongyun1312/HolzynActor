@@ -62,6 +62,9 @@ public record CharacterRelationGraphVO(
      * @param state 普通型 NPC 当前状态（idle/walk/…；可空）
      *
      * @param lastAction 普通型 NPC 最近行动描述（可空）
+     *
+     * @param meta 节点附加语义（归属/家族/所在地/档案速览；<b>UI V3.0 只增不改新增</b>，
+     *             未装配/降级时为空对象而非 null——旧消费方忽略本字段即可）
      */
     public record NodeVO(
             String id,
@@ -75,8 +78,76 @@ public record CharacterRelationGraphVO(
             String crowdName,
             String occupation,
             String state,
-            String lastAction
+            String lastAction,
+            NodeMeta meta
     ) {
+    }
+
+    /**
+     * 节点附加语义（UI V3.0 · 关系工作台「社会结构总览」只增不改新增）。
+     *
+     * <p><b>为什么要有它</b>：重做前的关系拓扑只有「名字 + 重要度 + 圆点」可编码，画出来
+     * 是一盘散点（实测：17 节点 / 0 关系时整块画布只剩孤立圆），界面让人怀疑「世界是不是坏了」。
+     * 而「谁和谁是一拨人」这件事世界内核里本来就有答案——中观组织（{@code actor_meso_membership}
+     * + {@code actor_meso_group}，势力/宗族/行会/自发成组）与血缘谱系（{@code actor_growth_lineage}）。
+     * 本记录把这两类<b>真实归属</b>连同档案速览一次带给前端，使「分成哪几拨人」按世界事实分区，
+     * 而不是靠图算法凭空猜。</p>
+     *
+     * <p><b>口径</b>：组织归属优先取成员关系；无成员关系时按 {@code actor_profile.affiliation}
+     * 文本匹配组织名兜底——与 {@code WorldGraphQueryService} 的「角色所属组织」同源，
+     * 保证关系拓扑里的圈子与世界图谱里的势力对得上。</p>
+     *
+     * @param avatarUrl 头像地址（{@code actor_profile.avatar_url}；可空=前端用姓名首字徽章兜底）
+     *
+     * @param gender 性别（可空）
+     *
+     * @param age 年龄（可空；随世界时间增龄）
+     *
+     * @param stage 生命周期阶段（婴儿/幼儿/…/耄耋；可空）
+     *
+     * @param affiliation 归属文本（原 {@code actor_profile.affiliation}；各类节点统一给出）
+     *
+     * @param occupation 职业（各类节点统一给出；与节点顶层 {@code occupation} 同值，
+     *                   那里只为兼容旧消费方面保留）
+     *
+     * @param location 当前所在地点名（可空）
+     *
+     * @param locationId 当前所在地点 ID（可空）
+     *
+     * @param groupId 主要中观组织 ID（可空=无归属；不编造）
+     *
+     * @param groupName 主要中观组织名（如「村中宗族」；可空）
+     *
+     * @param groupType 组织类型（family 宗族 / cult 祭祀 / guild 行会 / community 群落 /
+     *                  adhoc 自发成组；可空）
+     *
+     * @param groupRole 组内角色（leader 首领 / elder 长老 / core 核心 / member 普通 /
+     *                  affiliate 外围；可空）
+     *
+     * @param familyId 血缘家族 ID（谱系连通分量；可空=无任何谱系边，不编造）
+     *
+     * @param familyName 血缘家族称谓（如「沈氏一族」；可空）
+     */
+    public record NodeMeta(
+            String avatarUrl,
+            String gender,
+            Integer age,
+            String stage,
+            String affiliation,
+            String occupation,
+            String location,
+            Long locationId,
+            Long groupId,
+            String groupName,
+            String groupType,
+            String groupRole,
+            String familyId,
+            String familyName
+    ) {
+
+        /** 空附加语义（降级/未装配时的唯一兜底，前端无需判空）。 */
+        public static final NodeMeta EMPTY = new NodeMeta(
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

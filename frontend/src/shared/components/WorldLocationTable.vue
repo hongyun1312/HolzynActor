@@ -66,12 +66,18 @@
       </el-table-column>
     </el-table>
 
-    <!-- 空态 -->
+    <!-- 空态：地点表是世界观编辑的一部分，空态给"怎么开始"而不是一句"暂无" -->
     <div v-if="list.length === 0 && !editing" class="loc-empty">
-      <el-empty description="暂无地点（AI 提取 或 手动添加）" :image-size="60">
-        <el-button v-if="editable" size="small" type="primary" plain @click="startEdit">手动添加</el-button>
-        <el-button v-if="extractable" size="small" :loading="extracting" @click="doExtract">AI 提取</el-button>
-      </el-empty>
+      <EmptyState
+        size="page"
+        icon="ic_gallery_map_all"
+        title="还没有地点"
+        desc="地点用于角色移动、事件定位与地图标记。可以手动添加，也可以让 AI 从世界观文本里提取。"
+        :primary-text="editable ? '手动添加' : ''"
+        :secondary-text="extractable ? 'AI 提取现有世界观' : ''"
+        @primary="startEdit"
+        @secondary="doExtract"
+      />
     </div>
 
     <!-- 编辑模式：新增行 -->
@@ -101,6 +107,8 @@ import {
 } from '@/shared/api'
 // ：SSE 流统一客户端（fetch + ReadableStream 解析/错误分类统一）
 import { streamFetch, SSE_EVENTS } from '@/shared/sse/sseClient'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 
 const props = defineProps({
   /** 项目 ID：传入=持久化模式；不传=草稿模式（v-model 双向） */

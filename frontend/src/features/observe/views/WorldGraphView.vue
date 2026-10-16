@@ -1103,7 +1103,9 @@ async function refresh() {
   gap: 12px;
   min-width: 0;
 }
-@media (max-width: 1200px) {
+/* V2.0 批次二：断点 1200 → 1024（全站三档）。取 1024 而非 1440 是为了保持
+   1440 档的两栏布局不变（该档有基线截图，改档位会造成无谓的视觉差异）。 */
+@media (max-width: 1024px) {
   .wg-two-col {
     grid-template-columns: 1fr;
   }

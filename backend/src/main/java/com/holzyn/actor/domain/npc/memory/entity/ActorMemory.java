@@ -78,6 +78,18 @@ public class ActorMemory {
     @Column(name = "source", length = 20)
     private String source = ActorMemoryTypes.SOURCE_DIALOG;
 
+    /**
+     * 决策来源（P0-03 决策源可追溯，VARCHAR(32) 存 {@code DecisionSource} 枚举名）：
+     * AI 真实决策 / AI_RETRY 重试决策 / FALLBACK_PROGRAMMATIC 程序化兜底 /
+     * BUDGET_EXHAUSTED 预算耗尽降级 / DECISION_MISSING 决策缺失。
+     * <p><b>隔离语义</b>（P0-02 诚实化止血）：反思/学习/巩固等学习管线按本列过滤，
+     * 不吸收兜底产出（见 {@code DecisionSources#isAbsorbableByLearning} 与
+     * {@code ReflectionService} 证据过滤）——不得基于兜底数据学「经历」。
+     * 空值=旧数据/未打标路径（视为 AI，不隔离）。</p>
+     */
+    @Column(name = "decision_source", length = 32)
+    private String decisionSource;
+
     /** 被本条取代的旧记忆 id */
     @Column(name = "supersedes_id")
     private Long supersedesId;

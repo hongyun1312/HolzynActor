@@ -37,6 +37,9 @@
             <div class="trace-steps-title">
               决策链路{{ row.traceId ? ' ' + shortTraceId(row.traceId) : '' }} · {{ row.stepCount }} 个环节
               <span class="dim">（点击环节卡片查看该调用的结构化详情）</span>
+              <el-button size="small" type="primary" plain class="ask-btn" @click.stop="askExplain(row)">
+                🤖 解释这次决策
+              </el-button>
             </div>
             <!-- 环节卡片流：按发生顺序（感知→思考→行动→学习） -->
             <div class="step-cards">
@@ -109,6 +112,9 @@
         :page-sizes="[10, 20, 50]" @current-change="(p) => { page = p; load() }"
         @size-change="(s) => { size = s; page = 1; load() }" />
     </div>
+
+    <!-- M5：调试页内嵌项目级 AI 助手（「解释这次决策」直接唤起，不再跳转新标签页） -->
+    <AiTraceAssistant ref="assistantRef" :project-id="panelProjectId" />
   </div>
 </template>
 
@@ -117,6 +123,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { get } from '../api'
+import AiTraceAssistant from '../components/AiTraceAssistant.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -127,6 +134,10 @@ const rows = ref([])
 const total = ref(0)
 const page = ref(1)
 const size = ref(20)
+
+// M5：调试页内嵌助手（「解释这次决策」内联唤起）
+const assistantRef = ref(null)
+const panelProjectId = ref(null)
 
 // D5 按角色维度：每角色最近 N 次决策轨迹
 const characters = ref([])
@@ -195,6 +206,19 @@ function onExpand(row, expandedRows) {
 /** 打开 AI 调用详情（新页面 #/ai-call-detail?id=） */
 function openCallDetail(id) {
   router.push({ path: '/ai-call-detail', query: { id } })
+}
+
+/** 「解释这次决策」（M5 深化）：内联唤起调试页内嵌助手面板并自动提问（不再跳转主前端新标签页）。 */
+function askExplain(row) {
+  const pid = row.projectId
+  if (!pid) {
+    ElMessage.warning('该链路缺少项目 ID，无法唤起助手')
+    return
+  }
+  panelProjectId.value = pid
+  const traceId = row.traceId || ''
+  const q = traceId ? `解释这次决策，traceId=${traceId}` : '解释最近的 AI 决策链路'
+  assistantRef.value?.openWith(q)
 }
 
 /** 项目切换 → 重载角色候选 */
@@ -326,7 +350,11 @@ onMounted(() => {
   font-weight: 600;
   color: var(--text-regular);
   margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+.trace-steps-title .ask-btn { margin-left: auto; }
 .step-cards {
   display: flex;
   flex-wrap: wrap;

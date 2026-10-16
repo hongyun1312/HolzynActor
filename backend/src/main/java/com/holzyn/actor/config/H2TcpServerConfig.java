@@ -46,7 +46,7 @@ import java.util.List;
 @Configuration
 public class H2TcpServerConfig {
 
-    /** H2 TCP 默认端口（与 8080 主端口错开；DataGrip 连接用） */
+    /** H2 TCP 默认端口（与 18080 主端口错开；DataGrip 连接用） */
     public static final int DEFAULT_TCP_PORT = 9092;
 
     /**

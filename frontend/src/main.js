@@ -22,6 +22,7 @@ import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import App from './App.vue'
 import router from '@/shared/router'
+import '@/shared/styles/fonts.css'
 import '@/shared/styles/variables.css'
 import '@/shared/styles/global.css'
 import { initTheme } from '@/shared/theme'
@@ -44,16 +45,15 @@ app.mount('#app')
 
 // 字体加载状态诊断：DevTools Console 直接调用 window.__holzynFontStatus()
 // 逐个字重检查 HarmonyOS Sans SC 是否已加载（document.fonts.check 为 true 表示可用）。
-// 说明：@font-face 为 font-display: swap，浏览器按需下载；返回某字重 false 不一定是失败，
-// 可能只是该字重尚未被页面文本使用（未触发下载），用 Network 面板确认对应 ttf 请求即可。
+// ⚠️ V2.0 起字体为 **unicode-range 分片 woff2**（4 字重 × 18 片，见 scripts/build-font-subsets.py）：
+//    "某字重 false" 通常只表示当前页面文本用到的字还没触发该片的下载，并不代表字体损坏；
+//    要确认分片加载情况请看 Network 面板里 harmonyos-sc-<字重>-<片号>.woff2 的请求。
 window.__holzynFontStatus = () => {
   const weights = [
-    { weight: 100, file: 'HarmonyOS_Sans_SC_Thin' },
-    { weight: 300, file: 'HarmonyOS_Sans_SC_Light' },
-    { weight: 400, file: 'HarmonyOS_Sans_SC_Regular' },
-    { weight: 500, file: 'HarmonyOS_Sans_SC_Medium' },
-    { weight: 700, file: 'HarmonyOS_Sans_SC_Bold' },
-    { weight: 900, file: 'HarmonyOS_Sans_SC_Black' }
+    { weight: 400, file: 'harmonyos-sc-400-*.woff2' },
+    { weight: 500, file: 'harmonyos-sc-500-*.woff2' },
+    { weight: 700, file: 'harmonyos-sc-700-*.woff2' },
+    { weight: 900, file: 'harmonyos-sc-900-*.woff2' }
   ]
   return weights.map(w => ({
     weight: w.weight,

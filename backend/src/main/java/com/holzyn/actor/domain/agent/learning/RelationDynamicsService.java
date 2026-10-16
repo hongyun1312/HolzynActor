@@ -323,6 +323,71 @@ public class RelationDynamicsService {
         return relationRepository.save(r);
     }
 
+    /**
+     * 发布「关系被人工改动」事件（kind=relation，源=manual）。
+     *
+     * <p><b>为什么补这一条</b>：关系拓扑工作台的实时刷新订阅的是世界事件流
+     * （{@code /api/projects/{id}/world-events/stream}，按 {@code kind=relation} 过滤），
+     * 而此前只有 AI 互动引起的动态变化会发事件——手动新增/编辑/删除关系时，
+     * 另一个标签页（或另一位协作者）的画布不会更新，"实时"看起来是坏的。
+     * 这里把手动路径也接上同一条总线：<b>纯新增</b>，不改任何既有字段语义，
+     * 且下游 {@code LearningRelationEventSubscriber}／{@code CognitiveAttentionService} 本就
+     * 显式跳过 kind=relation，不会产生自触发回路。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param rel 关系行（已落库）
+     *
+     * @param action 动作：create / update / delete
+     */
+    public void publishManualRelationEvent(Long projectId, ActorCharacterRelation rel, String action) {
+        if (rel == null) {
+            return;
+        }
+        try {
+            List<String> refs = new ArrayList<>();
+            if (rel.getFromRef() != null && !rel.getFromRef().isBlank()) {
+                refs.add(rel.getFromRef());
+            }
+            if (rel.getToRef() != null && !rel.getToRef().isBlank()) {
+                refs.add(rel.getToRef());
+            }
+            String fromName = rel.getFromName() == null || rel.getFromName().isBlank() ? "未知" : rel.getFromName();
+            String toName = rel.getToName() == null || rel.getToName().isBlank() ? "未知" : rel.getToName();
+            String act = action == null || action.isBlank() ? "update" : action;
+            String verb = switch (act) {
+                case "create" -> "新增";
+                case "delete" -> "删除";
+                default -> "更新";
+            };
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("relationId", rel.getId());
+            payload.put("action", act);
+            payload.put("fromRef", rel.getFromRef() == null ? fromName : rel.getFromRef());
+            payload.put("toRef", rel.getToRef() == null ? toName : rel.getToRef());
+            payload.put("fromName", fromName);
+            payload.put("toName", toName);
+            payload.put("relationType", rel.getRelationType());
+            payload.put("affinity", rel.getAffinity());
+            payload.put("trust", rel.getTrust());
+            payload.put("relationState", rel.getRelationState());
+            worldEventBus.publish(currentUserProvider.currentUserId(), projectId, EventSpec.builder()
+                    .kind("relation")
+                    .source("manual")
+                    .characterRefs(refs)
+                    .visibility("global")
+                    .title("关系" + verb + "：" + fromName + (act.equals("create") ? " → " : " ↔ ") + toName)
+                    .content("类型=" + (rel.getRelationType() == null ? "未填" : rel.getRelationType())
+                            + "，好感=" + rel.getAffinity() + "，信任=" + rel.getTrust()
+                            + "，状态=" + stateLabel(rel.getRelationState()))
+                    .payloadJson(toJson(payload))
+                    .sourceKey("manual:rel:" + rel.getId() + ":" + act + ":" + System.nanoTime())
+                    .build());
+        } catch (Exception e) {
+            log.warn("[关系CRUD] 手动关系事件发布失败: relation={} : {}", rel.getId(), e.getMessage());
+        }
+    }
+
     /** 发布关系变迁事件（kind=relation，源=learning；source_key 唯一防幂等折叠） */
     private void publishRelationEvent(Long projectId, ActorCharacterRelation rel, Endpoint from, Endpoint to,
                                       int delta, String reason, int oldAffinity, int oldTrust) {

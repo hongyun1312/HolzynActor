@@ -74,9 +74,16 @@ jobs:
         working-directory: desktop
         run: npm install --no-audit --no-fund
 
-      - name: electron-builder (NSIS installer + portable)
+      # U1 更新机制：--publish always 由 electron-builder 自动生成并上传 latest.yml（sha512 校验元数据）、
+      # .blockmap 与安装包到 GitHub Release（desktop/package.json 的 build.publish = github provider）。
+      # - stable 通道：默认生成 latest.yml（不带后缀）；
+      # - beta 通道：额外加 --config.publish.channel=beta 生成 latest-beta.yml（并在 GitHub 上把 Release 标记为 Pre-release）。
+      # - releaseType: draft → 先出草稿，人工确认后转正式 Release，避免误发布。
+      - name: electron-builder (NSIS installer + portable, publish metadata + assets)
         working-directory: desktop
-        run: npx electron-builder --win nsis portable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npx electron-builder --win nsis portable --publish always
 
       - name: List artifacts
         shell: pwsh
@@ -89,12 +96,5 @@ jobs:
           path: |
             desktop/release/*.exe
             desktop/release/*.blockmap
+            desktop/release/latest*.yml
           if-no-files-found: error
-
-      - name: Attach to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            desktop/release/*.exe
-            desktop/release/*.blockmap
-          generate_release_notes: true

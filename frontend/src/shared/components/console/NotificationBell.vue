@@ -12,8 +12,8 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <!-- 顶栏通知铃铛：未读角标 + 下拉最近通知 + 全部已读 + 跳转通知中心 -->
-  <el-popover placement="bottom-end" :width="340" trigger="click" popper-class="bell-popover">
+  <!-- 顶栏通知铃铛：未读角标 + 下拉最近通知 + 全部已读 + 跳转通知中心；打开时拉取刷新（后端通知域尚未实现数据源，当前返回空） -->
+  <el-popover placement="bottom-end" :width="340" trigger="click" popper-class="bell-popover" @show="loadData">
     <template #reference>
       <el-badge :value="unreadCount" :max="99" :hidden="unreadCount === 0" class="topbar-bell">
         <el-icon :size="18"><HIcon name="Bell" /></el-icon>
@@ -48,12 +48,12 @@
 <script setup>
 /**
  * 顶栏通知铃铛组件。
- * 职责：展示未读角标，提供最近通知下拉列表、单条点击查看（自动已读）、全部已读、跳转通知中心，
- * 并订阅 /ws/notifications 实时刷新未读数量与列表。
+ * 职责：展示未读角标，提供最近通知下拉列表、单条点击查看（自动已读）、全部已读、跳转通知中心。
+ * 数据源：/api/notifications*（后端通知域尚未实现，占位接口返回空；UI 已接线，打开时刷新拉取）。
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { fetchNotifications, fetchUnreadCount, markNotificationRead, markAllNotificationsRead, createNotificationSocket } from '@/shared/api'
+import { fetchNotifications, fetchUnreadCount, markNotificationRead, markAllNotificationsRead } from '@/shared/api'
 import { useAccountStore } from '@/shared/store'
 import { ElMessage } from 'element-plus'
 
@@ -65,7 +65,6 @@ const router = useRouter()
 const unreadCount = ref(0)
 const items = ref([])
 const loading = ref(false)
-let socket = null
 
 /** 通知类型 → 标签颜色 */
 function typeTag(type) {
@@ -135,12 +134,7 @@ async function onReadAll() {
 /** 跳转通知中心 */
 function goCenter() { router.push('/projects') }
 
-onMounted(() => {
-  loadData()
-  // 订阅通知实时推送：收到新通知后刷新未读数与列表
-  socket = createNotificationSocket(USER_ID(), () => { loadData() })
-})
-onUnmounted(() => { if (socket) socket.close() })
+onMounted(() => { loadData() })
 </script>
 
 <style scoped>

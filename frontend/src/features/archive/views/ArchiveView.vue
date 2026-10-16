@@ -12,7 +12,9 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="archive-page">
+  <!-- V2.0：页面骨架化——原 .archive-page 内联 max-width:1200px（与全站其它内容列不统一），
+       改由 PageShell width="content"（1200）承载，页面不再自写限宽。 -->
+  <PageShell width="content" class="archive-page">
     <!-- 标题 + 操作 -->
     <div class="ar-top">
       <div class="ar-title-wrap">
@@ -112,7 +114,7 @@
         />
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup>
@@ -132,6 +134,8 @@ import {
 } from '@/shared/api'
 // 统一身份引用
 import { npcRef, npcIdOf } from '@/shared/npcRef'
+// V2.0：统一页面骨架（限宽/居中/纵向节奏只此一处）
+import PageShell from '@/shared/layout/PageShell.vue'
 
 const route = useRoute()
 const projectId = Number(route.params.id)
@@ -270,7 +274,8 @@ onMounted(() => { loadChars(); load() })
 </script>
 
 <style scoped>
-.archive-page { display: flex; flex-direction: column; gap: 14px; max-width: 1200px; }
+/* V2.0：限宽交给 PageShell（原 max-width:1200px 已移除，避免全站并存两套栅格约定） */
+.archive-page { display: flex; flex-direction: column; gap: 14px; }
 .ar-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .ar-title-wrap { display: flex; flex-direction: column; gap: 4px; }
 .ar-title { margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; }

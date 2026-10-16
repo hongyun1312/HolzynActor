@@ -33,7 +33,7 @@ import java.net.URI;
 /**
  * 打包桌面模式：启动完成后在默认浏览器自动打开本地 Web 界面（2026-10-10 桌面端封装）。
  * <p>背景：桌面封装（jpackage）把应用打成无控制台/可随装随跑的 exe，启动后是一个
- * {@code http://127.0.0.1:8080} 本地服务进程——没有「启动成功」的可见反馈，用户会不知所措。
+ * {@code http://127.0.0.1:18080} 本地服务进程——没有「启动成功」的可见反馈，用户会不知所措。
  * 本组件在上下文就绪后自动用默认浏览器打开该地址，作为桌面应用的「启动可见反馈」。</p>
  * <p>装配条件（三选一即可关闭）：</p>
  * <ul>
@@ -54,7 +54,7 @@ public class DesktopAutoOpen implements ApplicationRunner {
     /** 关闭参数（启动参数 {@code --no-open} 或 {@code no-open} 任一命中即跳过打开） */
     static final String DISABLE_ARG = "no-open";
 
-    @Value("${server.port:8080}")
+    @Value("${server.port:18080}")
     private int port;
 
     @Value("${holzyn.actor.packaged.auto-open:true}")

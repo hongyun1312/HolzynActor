@@ -101,6 +101,12 @@ public class WorldFrameService implements WorldEventSubscriber {
     /** 事件类别：世界帧（actor_event.kind） */
     private static final String KIND_WORLD_FRAME = "world_frame";
 
+    /**
+     * 「尚未生成世界帧」的说明文案（UI V2.0 §8.4：未生成是正常状态，200 + generated=false + 本说明）。
+     * <p>用世界内语言说清「什么时候会有」，不暴露 gameDay 等内部术语。公开给接口契约测试 pin 文案。</p>
+     */
+    public static final String HINT_NO_FRAME = "世界还没过完第一个游戏日——第一份世界帧会在第一个游戏日 00:00 自动生成";
+
     /** 机制天气轮换池（按游戏日轮换，保证多样性与可预测） */
     private static final String[] MECHANISM_WEATHER = {"晴", "多云", "小雨", "阴", "微风晴"};
 
@@ -430,17 +436,26 @@ public class WorldFrameService implements WorldEventSubscriber {
     // ==================== 读接口 ====================
 
     /**
-     * 当前生效世界帧（active；无 → 404）。
+     * 当前生效世界帧（无 active 帧 → 200 + {@code generated=false}，非 404）。
+     *
+     * <p><b>契约（UI V2.0 §8.4，2026-10-15 改判）</b>：改前无 active 帧抛 404「当前无生效世界帧」，
+     * 结果前端每次首访首页都在 DevTools 里报一条红色 4xx（实测 6 条/轮采集），且"世界里还没有
+     * 世界帧"与"接口挂了"在前端无法区分。世界帧在首个游戏日 00:00 才诞生，**未生成是正常状态**，
+     * 故改为恒 200 + {@code generated} 显式字段 + {@code hint} 说明原因。</p>
      *
      * @param projectId 项目 ID
      *
-     * @return 帧 VO
+     * @return 帧 VO（未生成时 {@code generated=false}、{@code hint} 非空、其余字段为空）
      */
     @Transactional(readOnly = true)
     public WorldFrameVO getActiveFrame(Long projectId) {
         ActorWorldFrame f = findActive(projectId);
         if (f == null) {
-            throw new BizException(404, "当前无生效世界帧（首帧将于首个游戏日 00:00 生成）");
+            WorldFrameVO pending = new WorldFrameVO();
+            pending.setGenerated(false);
+            pending.setProjectId(projectId);
+            pending.setHint(HINT_NO_FRAME);
+            return pending;
         }
         return toVO(f, projectId);
     }
@@ -1078,6 +1093,7 @@ public class WorldFrameService implements WorldEventSubscriber {
     /** 帧 → VO（含解析后的结构化字段，供读接口）。 */
     private WorldFrameVO toVO(ActorWorldFrame f, Long projectId) {
         WorldFrameVO vo = new WorldFrameVO();
+        vo.setGenerated(true);
         vo.setFrameId(f.getId());
         vo.setProjectId(f.getProjectId() == null ? projectId : f.getProjectId());
         vo.setGameDay(f.getGameDay());

@@ -33,12 +33,14 @@ let startupRedirectHandled = false
  * HolzynActor 前端路由。
  * 顶层路由：/onboarding（首次设置向导）、/（项目画廊）、/project/new（新增项目）。
  * 项目空间路由（带:projectId，全部位于 ProjectLayout 骨架内）：
- * /project/:id/sandbox（世界沙盘·项目主页，默认落地）、/project/:id/dashboard（项目仪表盘）、
+ * /project/:id/sandbox（世界沙盘·项目主页，默认落地）、/project/:id/dialogue（对谈·静止世界聊天）、
+ * /project/:id/dashboard（项目仪表盘）、
  * /world（世界详情，含 /world/edit 修改页）、/characters（NPC 角色）、/chat（对话·单聊/群聊）、
  * /settings（设置：general/apis/prompts/usage）、
- * /crowds（普通型人群）、/evolve（世界演化）、/timeline（时间线）、/knowledge（知识库）
- * —— 后四个原为隐藏页， 恢复侧边栏入口。
- * 已移除：/login、/register（登录鉴权整体移除，首次启动引导本地账户设置）。
+ * /crowds（普通型人群）、/timeline（时间线）、/knowledge（知识库）
+ * —— 后三个原为隐藏页， 恢复侧边栏入口。
+ * 已移除：/login、/register（登录鉴权整体移除，首次启动引导本地账户设置）；
+ * /evolve（世界演化旧路由，M4 起能力拆入新首页右栏「世界演化面板」+ 对戏抽屉，路由一并移除）。
  */
 const routes = [
   // ==================== 首次设置向导（本地个人账户） ====================
@@ -82,7 +84,13 @@ const routes = [
       { path: 'prompts', name: 'global-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { requiresAccount: true, title: 'Prompt 模板 · HolzynActor', domain: 'settings' } },
       { path: 'usage', name: 'global-settings-usage', component: () => import('@/features/settings/views/ProjectUsageSettings.vue'), meta: { requiresAccount: true, title: 'AI 用量 · HolzynActor', domain: 'observe' } },
       // 界面与布局（全局）：面板宽度/信息密度/抽屉固定/导览重看——不依赖具体项目，故项目内外共用同一页
-      { path: 'appearance', name: 'global-settings-appearance', component: () => import('@/features/settings/views/ProjectAppearanceSettings.vue'), meta: { requiresAccount: true, title: '界面与布局 · HolzynActor', domain: 'settings' } }
+      { path: 'appearance', name: 'global-settings-appearance', component: () => import('@/features/settings/views/ProjectAppearanceSettings.vue'), meta: { requiresAccount: true, title: '界面与布局 · HolzynActor', domain: 'settings' } },
+      // 项目级 AI 助手（M1+M2）：能力说明 + docs 索引管理与工具清单
+      { path: 'assistant', name: 'global-settings-assistant', component: () => import('@/features/settings/views/ProjectAssistantSettings.vue'), meta: { requiresAccount: true, title: '助手设置 · HolzynActor', domain: 'settings' } },
+      // 玩家档案（M3）：persona 六维（用户级）；每角色关系设定需在项目内编辑
+      { path: 'player-profile', name: 'global-settings-player-profile', component: () => import('@/features/settings/views/PlayerProfileView.vue'), meta: { requiresAccount: true, title: '玩家档案 · HolzynActor', domain: 'settings' } },
+      // 更新与版本（U1 桌面端更新机制）：当前版本/检查更新/下载进度/数据备份回滚/更新说明
+      { path: 'update', name: 'global-settings-update', component: () => import('@/features/settings/views/UpdateSettingsView.vue'), meta: { requiresAccount: true, title: '更新与版本 · HolzynActor', domain: 'settings' } }
     ]
   },
 
@@ -123,6 +131,35 @@ const routes = [
       // 1. 世界地图：项目默认落地页（M4 新首页：2D 地图 + 双主角并置，取代旧 3D 沙盘）
       //    meta.fullbleed 不再需要（三层壳内布局，非全屏 3D 画布）
       { path: 'sandbox', name: 'project-sandbox', component: () => import('@/features/home/views/NewHomeView.vue'), meta: { title: '世界地图 · HolzynActor', domain: 'world' } },
+      // V2.0 §4.2 P4：世界直播（纯前端聚合：事件流 + 角色当前行动 + 宏观指标 + 世界时钟）
+      { path: 'live', name: 'project-live', component: () => import('@/features/live/views/WorldLiveView.vue'), meta: { title: '世界直播 · HolzynActor', domain: 'world' } },
+      // 1b. 对谈：与「浮生」主模式同级的**独立界面**（对谈界面的侧边栏由 DIALOGUE_ITEMS 提供）
+      //     入口在左上角世界名右侧的「浮生 ⇄ 对谈」切换按钮；/dialogue 子树全部属于对谈界面
+      { path: 'dialogue', name: 'project-dialogue', component: () => import('@/features/dialogue/views/DialogueView.vue'), meta: { title: '对谈 · HolzynActor', domain: 'dialogue' } },
+      // 1c. 对谈 · 玩家档案：玩家 persona 六维 + 「与我的关系」设定（对谈界面内独立入口；
+      //     与旧 settings/player-profile 路由复用同一组件，旧深链仍可用）
+      { path: 'dialogue/player-profile', name: 'project-dialogue-player', component: () => import('@/features/settings/views/PlayerProfileView.vue'), meta: { title: '玩家档案 · HolzynActor', domain: 'dialogue' } },
+      // 1d. 对谈 · 设置：设置是浮生/对谈**共有**的功能（API 配置 / Prompt / 用量 / 界面 / 助手），
+      //     因此在对谈界面侧边栏同样提供入口。路由挂在 /dialogue/settings/* 子树下、复用同一套
+      //     设置子页组件（SettingsView 外壳 + 六个子页），从而打开设置时界面**保持「对谈」**，
+      //     不会因跳转 /project/:id/settings/* 而切回浮生（见 navModel.DIALOGUE_SETTINGS_ITEMS）。
+      {
+        path: 'dialogue/settings',
+        component: () => import('@/features/settings/views/SettingsView.vue'),
+        // V2.0（P1）：设置区自带导航轨道（railSidebar），因此不再依赖域侧栏逐个列出设置子页；
+        // 8 个子页仍全部可达（其中 player-profile 在对谈界面是独立置顶项，故不在本轨道内重复）。
+        meta: { title: '设置 · HolzynActor', domain: 'dialogue', railSidebar: true },
+        children: [
+          { path: '', redirect: 'general' },
+          { path: 'general', name: 'project-dialogue-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { title: '通用设置 · HolzynActor', domain: 'dialogue' } },
+          { path: 'apis', name: 'project-dialogue-settings-apis', component: () => import('@/features/settings/views/ProjectApiSettings.vue'), meta: { title: 'API 配置 · HolzynActor', domain: 'dialogue' } },
+          { path: 'prompts', name: 'project-dialogue-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { title: 'Prompt 模板 · HolzynActor', domain: 'dialogue' } },
+          { path: 'usage', name: 'project-dialogue-settings-usage', component: () => import('@/features/settings/views/ProjectUsageSettings.vue'), meta: { title: 'AI 用量 · HolzynActor', domain: 'dialogue' } },
+          { path: 'appearance', name: 'project-dialogue-settings-appearance', component: () => import('@/features/settings/views/ProjectAppearanceSettings.vue'), meta: { title: '界面与布局 · HolzynActor', domain: 'dialogue' } },
+          { path: 'assistant', name: 'project-dialogue-settings-assistant', component: () => import('@/features/settings/views/ProjectAssistantSettings.vue'), meta: { title: '助手设置 · HolzynActor', domain: 'dialogue' } },
+          { path: 'update', name: 'project-dialogue-settings-update', component: () => import('@/features/settings/views/UpdateSettingsView.vue'), meta: { title: '更新与版本 · HolzynActor', domain: 'dialogue' } }
+        ]
+      },
       // 2. 项目仪表盘：概况 + 统计 + 最近动态
       { path: 'dashboard', name: 'project-dashboard', component: () => import('@/features/project/views/DashboardView.vue'), meta: { title: '项目仪表盘 · HolzynActor', domain: 'observe' } },
       // 2b. 世界图谱（观测域）：时间/地点/角色/事件/关系/势力/宏观七个只读切面
@@ -134,11 +171,11 @@ const routes = [
       { path: 'characters', name: 'project-characters', component: () => import('@/features/character/views/CharacterView.vue'), meta: { title: 'NPC 角色 · HolzynActor', domain: 'cast' } },
       // 4. 对话（单聊）
       { path: 'chat', name: 'project-chat', component: () => import('@/features/chat/views/ChatView.vue'), meta: { title: '对话 · HolzynActor', domain: 'cast' } },
-      // 5. 设置（默认通用；子页 general/apis/prompts/usage/appearance）
+      // 5. 设置（设置区自带导航轨道；子页 general/apis/prompts/usage/appearance/assistant/player-profile/update）
       {
         path: 'settings',
         component: () => import('@/features/settings/views/SettingsView.vue'),
-        meta: { title: '设置 · HolzynActor', domain: 'settings' },
+        meta: { title: '设置 · HolzynActor', domain: 'settings', railSidebar: true },
         children: [
           { path: '', redirect: 'general' },
           { path: 'general', name: 'project-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { title: '通用设置 · HolzynActor', domain: 'settings' } },
@@ -146,23 +183,28 @@ const routes = [
           { path: 'prompts', name: 'project-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { title: 'Prompt 模板 · HolzynActor', domain: 'settings' } },
           { path: 'usage', name: 'project-settings-usage', component: () => import('@/features/settings/views/ProjectUsageSettings.vue'), meta: { title: 'AI 用量 · HolzynActor', domain: 'observe' } },
           // 界面与布局（新增）：面板宽度、信息密度、内容宽度、抽屉固定、导览重看
-          { path: 'appearance', name: 'project-settings-appearance', component: () => import('@/features/settings/views/ProjectAppearanceSettings.vue'), meta: { title: '界面与布局 · HolzynActor', domain: 'settings' } }
+          { path: 'appearance', name: 'project-settings-appearance', component: () => import('@/features/settings/views/ProjectAppearanceSettings.vue'), meta: { title: '界面与布局 · HolzynActor', domain: 'settings' } },
+          // 项目级 AI 助手（M1+M2）
+          { path: 'assistant', name: 'project-settings-assistant', component: () => import('@/features/settings/views/ProjectAssistantSettings.vue'), meta: { title: '助手设置 · HolzynActor', domain: 'settings' } },
+          // 玩家档案（M3）：persona 六维 + 本项目角色关系设定/关系行
+          { path: 'player-profile', name: 'project-settings-player-profile', component: () => import('@/features/settings/views/PlayerProfileView.vue'), meta: { title: '玩家档案 · HolzynActor', domain: 'settings' } },
+          // 更新与版本（U1 桌面端更新机制）
+          { path: 'update', name: 'project-settings-update', component: () => import('@/features/settings/views/UpdateSettingsView.vue'), meta: { title: '更新与版本 · HolzynActor', domain: 'settings' } }
         ]
       },
 
       // ===== 恢复页（从隐藏恢复：入口已回到侧边栏，路由与页面均可用） =====
       // 普通型人群
       { path: 'crowds', name: 'project-crowds', component: () => import('@/features/crowd/views/CrowdView.vue'), meta: { title: '普通型人群 · HolzynActor', domain: 'cast' } },
-      // 世界演化（世界模拟控制台）
-      { path: 'evolve', name: 'project-evolve', component: () => import('@/features/evolve/views/EvolveView.vue'), meta: { title: '世界演化 · HolzynActor', domain: 'world' } },
       // 时间线（竖轴 + 横红线 + 精度切换）
       { path: 'timeline', name: 'project-timeline', component: () => import('@/features/timeline/views/TimelineView.vue'), meta: { title: '时间线 · HolzynActor', domain: 'world' } },
       // 知识库（文档 / 检索 / 项目大事记）
       { path: 'knowledge', name: 'project-knowledge', component: () => import('@/features/knowledge/views/KnowledgeView.vue'), meta: { title: '知识库 · HolzynActor', domain: 'mind' } },
       // 项目记忆
       { path: 'world-memory', name: 'project-world-memory', component: () => import('@/features/worldmemory/views/WorldMemoryView.vue'), meta: { title: '项目记忆 · HolzynActor', domain: 'mind' } },
-      // 全局关系拓扑（角色页同款组件 variant=page：整页网络图 + 右上角角色卡片 + 补充跳转）
-      { path: 'topology', name: 'project-topology', component: () => import('@/features/character/views/TopologyView.vue'), meta: { title: '关系拓扑 · HolzynActor', domain: 'cast' } },
+      // 全局关系拓扑（UI V3.0 工作台：整页画布 + 浮动工具条/图例/状态条 + 可收起详情栏）
+      // fullbleed：去掉外壳内边距并禁滚动，画布直接铺满内容区（工作台类页面的标准形态）
+      { path: 'topology', name: 'project-topology', component: () => import('@/features/character/views/TopologyView.vue'), meta: { title: '关系拓扑 · HolzynActor', domain: 'cast', fullbleed: true } },
       // 记忆归档
       { path: 'archive', name: 'project-archive', component: () => import('@/features/archive/views/ArchiveView.vue'), meta: { title: '记忆归档 · HolzynActor', domain: 'mind' } },
       // 家族谱系

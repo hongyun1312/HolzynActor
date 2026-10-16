@@ -14,3 +14,10 @@ Third-party notices:
 - Element Plus (https://element-plus.org) - MIT License
 - LangChain4j (https://github.com/langchain4j/langchain4j) - Apache License 2.0
 - H2 Database (https://www.h2database.com) - Mozilla Public License 2.0 / EPL 1.0
+- Apache ECharts (https://echarts.apache.org) - Apache License 2.0
+- AntV G6 (https://g6.antv.antgroup.com) - MIT License
+- AntV Algorithm (https://github.com/antvis/algorithm) - MIT License
+- AntV Layout (https://github.com/antvis/layout) - MIT License
+
+Note: all front-end third-party libraries above are bundled locally from
+`frontend/node_modules` by Vite at build time (no CDN reference at runtime).

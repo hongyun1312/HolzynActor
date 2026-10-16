@@ -94,3 +94,94 @@ export function openEventStream(url, handlers = {}) {
     }
   }
 }
+
+/**
+ * POST + ReadableStream 型 SSE 客户端（M5 调试页内嵌助手面板）。
+ * 以 POST JSON 体发起一次生成型流（一次请求 → 一次结果，<b>不自动重连</b>防重复生成）；
+ * 统一解析 event:/data: 帧，经 onEvent(name, data) 分发；error 事件 → onError 并终止；
+ * 流自然结束 → onDone(terminalPayload)；支持 AbortController 取消。
+ *
+ * @param url      流 URL（相对 /api 或以 / 开头）
+ * @param body     JSON 请求体
+ * @param handlers { onEvent(name, data), onError(err), onDone(payload) }
+ * @returns { close }
+ */
+export function postEventStream(url, body = {}, handlers = {}) {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+  let closed = false
+
+  const parse = (raw) => {
+    if (raw == null || raw === '') return null
+    try { return JSON.parse(raw) } catch (_) { return raw }
+  }
+
+  ;(async () => {
+    let resp
+    try {
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller ? controller.signal : undefined
+      })
+    } catch (e) {
+      if (closed || (e && e.name === 'AbortError')) return
+      handlers.onError?.(new Error('无法发起流请求：' + (e && e.message)))
+      return
+    }
+    if (!resp.ok || !resp.body) {
+      let msg = `HTTP ${resp.status}`
+      try { msg = (await resp.json())?.message || msg } catch (_) { /* 忽略 */ }
+      handlers.onError?.(new Error(msg))
+      return
+    }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let eventName = 'message'
+    let terminalPayload = null
+    try {
+      while (true) {
+        if (closed) return
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let idx
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, idx)
+          buf = buf.slice(idx + 2)
+          for (const line of block.split('\n')) {
+            const t = line.trim()
+            if (!t) continue
+            if (t.startsWith('event:')) eventName = t.slice(6).trim()
+            else if (t.startsWith('data:')) {
+              const ev = parse(t.slice(5).trim())
+              if (closed) return
+              if (eventName === 'error') {
+                const msg = (ev && typeof ev === 'object' && ev.message) || '流执行失败'
+                handlers.onError?.(new Error(msg))
+                return
+              }
+              if (eventName === 'done' || eventName === 'result' || eventName === 'finished') {
+                terminalPayload = ev
+              }
+              handlers.onEvent?.(eventName, ev)
+            }
+          }
+          eventName = 'message'
+        }
+      }
+      if (!closed) handlers.onDone?.(terminalPayload)
+    } catch (e) {
+      if (closed || (e && e.name === 'AbortError')) return
+      handlers.onError?.(new Error('流读取中断：' + (e && e.message)))
+    }
+  })()
+
+  return {
+    close() {
+      closed = true
+      try { controller?.abort() } catch (_) { /* 忽略 */ }
+    }
+  }
+}

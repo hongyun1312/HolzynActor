@@ -265,7 +265,9 @@ function close() { layout.setCommandOpen(false) }
   color: var(--text-secondary);
 }
 .cmdk-input {
-  flex: 1; background: none; border: none; outline: none;
+  /* V2.0 a11y：不写裸 outline:none —— 命令面板是键盘主入口，焦点必须可见
+     （global.css 的 input:focus-visible 提供内缩实心焦点环） */
+  flex: 1; background: none; border: none;
   color: var(--text-primary);
   font-size: 1rem;
 }

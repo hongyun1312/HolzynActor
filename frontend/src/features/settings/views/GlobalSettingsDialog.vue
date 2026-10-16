@@ -80,8 +80,10 @@ defineExpose({ open })
 .gs-tabs { --el-tabs-header-margin-bottom: 14px; }
 </style>
 
-<!-- 弹窗体：受限最大高度 + 内部滚动，小屏下避免被截断（对话框 teleport 到 body，需非 scoped 规则） -->
+<!-- 弹窗体：受限最大高度 + 内部滚动，小屏下避免被截断（对话框 teleport 到 body，需非 scoped 规则）
+     V2.0：改用 80vh 表达「最多占视口八成」，不再用 calc(100vh − 190px) 把标题栏/页脚高度写死。
+     模态框本来就不在外壳内容区里，用视口比例是正确语义。 -->
 <style>
-.global-settings-dialog .el-dialog__body { max-height: calc(100vh - 190px); overflow-y: auto; }
+.global-settings-dialog .el-dialog__body { max-height: 80vh; overflow-y: auto; }
 .global-settings-dialog .el-dialog__body::-webkit-scrollbar { width: 8px; }
 </style>

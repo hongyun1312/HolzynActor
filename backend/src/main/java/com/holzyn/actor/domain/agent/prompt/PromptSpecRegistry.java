@@ -308,6 +308,40 @@ public class PromptSpecRegistry {
         // Judge 四维合理性评分（复用 JudgeChatClient + PromptTemplateService 模板
         // nanojev_ab_judge；judge 调用不落 actor_ai_call_log，本登记供模板版本留痕/指标）。
         register("nanojev_ab_judge", 1, PromptContractType.SCHEMA_JSON, 1024, 0.0);
+
+        // ===== 项目级 AI 助手（2026-10-10 第 50 次 · M1+M2）=====
+        // assistant_tool：工具决策一步（jsonMode 结构化）——「判断是否需要查询数据并声明工具调用」
+        // 是严谨判定：低温（0.3）抑制发散、篇幅收敛（1024：工具调用 JSON 很短）。
+        // v2（2026-10-12 冒烟）：明示「前一轮工具结果已足够时直接 no_tool、不要重复调用」——
+        // 实测模型同一轮重复声明 macro_overview ×3 浪费 AI 调用，提示词收敛 + 执行器同参去重双保险。
+        // assistant_chat：最终回答（PLAIN_TEXT 流式正文）——叙事需要一定文学性（0.6），
+        // 篇幅放宽（1400）容纳双模式回答；事实模式经提示词约束不依赖低温。
+        register("assistant_tool", 2, PromptContractType.SCHEMA_JSON, 1024, 0.3);
+        register("assistant_chat", 1, PromptContractType.PLAIN_TEXT, 1400, 0.6);
+
+        // ===== 对谈模式（2026-10-12 第 54 次 · M1 对谈地基）=====
+        // dialogue_reply：单聊回复（PLAIN_TEXT 流式正文）——「像真人一样」的促膝长谈：
+        // 需要自然与温度（0.7），篇幅收敛（300=一轮回复，防长篇大论）。
+        // 上下文装配见 DialogueContextAssembler（L0 稳定 system + L1 动态 user）。
+        register("dialogue_reply", 1, PromptContractType.PLAIN_TEXT, 300, 0.7);
+        // dialogue_greeting：AI 动态开场白（PLAIN_TEXT 正文）——角色第一句话要自然亲切
+        // 有温度（0.8 略高增强开场感），篇幅收敛（160=≤80 字约束的余量）。
+        register("dialogue_greeting", 1, PromptContractType.PLAIN_TEXT, 160, 0.8);
+        // dialogue_summary（M4 长对话滚动窗口自动摘要）：超窗前段折叠为 AI 摘要——
+        // 需要忠实浓缩前情（低温 0.4 抑制发散），篇幅收敛（300=摘要正文上限）。
+        // 运行时由 DialogueSummaryService 组装（既有摘要 + 新增超窗批），PLAIN_TEXT 只输出摘要正文。
+        register("dialogue_summary", 1, PromptContractType.PLAIN_TEXT, 300, 0.4);
+        // dialogue_group_reply（M5 群聊逐角色回复）：每回应独立 AI 调用、复用单聊流式正文形态
+        // （设计 §6.4「每回应独立 AI 调用（复用单聊回应生成），串行流式」→ 实施抓修：设计稿 §8.3
+        // 拟 DIALOG_JSON 整轮契约，M5 编排决策为确定性全员依次 + 逐角色独立调用，正文 PLAIN_TEXT 流式；
+        // DIALOG_JSON 留待 AI 编排模式扩展）。群聊对话需要自然温度（0.7），篇幅放宽（500=逐角色一轮）。
+        // 上下文装配见 DialogueContextAssembler.composeGroup（本人卡 + 场景段 + 【对家】+ 群聊历史）。
+        register("dialogue_group_reply", 1, PromptContractType.PLAIN_TEXT, 500, 0.7);
+        // dialogue_consolidation（M6 沉淀）：关系 delta + 记忆要点抽取——「沉淀时写什么」是克制的
+        // 严谨判定（关系变化宁缺毋滥、记忆要点只写明确发生的活动/共识/承诺），低温（0.3）抑制发散，
+        // 篇幅收敛（512=多角色各 1~3 条要点足够）。SCHEMA_JSON（jsonMode=true）只输出 relations 数组；
+        // 运行时由 DialogueConsolidationService 组装（会话角色清单 + 当前关系 + 最近对话窗）。
+        register("dialogue_consolidation", 1, PromptContractType.SCHEMA_JSON, 512, 0.3);
     }
 
     /** 登记一条场景规格（version=1）。 */

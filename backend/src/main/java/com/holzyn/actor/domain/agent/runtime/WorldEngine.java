@@ -123,6 +123,24 @@ public class WorldEngine {
     private final WorldEventBus worldEventBus;
     private final BudgetGuard budgetGuard;
 
+    /**
+     * 决策台账服务（P0-03 决策源可追溯 / P0-02 诚实化止血）：决策失败→决策缺失留痕
+     * （编年史显式「该时段无决策」，不伪造活动文本）+ 每轮预算统计持久化（防 BudgetGuard
+     * endTick 后内存态丢失）。字段注入保持构造器不变；null=未装配[单测]跳过，
+     * 台账是观测旁路不阻断推进）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DecisionLedgerService decisionLedgerService;
+
+    /**
+     * 决策重试作业服务（P0-02 根治 · 可重试性）：AI 决策失败 → 入队可重试作业（指数退避、
+     * max 档不限次数），引擎扫描到点重跑决策并<b>回填到原定 gameSecond</b>；成功以
+     * AI/AI_RETRY 落台账，最终放弃才落显式缺失。字段注入保持构造器不变；null=未装配
+     * [单测]跳过（退回 P0-02 止血 (a) 的缺失留痕行为）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DecisionRetryService decisionRetryService;
+
     /** 世界模拟总开关（默认 true；false 时引擎扫描直接跳过） */
     @Value("${holzyn.actor.world.sim-enabled:true}")
     private boolean simEnabled;
@@ -148,6 +166,24 @@ public class WorldEngine {
      */
     @Value("${holzyn.actor.world.tick-game-minutes:5}")
     private int tickGameMinutes;
+
+    /**
+     * 时间回补积压告警阈值（游戏秒，默认 86400=24 游戏小时；P0-01 修复新增）。
+     * <p>口径：单轮被推迟量 &gt;0 记 INFO；仅当「当前积压（世界落后量）≥ 阈值且创出新高」才升 WARN——
+     * 避免离线回补/长耗时轮次的连续刷屏，同时让「积压持续扩大」的真实异常显眼。</p>
+     */
+    @Value("${holzyn.actor.world.deferral-warn-threshold-game-seconds:86400}")
+    private long deferralWarnThresholdGameSeconds = 86400L;
+
+    /**
+     * tick 队列容量（游戏秒，P0-01 根治新增；默认 604800=7 游戏天）。
+     * <p>范围式队列 {@code [lastGameSecond, authorizedTargetSecond)} 的有界上限——墙钟/Unity
+     * 授权前沿不得超过「已消费位置 + 容量」；超出部分显式计入 {@code droppedGameSeconds} 并 WARN
+     * （显式丢弃并记录，不再静默丢失）。默认 7 游戏天：rate=24 时覆盖约 7 真实小时离线，rate=4
+     * （更写实的慢速档）时约 42 真实小时（近两天），典型停机/周末都在完整回补范围内。</p>
+     */
+    @Value("${holzyn.actor.world.tick-queue-capacity-game-seconds:604800}")
+    private long tickQueueCapacityGameSeconds = 604800L;
 
     /** 推进防重入标志（单实例运行约定 + 内存互斥，修） */
     private final AtomicBoolean scanning = new AtomicBoolean(false);
@@ -214,6 +250,36 @@ public class WorldEngine {
      */
     @Value("${holzyn.actor.world.dispatch-wait-seconds:180}")
     private long dispatchWaitSeconds = 180L;
+
+    // ==================== P0-01 时间回补可观测（世界时间不得静默丢弃） ====================
+
+    /**
+     * projectId → 时间回补统计（内存态峰值/轮次 + 与落库队列状态同源的快照）。
+     * <p>P0-01 根治（tick 任务队列化）后：积压/丢弃的<b>权威</b>状态已持久化到时钟行
+     * （authorizedTargetSecond=授权前沿、droppedGameSeconds=显式丢弃累计），本表只保留观测用
+     * 峰值/推迟轮次（重启清零可接受，不对正确性负责）；{@link #timeBacklogSnapshot} 聚合两者
+     * 暴露到调试端点（对齐 P0-03 的 decision_source 度量基座）。</p>
+     */
+    private final ConcurrentHashMap<Long, TimeBacklogMetric> timeBacklog = new ConcurrentHashMap<>();
+
+    /** 时间回补统计（单项目，内存态）。 */
+    private static final class TimeBacklogMetric {
+
+        /** 最近一轮推进结束时仍未消费的积压（游戏秒；0=已追平） */
+        long backlogGameSeconds;
+
+        /** 观测到的峰值积压（游戏秒；即 WARN 高水位，积压创新高时更新） */
+        long peakBacklogGameSeconds;
+
+        /** 出现推迟（积压>0）的轮次计数 */
+        long deferredRounds;
+
+        /** 最近一轮推进结束时的已消费位置（游戏秒；与 backlogGameSeconds 同快照，供调试端点展示） */
+        long committedGameSecond;
+
+        /** 显式丢弃累计（游戏秒；队列溢出时累加，与落库 droppedGameSeconds 同源） */
+        long droppedGameSeconds;
+    }
 
     // ==================== R1 引擎 AI 异步化/前瞻缓冲 ====================
 
@@ -502,8 +568,10 @@ public class WorldEngine {
         if (lastRunAt == null || now == null || rate <= 0) {
             return 0L;
         }
-        // 毫秒级精度：Duration.getSeconds() 截断亚秒——12.5s 扫描 + rate=24 下每轮丢 0.5s
-        // （288 vs 300 游戏秒），长期落后流动时钟 ~4%；毫秒换算保证引擎位置与流动时钟几乎同步（≤1 tick）
+        // 毫秒级精度：Duration.getSeconds() 截断亚秒——12.5s 扫描 + rate=24 下每轮少算 0.5s
+        // （288 vs 300 游戏秒）。P0-01 根治后无截断残差累积：生产者锚点在每次授权后置为 now，
+        // 亚秒残差随锚点前移自然继承到下一轮 elapsed（锚点=now 使 delta 恒为干净正向增量）；
+        // 且被 maxStep/屏障封顶截掉的时间显式留在授权前沿（tick 队列）里，不会丢失也不会重复补。
         long millis = Duration.between(lastRunAt, now).toMillis();
         if (millis <= 0) {
             return 0L;
@@ -746,6 +814,11 @@ public class WorldEngine {
                     "Unity 外部时钟驱动中（推进由 Unity 时钟上报驱动，断开后恢复自走）");
         }
 
+        // P0-02 根治（可重试性）：世界运行中排空到点的决策重试作业（时间可以等作业——
+        // 失败决策在后台补算回填到原定 gameSecond）。置于 tick 队列处理之前：即使本轮无
+        // 流逝（idle）也照常排空，暂停/未运行/未激活闸门已在上方拦截（重试不耗 AI 于停摆世界）。
+        drainDecisionRetries(projectId);
+
         // 引擎配置（懒创建）+ 预算窗口
         ActorWorldEngine engine = requireEngine(projectId);
         int configuredBudget = engine.getBudgetPerTick() == null ? maxAiCalls : engine.getBudgetPerTick();
@@ -771,15 +844,28 @@ public class WorldEngine {
                         projectId, e.getMessage());
             }
         }
-        // 封顶按游戏秒：DB 列 max_step_hours（小时，存量）→ ×3600 换算；行缺失用全局缺省 max-catch-up-seconds
+        // 封顶按游戏秒：DB 列 max_step_hours（小时，存量）→ ×3600 换算；行缺失用全局缺省 max-catch-up-seconds。
+        // P0-01 根治后其语义=「屏障关闭时单轮消费上限」；屏障开启（默认）时由 maxCatchUpTicks 收敛（更小，先命中）
         Integer stepHoursCfg = engine.getMaxStepHours();
         long maxStepSeconds = stepHoursCfg != null ? stepHoursCfg * 3600L : maxCatchUpSeconds;
         budgetGuard.beginTick(projectId, budgetPerTick);
         try {
-            // 秒级模拟位置：从 last_game_second 起算（requireClock 已对存量行惰性初始化 = last_game_hour×3600）
+            // ==================== P0-01 根治：tick 任务队列（游戏秒为唯一权威） ====================
+            // 权威量：last_game_second=已消费位置（世界实际走到哪）；authorizedTargetSecond=授权前沿
+            // （墙钟已授权、尚未被世界消费的队列尾）；两者之差=未消费积压（tick 任务队列——每个
+            // tick-game-minutes×60 游戏秒槽位即一个待消费 job）。墙钟只是生产者：真实流逝×rate 只用于
+            // 把前沿往后推（有界，容量=tickQueueCapacityGameSeconds），已消费位置只由「消费 tick」前进。
+            // 被封顶截掉的时间不再消失：容量内的留在队列里逐轮消费（绝不静默丢弃），超出容量的部分显式
+            // 计入 droppedGameSeconds（显式丢弃并记录，WARN 可追溯）——对齐审计「tick 才是 job，墙钟
+            // 只是 job 生产者」，不再把时间藏在 last_engine_run_at 与 now 的差值里。
             long fromSecond = clock.getLastGameSecond() == null ? 0L : clock.getLastGameSecond();
             long fromHour = fromSecond / 3600L;
-            // 回补基准：last_engine_run_at 优先；兼容 B3 前旧库（活跃窗口时代的 last_sim_time）；
+            int rate = rateOf(clock);
+            int tickSeconds = tickGameMinutes > 0 ? tickGameMinutes * 60 : 300;
+            // 队列前沿（存量/首次运行 NULL=尚未授权，视为=已消费位置：无积压；防御性不与已消费位置回退）
+            long frontier = clock.getAuthorizedTargetSecond() == null
+                    ? fromSecond : Math.max(fromSecond, clock.getAuthorizedTargetSecond());
+            // 生产者锚点：last_engine_run_at 优先；兼容 B3 前旧库（活跃窗口时代的 last_sim_time）；
             // 两者皆空=首次运行，以当前为基准不补推
             LocalDateTime base = clock.getLastEngineRunAt();
             if (base == null) {
@@ -788,70 +874,93 @@ public class WorldEngine {
             if (base == null) {
                 base = now;
             }
-            long elapsed = engineElapsedGameSeconds(base, now, rateOf(clock));
-            long step = stepOf(elapsed, maxStepSeconds);
-            if (step <= 0) {
-                // 无流逝：仅刷新回补基准（避免下次仍从空基准计算）
-                // 长跑缺陷：窄列更新（只写 last_engine_run_at），不整实体回写
+            // 显式丢弃累计（存量行 NULL=0）
+            long dropped = clock.getDroppedGameSeconds() == null ? 0L : clock.getDroppedGameSeconds();
+            // ---- 生产相：墙钟流逝 × rate → 授权前沿（有界：溢出显式丢弃并记录） ----
+            long elapsed = engineElapsedGameSeconds(base, now, rate);
+            long droppedThisRound = 0L;
+            if (elapsed > 0) {
+                long newFrontier = frontier + elapsed;
+                long capacity = Math.max(0L, tickQueueCapacityGameSeconds);
+                if (capacity > 0 && newFrontier - fromSecond > capacity) {
+                    // 溢出：超出容量的部分显式丢弃并记录（世界落后真实流逝的部分显式计数，不再静默丢失）
+                    droppedThisRound = newFrontier - fromSecond - capacity;
+                    dropped += droppedThisRound;
+                    newFrontier = fromSecond + capacity;
+                }
+                frontier = newFrontier;
+            }
+            long backlog = frontier - fromSecond;
+            if (elapsed <= 0 && backlog <= 0) {
+                // 无流逝且队列空：仅刷新生产者锚点（避免下次仍从空基准计算；窄列更新）。
+                // ⚠️ 队列非空（重启/上轮积压）时<b>不得</b>走 idle——积压仍需逐轮消费
                 clock.setLastEngineRunAt(now);
                 clockRepository.updateEngineBase(projectId, now);
                 return baseResult(projectId, "idle", fromHour, 0, 0, 0, 0, "无流逝时间，跳过推进");
             }
-
-            // ⚠️ 长跑抓修（世界「只走时间、不做任何事」）：simulate 的 tick 循环是
-            //
-            // toSecond - fromSecond < tickSeconds 时循环体一次都不进——感知/状态衰减/ 注意力/
-            // 每小时决策/世界事件全部为 0（日志实证：角色=0 人群=0 事件=0 AI=0/27 屏障=0 次），
-            // 世界表面在推进、实则空转（日历照走、NPC 永远不动、tick 摘要永不更新）。
-            // 触发条件：rate × 扫描间隔 < tickSeconds（实测 rate=16×12.5s=200、rate=6×12.5s=75，
-            // 均 < 300 游戏秒）；原实现隐含假设 rate × 扫描间隔 ≥ tickSeconds（rate=24 时恰为 300）。
-            // 处置：不足一个 tick 时**不推进、不刷新回补基准**（last_engine_run_at 保持），elapsed 在
-            // 下一轮扫描继续累计，够了自然推进；够一个 tick 时按原语义推进完整 step（亚 tick 余数保留在
-            // last_game_second，见 subTickRemainderPreservedInLastGameSecond 单测）——世界对任意 rate
-            // 都能自洽运转，慢速率表现为 tick 更稀疏，而不是空转。
-            int tickSeconds = tickGameMinutes > 0 ? tickGameMinutes * 60 : 300;
-            if (step < tickSeconds) {
+            if (backlog < tickSeconds) {
+                // 不足一个 tick：把前沿落库（亚 tick 余量显式留在队列，不再藏在基准差值里）、
+                // 刷新生产者锚点——任意 rate 都能自洽累计，慢速率表现为 tick 更稀疏而非空转/丢时间。
+                // ⚠️ 长跑抓修背景：rate×扫描间隔 < tickSeconds 时 simulate 循环体一次都不进（空转），
+                // 根治后该情形显式保留在队列前沿，下一轮扫描继续累计，够了自然推进。
+                clockRepository.updateEngineFrontier(projectId, frontier, now);
+                recordDeferred(projectId, backlog, droppedThisRound, dropped, fromSecond, "queue");
                 return baseResult(projectId, "pending", fromHour, 0, 0, 0, 0,
-                        "累计中：不足一个 tick（" + step + "/" + tickSeconds + " 游戏秒），留待下一轮扫描");
+                        "累计中：不足一个 tick（" + backlog + "/" + tickSeconds + " 游戏秒），留待下一轮扫描");
             }
-            long toSecond = fromSecond + step;
-            // 屏障接线配套：回补步长按「单轮最多推进的 tick 数」收敛。
-            // 屏障让每个 tick 的下限耗时变成「AI 写回链最长耗时」，若一次回补几十个 tick
-            // （长时间离线 / Unity 拨钟 / 改 rate 造成的追帧），等待会成倍累积、时钟越追越远，
-            // 且越过越多的 tick 会让积压持续放大。改为：时钟宁可走慢，也不快进雪崩——
-            // 本轮只推进 maxCatchUpTicks 个 tick（缺省 24 tick = 2 游戏小时），剩余回补留给
-            // 下一轮扫描自然追平（last_engine_run_at 已在本轮末尾推进，不会重复补）。
-            if (tickBarrier != null && tickBarrier.isEnabled()) {
-                long maxTicksSeconds = tickBarrier.maxCatchUpTicks() * (long) tickSeconds;
-                if (toSecond - fromSecond > maxTicksSeconds) {
-                    log.info("[世界引擎] 回补步长按屏障上限收敛: project={} {}→{} 游戏秒（上限 {} tick），"
-                                    + "剩余回补留待下一轮扫描", projectId, fromSecond, fromSecond + maxTicksSeconds,
-                            tickBarrier.maxCatchUpTicks());
-                    toSecond = fromSecond + maxTicksSeconds;
-                }
+            // ---- 消费相：本轮最多消费 maxCatchUpTicks 个 tick（屏障语义：宁可走慢，不快进雪崩） ----
+            // 屏障让每个 tick 的下限耗时变成「AI 写回链最长耗时」，若一次消费几十个 tick（长时间离线/
+            // Unity 拨钟/改 rate 造成的追帧），等待会成倍累积、时钟越追越远。本轮只消费
+            // maxCatchUpTicks 个 tick（缺省 24 tick=2 游戏小时），余量留在队列由后续扫描继续追平——
+            // 未消费 tick 是显式的（队列积压可观测），不会丢失也不会重复补。
+            long drainCap = tickBarrier != null && tickBarrier.isEnabled()
+                    ? tickBarrier.maxCatchUpTicks() * (long) tickSeconds : maxStepSeconds;
+            long toSecond = fromSecond + Math.min(backlog, drainCap);
+            if (backlog > drainCap) {
+                log.info("[世界引擎] 回补按单轮消费上限收敛: project={} 积压 {} 游戏秒，本轮消费 {}"
+                                + "（上限 {} tick），余量留在队列逐轮追平", projectId, backlog, toSecond - fromSecond,
+                        tickBarrier != null && tickBarrier.isEnabled() ? tickBarrier.maxCatchUpTicks() : 0);
             }
             EngineStats stats = simulate(project, fromSecond, toSecond, tickSeconds, budgetPerTick, runMode);
 
-            // 时钟推进位置（秒级权威 last_game_second + 兼容派生 last_game_hour）与回补基准
+            // P0-03 度量基座：持久化本轮预算统计（预算总量/实际消耗/各来源决策数，台账窗口查询）
+            // ——修「BudgetGuard 预算耗尽只在内存、endTick 即 remove」；失败隔离不阻断推进
+            if (decisionLedgerService != null) {
+                try {
+                    decisionLedgerService.persistTickStat(projectId, fromSecond, toSecond,
+                            budgetPerTick, stats.aiCalls);
+                } catch (Exception e) {
+                    log.warn("[世界引擎] tick 预算统计持久化失败（隔离继续）: project={} : {}",
+                            projectId, e.getMessage());
+                }
+            }
+
+            // ---- 收尾：已消费位置前进 + 前沿/丢弃量一并原子落库（窄列更新，与配置侧无覆盖冲突） ----
+            // P0-01 修复口径：位置/前沿/丢弃必须同事务提交（torn state 会让下一轮重复消费同一段
+            // 游戏时间）。生产者锚点=now：墙钟时刻被「本次授权」消费干净，亚秒残差随锚点前移自然继承，
+            // 无止血模式的截断余量问题（见 engineElapsedGameSeconds 注释）。
             clock.setLastGameSecond(toSecond);
             clock.setLastGameHour(toSecond / 3600L);
             clock.setLastEngineRunAt(now);
             clock.setLastSimTime(now);
             clock.setLastSummary(stats.summary);
+            // 可观测：本轮结束后队列积压（>0=世界落后真实流逝、正在追平；=0=已追平）；丢弃>0 升 WARN
+            recordDeferred(projectId, frontier - toSecond, droppedThisRound, dropped, toSecond, "queue");
             // 长跑缺陷 根治：**窄列更新**（只写引擎列）代替整实体 save——
             // 原实现把整个实体（含 rate/paused/锚点等配置列的事务前快照）回写，与配置侧 PUT 并发时
             // 后写者覆盖前写者，实测 rate 被反复打回旧值、日历投影跑偏（偏移 −196s → +1207s）。
-            clockRepository.updateEnginePosition(projectId, toSecond, toSecond / 3600L, now, stats.summary);
+            clockRepository.updateEnginePosition(projectId, toSecond, toSecond / 3600L, now,
+                    frontier, dropped, stats.summary);
 
             // S2 沙盘 clock 广播：推进后推送当前时钟（游戏日/小时/暂停态），失败不影响推进
             publishClockSafe(projectId, 0);
 
-            log.info("[世界引擎] 项目={} 推进 {} 游戏秒（≈{} 游戏小时，{}→{}） 角色={} 人群={} 事件={} AI={}/{}"
+            log.info("[世界引擎] 项目={} 推进 {} 游戏秒（≈{} 游戏小时，{}→{}） 队列积压={} 丢弃={} 角色={} 人群={} 事件={} AI={}/{}"
                             + " 屏障={}次/{}ms(超时{} 排队{}) 扇出超时={} 摘要={}",
                     projectId, toSecond - fromSecond, (toSecond - fromSecond) / 3600L, fromHour,
-                    toSecond / 3600L, stats.actions, stats.crowds, stats.events, stats.aiCalls, budgetPerTick,
-                    stats.barrierWaits, stats.barrierWaitedMs, stats.barrierTimeouts, stats.barrierDeferred,
-                    stats.dispatchTimeouts, stats.summary);
+                    toSecond / 3600L, frontier - toSecond, dropped, stats.actions, stats.crowds, stats.events,
+                    stats.aiCalls, budgetPerTick, stats.barrierWaits, stats.barrierWaitedMs,
+                    stats.barrierTimeouts, stats.barrierDeferred, stats.dispatchTimeouts, stats.summary);
             return baseResult(projectId, "advanced", toSecond / 3600L, (toSecond - fromSecond) / 3600L,
                     stats.actions, stats.crowds, stats.events, stats.aiCalls, stats.summary,
                     stats.dispatchTimeouts);
@@ -895,6 +1004,10 @@ public class WorldEngine {
             return baseResult(projectId, "stopped", clock.getLastGameHour(), 0, 0, 0, 0,
                     "世界未开启持续运行，外部时钟推进跳过");
         }
+
+        // P0-02 根治（可重试性）：外部时钟路径同口径排空到点决策重试（暂停/未运行已在上方拦截）
+        drainDecisionRetries(projectId);
+
         long fromSecond = clock.getLastGameSecond() == null ? 0L : clock.getLastGameSecond();
         if (toSecond <= fromSecond) {
             return baseResult(projectId, "idle", fromSecond / 3600L, 0, 0, 0, 0,
@@ -905,47 +1018,81 @@ public class WorldEngine {
         ActorWorldEngine engine = requireEngine(projectId);
         long maxStepSeconds = engine.getMaxStepHours() != null
                 ? engine.getMaxStepHours() * 3600L : maxCatchUpSeconds;
-        long to = Math.min(toSecond, fromSecond + Math.max(1L, maxStepSeconds));
-        if (to <= fromSecond) {
-            return baseResult(projectId, "idle", fromSecond / 3600L, 0, 0, 0, 0,
-                    "外部时钟推进量小于最小步长");
-        }
         int configuredBudget = engine.getBudgetPerTick() == null ? maxAiCalls : engine.getBudgetPerTick();
         String runMode = RunModes.normalize(engine.getRunMode());
         int budgetPerTick = RunModes.effectiveBudget(runMode, configuredBudget);
         budgetPerTick = intensityBudget(budgetPerTick, aiIntensityGate, projectId);
         budgetGuard.beginTick(projectId, budgetPerTick);
         try {
+            // ==================== P0-01 根治：外部时钟路径同队列模型 ====================
+            // Unity 是时钟权威：上报目标直接作为授权前沿（单调不回退）；已消费位置只由消费前进。
+            // 同自走路径：未消费 tick 显式留在队列里，本轮按 maxCatchUpTicks 收敛，余量由后续上报
+            // （或队列本身）继续追平——不再依赖 Unity 重新上报才自愈（旧实现封顶后余量即丢）。
             int tickSeconds = tickGameMinutes > 0 ? tickGameMinutes * 60 : 300;
-            // 同自走路径：单轮推进按屏障上限收敛（理由见 advanceProject 中同段说明）——Unity 拨钟/
-            // 重连造成的巨量回补不在一次调用里跑完，剩余量由后续上报继续收敛（时钟权威仍在 Unity，
-            // 只是世界时间分多轮追上，避免一次调用把调度线程与屏障占住数分钟）
-            if (tickBarrier != null && tickBarrier.isEnabled()) {
-                long maxTicksSeconds = tickBarrier.maxCatchUpTicks() * (long) tickSeconds;
-                if (to - fromSecond > maxTicksSeconds) {
-                    log.info("[世界引擎] 外部时钟推进按屏障上限收敛: project={} 目标 {} → 本轮 {} 游戏秒"
-                                    + "（上限 {} tick），剩余量由后续上报继续收敛",
-                            projectId, to, fromSecond + maxTicksSeconds, tickBarrier.maxCatchUpTicks());
-                    to = fromSecond + maxTicksSeconds;
+            long frontier = clock.getAuthorizedTargetSecond() == null
+                    ? fromSecond : Math.max(fromSecond, clock.getAuthorizedTargetSecond());
+            long dropped = clock.getDroppedGameSeconds() == null ? 0L : clock.getDroppedGameSeconds();
+            long droppedThisRound = 0L;
+            if (toSecond > frontier) {
+                // 上报目标推进前沿（有界：超出容量显式丢弃并记录，避免超长拨钟让队列无限膨胀）
+                long newFrontier = toSecond;
+                long capacity = Math.max(0L, tickQueueCapacityGameSeconds);
+                if (capacity > 0 && newFrontier - fromSecond > capacity) {
+                    droppedThisRound = newFrontier - fromSecond - capacity;
+                    dropped += droppedThisRound;
+                    newFrontier = fromSecond + capacity;
                 }
+                frontier = newFrontier;
+            }
+            long backlog = frontier - fromSecond;
+            // 消费相：本轮最多消费 maxCatchUpTicks 个 tick（Unity 拨钟/重连巨量回补分多轮追上，
+            // 避免一次调用把调度线程与屏障占住数分钟）；外部路径保持「任意正增量都消费」——
+            // Unity 细粒度时钟上报（亚 tick）也照常推进，不被 tick 粒度卡住
+            long drainCap = tickBarrier != null && tickBarrier.isEnabled()
+                    ? tickBarrier.maxCatchUpTicks() * (long) tickSeconds : maxStepSeconds;
+            long to = fromSecond + Math.min(backlog, drainCap);
+            if (to <= fromSecond) {
+                return baseResult(projectId, "idle", fromSecond / 3600L, 0, 0, 0, 0,
+                        "外部时钟推进量小于最小步长");
+            }
+            if (backlog > drainCap) {
+                log.info("[世界引擎] 外部时钟推进按单轮消费上限收敛: project={} 目标 {} 本轮 {} 游戏秒"
+                                + "（上限 {} tick），余量留在队列由后续上报继续收敛", projectId, frontier,
+                        to - fromSecond,
+                        tickBarrier != null && tickBarrier.isEnabled() ? tickBarrier.maxCatchUpTicks() : 0);
             }
             EngineStats stats = simulate(project, fromSecond, to, tickSeconds, budgetPerTick, runMode);
 
-            // 时钟推进位置（秒级权威 last_game_second）与回补基准
+            // P0-03 度量基座：持久化本轮预算统计（外部时钟路径同口径；失败隔离不阻断推进）
+            if (decisionLedgerService != null) {
+                try {
+                    decisionLedgerService.persistTickStat(projectId, fromSecond, to,
+                            budgetPerTick, stats.aiCalls);
+                } catch (Exception e) {
+                    log.warn("[世界引擎] tick 预算统计持久化失败（隔离继续）: project={} : {}",
+                            projectId, e.getMessage());
+                }
+            }
+
+            // 时钟推进位置（秒级权威 last_game_second）与队列（前沿/丢弃量）一并原子落库；
+            // 生产者锚点=now：断开后自走从当前世界位置正确接续（不补 Unity 连接期间的墙钟流逝）
             clock.setLastGameSecond(to);
             clock.setLastGameHour(to / 3600L);
             clock.setLastEngineRunAt(LocalDateTime.now());
             clock.setLastSimTime(LocalDateTime.now());
             clock.setLastSummary(stats.summary);
+            recordDeferred(projectId, frontier - to, droppedThisRound, dropped, to, "external");
             // 同：窄列更新（外部时钟权威路径同步改造，两处推进出口口径一致）
-            clockRepository.updateEnginePosition(projectId, to, to / 3600L, LocalDateTime.now(), stats.summary);
+            clockRepository.updateEnginePosition(projectId, to, to / 3600L, LocalDateTime.now(),
+                    frontier, dropped, stats.summary);
             publishClockSafe(projectId, 0);
 
-            log.info("[世界引擎] 外部时钟推进：项目={} {}→{} 游戏秒（≈{} 游戏小时） 角色={} 人群={} 事件={} AI={}/{}"
-                            + " 屏障={}次/{}ms(超时{} 排队{}) 扇出超时={} 摘要={}",
-                    projectId, fromSecond, to, (to - fromSecond) / 3600L, stats.actions, stats.crowds,
-                    stats.events, stats.aiCalls, budgetPerTick, stats.barrierWaits, stats.barrierWaitedMs,
-                    stats.barrierTimeouts, stats.barrierDeferred, stats.dispatchTimeouts, stats.summary);
+            log.info("[世界引擎] 外部时钟推进：项目={} {}→{} 游戏秒（≈{} 游戏小时） 队列积压={} 丢弃={}"
+                            + " 角色={} 人群={} 事件={} AI={}/{} 屏障={}次/{}ms(超时{} 排队{}) 扇出超时={} 摘要={}",
+                    projectId, fromSecond, to, (to - fromSecond) / 3600L, frontier - to, dropped,
+                    stats.actions, stats.crowds, stats.events, stats.aiCalls, budgetPerTick,
+                    stats.barrierWaits, stats.barrierWaitedMs, stats.barrierTimeouts, stats.barrierDeferred,
+                    stats.dispatchTimeouts, stats.summary);
             return baseResult(projectId, "advanced", to / 3600L, (to - fromSecond) / 3600L,
                     stats.actions, stats.crowds, stats.events, stats.aiCalls, stats.summary,
                     stats.dispatchTimeouts);
@@ -990,7 +1137,7 @@ public class WorldEngine {
                                  int budgetPerTick, String runMode) {
         Long userId = project.getUserId();
         Long projectId = project.getId();
-        int actions = 0, crowds = 0, events = 0;
+        int actions = 0, crowds = 0, events = 0, missingDecisions = 0;
         // 长跑抓修：调度名单必须排除已故（DECEASED）角色——死亡链路只置 stage 标记
         // 不改 deleted，旧查询会把死人拉进每小时决策/感知/闲聊，产出荒谬行动并浪费 AI 预算
         List<ActorCharacter> characters = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
@@ -1102,6 +1249,7 @@ public class WorldEngine {
                         DispatchOutcome pre = dispatchHourlyDecisions(decisionPriority, projectId, userId,
                                 s, hour + 1, budgetPerTick);
                         actions += pre.completed();
+                        missingDecisions += pre.missing();
                         lookaheadDispatched += pre.completed();
                         log.info("[世界引擎] 前瞻预热触发：project={} 目标小时={} 派发角色={} 感知时刻={}（提前 {} 游戏分钟）",
                                 projectId, hour + 1, pre.completed(), s, lookaheadGameMinutes);
@@ -1126,6 +1274,7 @@ public class WorldEngine {
                 DispatchOutcome dispatched = dispatchHourlyDecisions(decisionPriority, projectId, userId,
                         hour * 3600L, hour, budgetPerTick);
                 actions += dispatched.completed();
+                missingDecisions += dispatched.missing();
                 dispatchTimeouts += dispatched.timedOut();
                 lookaheadSkipped += dispatched.skipped();
                 lookaheadDispatched += dispatched.completed();
@@ -1386,6 +1535,10 @@ public class WorldEngine {
 
         String summary = "游戏推进至" + WorldClockService.formatGameTime(toSecond / 3600L)
                 + "，角色行动 " + actions + " 次，普通居民调度 " + crowds + " 次，世界事件 " + events + " 起。"
+                + (missingDecisions > 0
+                ? "⚠️ 决策缺失 " + missingDecisions + " 次（决策失败，本时段暂无决策记录，不伪造活动文本"
+                + "；已入队重试的将补算回填原定时刻）。"
+                : "")
                 + (lookaheadSkipped > 0 || lookaheadDispatched > 0
                 ? "前瞻预热（提前 " + lookaheadGameMinutes + " 游戏分钟），边界跳过 " + lookaheadSkipped
                 + " 个已预热角色，异步派发 " + lookaheadDispatched + " 个。"
@@ -1400,7 +1553,7 @@ public class WorldEngine {
                 + "（世界照常推进，其 AI 结果不再计入本小时）。"
                 : "");
         return new EngineStats(actions, crowds, events, aiCalls, dispatchTimeouts, barrierWaits, barrierWaitedMs,
-                barrierTimeouts, barrierDeferred, lookaheadSkipped, summary);
+                barrierTimeouts, barrierDeferred, lookaheadSkipped, missingDecisions, summary);
     }
 
     /**
@@ -1443,7 +1596,7 @@ public class WorldEngine {
     private DispatchOutcome dispatchHourlyDecisions(List<ActorCharacter> decisionPriority, Long projectId, Long userId,
                                                     long gameSecond, long targetHour, int batchBudget) {
         if (decisionPriority == null || decisionPriority.isEmpty()) {
-            return new DispatchOutcome(0, 0, 0);
+            return new DispatchOutcome(0, 0, 0, 0);
         }
         // 去重记账：预热命中（本目标小时已派发过）跳过；未派发则记录并加入本批
         Map<String, Long> prepared = preparedHour.computeIfAbsent(projectId, k -> new ConcurrentHashMap<>());
@@ -1460,16 +1613,22 @@ public class WorldEngine {
             toDispatch.add(ch);
         }
         if (toDispatch.isEmpty()) {
-            return new DispatchOutcome(0, 0, skipped);
+            return new DispatchOutcome(0, 0, skipped, 0);
         }
         int parallelism = dispatchParallelism();
         if (parallelism <= 1) {
             // 串行路径：屏障未装配（单测）/已关闭（barrier.enabled=false）/并行度=1 → 引擎线程同步执行
             int serial = 0;
+            int missing = 0;
             for (ActorCharacter ch : toDispatch) {
-                serial += dispatchOneCharacter(ch, projectId, userId, gameSecond);
+                int r = dispatchOneCharacter(ch, projectId, userId, gameSecond);
+                if (r == 2) {
+                    missing++; // 决策缺失（决策失败，本时段无决策记录）
+                } else if (r == 1) {
+                    serial++;
+                }
             }
-            return new DispatchOutcome(serial, 0, skipped);
+            return new DispatchOutcome(serial, 0, skipped, missing);
         }
         // 异步路径：提交扇出线程池即返回，引擎永不阻塞
         ExecutorService pool = dispatchPool();
@@ -1500,7 +1659,7 @@ public class WorldEngine {
                 }
             }
         }
-        return new DispatchOutcome(toDispatch.size(), 0, skipped);
+        return new DispatchOutcome(toDispatch.size(), 0, skipped, 0);
     }
 
     /**
@@ -1542,8 +1701,12 @@ public class WorldEngine {
     /**
      * 单个角色的每小时周期决策（从 {@link #simulate} 串行循环抽出；R1
      * 感知时刻参数由「整点 hour」细化为「gameSecond」——预热批次传预热触发 tick 秒，B1 口径）。
-     * <p>内容与改造前逐行一致：空闲降频跳过 → 组装【当前所见】感知文本 → 追加【独处】段 →
-     * {@code AgentRuntime.trigger(ENGINE_TICK)}；任何异常 → 程序化角色状态更新兜底（不阻断推进）。</p>
+     * <p>内容与改造前逐行一致：空闲降频跳过 → {@link #attemptDecisionOnce} 组装【当前所见】
+     * 感知文本 + 追加【独处】段 + {@code AgentRuntime.trigger(ENGINE_TICK)}；任何异常 →
+     * <b>P0-02 根治（可重试性）</b>：先入队决策重试作业（指数退避；max 档不限次数），入队
+     * 成功 = 本时段暂无决策、等待补算（<b>不</b>立即落缺失、不伪造活动文本）；入队失败
+     * （未启用/队列满/服务未装配）→ 决策缺失留痕（P0-02 止血 (a)：current_activity 保持
+     * 上一小时值不变，落台账 + 编年史显式「该时段无决策」）。推进永不阻断。</p>
      *
      * @param ch 角色实体
      *
@@ -1553,13 +1716,13 @@ public class WorldEngine {
      *
      * @param gameSecond 决策感知时刻（游戏秒：预热=预热触发 tick 时刻；边界补发=边界整点）
      *
-     * @return 1=本小时完成一次决策（AI 或程序化兜底），0=空闲降频跳过（延续当前行动，零 AI）
+     * @return 1=本小时完成一次决策（AI 或程序化兜底），0=空闲降频跳过（延续当前行动，零 AI），
+     * 2=决策缺失（决策失败；已入队重试=本时段暂无决策待补算，或未入队=本时段无决策记录）
      */
     private int dispatchOneCharacter(ActorCharacter ch, Long projectId, Long userId, long gameSecond) {
         long hour = Math.floorDiv(gameSecond, 3600L);
-        int hourOfDay = (int) Math.floorMod(hour, 24);
+        String ref = com.holzyn.actor.common.NpcRefs.of(ch.getId());
         try {
-            String ref = com.holzyn.actor.common.NpcRefs.of(ch.getId());
             // 空闲降频：有进行中行动
             // （最近决策过，距上次决策 < idle-decision-window-game-minutes）且无新刺激 →
             // 本小时周期决策跳过（延续当前行动零 AI）；行动完成[窗口过后]或有刺激
@@ -1570,49 +1733,99 @@ public class WorldEngine {
                 log.debug("[世界引擎] 空闲降频跳过周期决策: char={} hour={}", ch.getId(), hour);
                 return 0;
             }
-            // 此刻可发生空间：感知组装前空间保障——buildPerceptionText 内注入的
-            // 空间段必须是最新生成结果（空间缺失/过期才 AI 生成，有效复用零成本；失败零阻断）
-            ensureDecisionSpace(projectId, ref, gameSecond);
-            // B3 统一时间口径：感知按引擎推进到的游戏时刻（gameSecond）组装【当前所见】，
-            // 而非读世界时钟当前值——回补推进时决策看到的也是「当时的世界」（修 L-07/）
-            String situation = perceptionService.buildPerceptionText(projectId, ref, gameSecond);
-            if (situation == null || situation.isBlank()) {
-                situation = "当前游戏时刻：" + WorldClockService.formatGameTime(hour)
-                        + "；角色当前状态：" + (ch.getCurrentActivity() == null
-                        || ch.getCurrentActivity().isBlank() ? "空闲" : ch.getCurrentActivity());
-            }
-            // 独处行为：同地点无其他
-            // 特殊 NPC 且无人群 NPC → 追加【独处】段（AI 自行决定独处时的真实行为；
-            // 判定失败/未装配跳过不阻断决策）
-            if (solitudeService != null) {
-                try {
-                    String solitude = solitudeService.solitudeSegment(projectId, ref);
-                    if (solitude != null && !solitude.isBlank()) {
-                        situation = situation + "\n\n" + solitude;
-                    }
-                } catch (Exception e) {
-                    log.warn("[世界引擎] 独处段注入失败（跳过）: char={} : {}", ch.getId(), e.getMessage());
-                }
-            }
-            agentRuntime.trigger(AgentTrigger.ENGINE_TICK, ref,
-                    DecisionContext.builder()
-                            .projectId(projectId)
-                            .userId(userId)
-                            .gameSecond(gameSecond)
-                            .situation(situation)
-                            .reason("世界引擎每游戏小时决策机会")
-                            .build());
+            attemptDecisionOnce(ch, projectId, userId, gameSecond, false);
             // 治理批次 0 · 卡3-A ①：动作结算复位点（当前行动非移动 → 沙盘 moveState 复位 idle）
             settleMoveState(projectId, ch);
             return 1;
         } catch (Exception e) {
-            // AI 决策失败：程序化兜底（不阻断推进）
-            log.warn("[世界引擎] 角色行动失败，程序化兜底: char={} : {}", ch.getId(), e.getMessage());
-            programmaticUpdate(ch, hourOfDay);
-            // 卡3-A ①：程序化兜底活动同样参与动作结算复位（歇息就寝/日常事务均非移动）
+            // P0-02 根治（可重试性）：决策失败 → 先入队重试作业（指数退避；max 档不限次数，
+            // 时间可以等作业——该角色的这一小时在上游时间推进后补算回填到原定 gameSecond，
+            // 而不是让世界停下来或编造）。入队成功=本时段暂无决策，等待补算。
+            if (decisionRetryService != null) {
+                try {
+                    if (decisionRetryService.enqueue(projectId, ch.getId(), ref, userId,
+                            gameSecond, e.getMessage())) {
+                        log.warn("[世界引擎] 角色决策失败，已入队重试（P0-02 根治）: char={} hour={} 原定时刻={} 原因={}",
+                                ch.getId(), hour, gameSecond, e.getMessage());
+                        settleMoveState(projectId, ch);
+                        return 2;
+                    }
+                } catch (Exception re) {
+                    log.warn("[世界引擎] 决策重试入队失败（按缺失留痕继续）: char={} : {}", ch.getId(), re.getMessage());
+                }
+            }
+            // P0-02 止血 (a)：入队失败/未启用 → 决策缺失（不伪造新活动文本；current_activity
+            // 保持上一小时值不变），落台账 + 编年史显式「该时段无决策」——比编造更接近真实，
+            // 且不再产生「在驻地歇息就寝」式的伪造经历被下游感知/记忆/反思吸收。
+            log.warn("[世界引擎] 角色决策失败，本时段无决策记录（不伪造活动文本）: char={} : {}",
+                    ch.getId(), e.getMessage());
+            if (decisionLedgerService != null) {
+                try {
+                    decisionLedgerService.recordMissing(projectId, ch, gameSecond, e.getMessage());
+                } catch (Exception le) {
+                    log.warn("[世界引擎] 决策缺失留痕失败（隔离继续）: char={} : {}", ch.getId(), le.getMessage());
+                }
+            }
+            // 卡3-A ①：动作结算复位仍执行（无新决策=延续当前行动；歇息/日常均非移动）
             settleMoveState(projectId, ch);
-            return 1;
+            return 2;
         }
+    }
+
+    /**
+     * 单次决策尝试主体（从 {@link #dispatchOneCharacter} 抽出；P0-02 根治复用——
+     * 决策重试作业重跑本方法，失败向上抛由调用方处置：入队重试或缺失留痕）。
+     * <p>内容=空闲降频判定之后的完整决策入口：此刻可发生空间保障 → 按游戏时刻组装
+     * 【当前所见】感知文本 → 追加【独处】段 → {@code AgentRuntime.trigger(ENGINE_TICK)}。
+     * 感知按传入 gameSecond 组装（回补推进时决策看到的也是「当时的世界」）。</p>
+     *
+     * @param ch 角色实体
+     *
+     * @param projectId 项目 ID
+     *
+     * @param userId 项目所属用户 ID
+     *
+     * @param gameSecond 决策感知时刻（游戏秒；重试=原定决策时刻，回填到历史位置）
+     *
+     * @param retry 是否决策重试补算（true=由重试作业重跑，决策循环据此打标 AI_RETRY）
+     */
+    private void attemptDecisionOnce(ActorCharacter ch, Long projectId, Long userId, long gameSecond,
+                                     boolean retry) {
+        long hour = Math.floorDiv(gameSecond, 3600L);
+        String ref = com.holzyn.actor.common.NpcRefs.of(ch.getId());
+        // 此刻可发生空间：感知组装前空间保障——buildPerceptionText 内注入的
+        // 空间段必须是最新生成结果（空间缺失/过期才 AI 生成，有效复用零成本；失败零阻断）
+        ensureDecisionSpace(projectId, ref, gameSecond);
+        // B3 统一时间口径：感知按引擎推进到的游戏时刻（gameSecond）组装【当前所见】，
+        // 而非读世界时钟当前值——回补推进时决策看到的也是「当时的世界」（修 L-07/）
+        String situation = perceptionService.buildPerceptionText(projectId, ref, gameSecond);
+        if (situation == null || situation.isBlank()) {
+            situation = "当前游戏时刻：" + WorldClockService.formatGameTime(hour)
+                    + "；角色当前状态：" + (ch.getCurrentActivity() == null
+                    || ch.getCurrentActivity().isBlank() ? "空闲" : ch.getCurrentActivity());
+        }
+        // 独处行为：同地点无其他
+        // 特殊 NPC 且无人群 NPC → 追加【独处】段（AI 自行决定独处时的真实行为；
+        // 判定失败/未装配跳过不阻断决策）
+        if (solitudeService != null) {
+            try {
+                String solitude = solitudeService.solitudeSegment(projectId, ref);
+                if (solitude != null && !solitude.isBlank()) {
+                    situation = situation + "\n\n" + solitude;
+                }
+            } catch (Exception e) {
+                log.warn("[世界引擎] 独处段注入失败（跳过）: char={} : {}", ch.getId(), e.getMessage());
+            }
+        }
+        agentRuntime.trigger(AgentTrigger.ENGINE_TICK, ref,
+                DecisionContext.builder()
+                        .projectId(projectId)
+                        .userId(userId)
+                        .gameSecond(gameSecond)
+                        .situation(situation)
+                        .retry(retry)
+                        .reason("世界引擎每游戏小时决策机会")
+                        .build());
     }
 
     /**
@@ -1628,6 +1841,170 @@ public class WorldEngine {
             return 1;
         }
         return barrier.parallelDispatch();
+    }
+
+    // ==================== P0-02 根治：决策重试作业排空（可重试性） ====================
+
+    /** 单轮决策重试排空上限（超出留到下一轮扫描，防单轮重活堆积）。 */
+    private static final int RETRY_DRAIN_BATCH = 50;
+
+    /** 决策重试批次预算（并行路径开 {@code BudgetGuard} 批次窗口用；max 档忽略预算不限次数）。 */
+    private static final int RETRY_BATCH_BUDGET = 10;
+
+    /**
+     * 排空到点的决策重试作业（P0-02 根治 · 可重试性；世界运行中由引擎扫描调用）。
+     * <p>执行模型与小时级决策扇出同口径：并行度&gt;1（屏障开启）→ 提交扇出线程池异步执行
+     * （任务内标记 {@code AgentRuntime.inBatchDispatch()}，预算走独立批次命名空间，不阻塞
+     * 扫描线程）；并行度=1（屏障未装配/已关闭）→ 引擎线程串行执行（单测确定性）。</p>
+     * <p>并发防双跑：每个作业经 {@code DecisionRetryService.claim} 原子认领（PENDING→
+     * RETRYING），引擎扫描与手动推进并发时只有一个线程执行，同一决策点绝不被重跑两次。</p>
+     *
+     * @param projectId 项目 ID
+     */
+    private void drainDecisionRetries(Long projectId) {
+        if (decisionRetryService == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        try {
+            // 崩溃残留回收：认领方进程退出后作业停留在 RETRYING 超期 → 回 PENDING 重新可重试
+            decisionRetryService.reclaimStale(projectId, now);
+        } catch (Exception e) {
+            log.warn("[世界引擎] 决策重试残留回收失败（隔离继续）: project={} : {}", projectId, e.getMessage());
+        }
+        List<com.holzyn.actor.domain.agent.runtime.entity.ActorDecisionRetry> due;
+        try {
+            due = decisionRetryService.dueJobs(projectId, now, RETRY_DRAIN_BATCH);
+        } catch (Exception e) {
+            log.warn("[世界引擎] 决策重试扫描失败（隔离继续）: project={} : {}", projectId, e.getMessage());
+            return;
+        }
+        if (due.isEmpty()) {
+            return;
+        }
+        if (dispatchParallelism() <= 1) {
+            // 串行路径：引擎线程逐个重跑（单测/串行配置确定性；AI 调用同步等待）。
+            // 同样经原子认领——屏障关闭配置下扫描与手动推进仍可能并发，防同一作业双跑
+            for (com.holzyn.actor.domain.agent.runtime.entity.ActorDecisionRetry job : due) {
+                try {
+                    if (decisionRetryService.claim(job, LocalDateTime.now())) {
+                        retryDecisionJob(job);
+                    }
+                } catch (Exception e) {
+                    log.warn("[世界引擎] 决策重试认领失败（跳过）: job={} : {}", job.getId(), e.getMessage());
+                }
+            }
+            return;
+        }
+        // 异步路径：原子认领后提交扇出线程池（批次预算命名空间，与引擎 tick 窗口隔离），
+        // 引擎立即继续推进——时间可以等作业，决策在后台补算回填到原定 gameSecond
+        ExecutorService pool = dispatchPool();
+        budgetGuard.beginBatch(projectId, Math.max(1, RETRY_BATCH_BUDGET));
+        AtomicInteger inFlight = new AtomicInteger(due.size());
+        for (com.holzyn.actor.domain.agent.runtime.entity.ActorDecisionRetry job : due) {
+            try {
+                if (!decisionRetryService.claim(job, LocalDateTime.now())) {
+                    // 已被并发另一轮认领/已终态：释放本批计数（该作业由认领方收口）
+                    inFlight.decrementAndGet();
+                    if (inFlight.get() == 0) {
+                        budgetGuard.endBatch(projectId);
+                    }
+                    continue;
+                }
+            } catch (Exception e) {
+                log.warn("[世界引擎] 决策重试认领失败（跳过）: job={} : {}", job.getId(), e.getMessage());
+                inFlight.decrementAndGet();
+                if (inFlight.get() == 0) {
+                    budgetGuard.endBatch(projectId);
+                }
+                continue;
+            }
+            try {
+                pool.submit(() -> {
+                    AgentRuntime.markBatchDispatch();
+                    try {
+                        retryDecisionJob(job);
+                    } finally {
+                        AgentRuntime.clearBatchDispatch();
+                        if (inFlight.decrementAndGet() == 0) {
+                            budgetGuard.endBatch(projectId);
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                // 提交失败（停机中）：释放批次计数，作业按失败收口重排（下次扫描再试）
+                log.warn("[世界引擎] 决策重试异步派发失败（按失败收口）: job={} : {}", job.getId(), e.getMessage());
+                try {
+                    decisionRetryService.markFailed(job, "异步派发失败: " + e.getMessage(),
+                            LocalDateTime.now(), aiIntensityGate != null && aiIntensityGate.isMax(projectId));
+                } catch (Exception me) {
+                    log.warn("[世界引擎] 决策重试失败收口异常（隔离继续）: job={} : {}", job.getId(), me.getMessage());
+                }
+                inFlight.decrementAndGet();
+                if (inFlight.get() == 0) {
+                    budgetGuard.endBatch(projectId);
+                }
+            }
+        }
+    }
+
+    /**
+     * 重跑一个决策重试作业（P0-02 根治 · 可重试性）。
+     * <p>语义：<b>时间可以等作业</b>——该角色的这一小时在上游时间推进后补算，重跑
+     * {@link #attemptDecisionOnce}（感知按<b>原定 gameSecond</b> 组装、ctx 带 retry 标记），
+     * 成功时决策点以 AI/AI_RETRY 回填到历史位置（台账写入在 {@code AgentRuntime} 决策循环内，
+     * 动作执行在当前时刻落地——补算的代价：后果发生在完成时刻，比编造更接近真实）。</p>
+     * <p>收口：成功 → SUCCEEDED；失败 → 指数退避重排（max 档不限次数），重试耗尽 →
+     * ABANDONED + 显式决策缺失留痕（编年史「该时段无记录」）；角色已删除/已故 → 直接放弃。</p>
+     *
+     * @param job 已认领的作业（调用方保证 claim 成功，本方法负责执行与收口；项目从作业行读取）
+     */
+    private void retryDecisionJob(com.holzyn.actor.domain.agent.runtime.entity.ActorDecisionRetry job) {
+        if (job == null || job.getProjectId() == null) {
+            return;
+        }
+        Long project = job.getProjectId();
+        try {
+            ActorCharacter ch = characterRepository.findById(job.getCharacterId()).orElse(null);
+            if (ch == null || Integer.valueOf(1).equals(ch.getDeleted()) || ch.isDeceased()) {
+                log.warn("[世界引擎] 决策重试角色不可用（放弃补算）: job={} char={} 原定时刻={}",
+                        job.getId(), job.getCharacterId(), job.getGameSecond());
+                decisionRetryService.markAbandoned(job, "角色不存在/已删除/已故，放弃补算");
+                return;
+            }
+            attemptDecisionOnce(ch, project, job.getUserId(), job.getGameSecond(), true);
+            settleMoveState(project, ch);
+            decisionRetryService.markSucceeded(job);
+            log.info("[世界引擎] 决策重试成功（回填原定时刻）: char={} 原定时刻={} 尝试={}次",
+                    job.getCharacterId(), job.getGameSecond(),
+                    (job.getAttemptCount() == null ? 0 : job.getAttemptCount()) + 1);
+        } catch (Exception e) {
+            boolean unlimited = aiIntensityGate != null && aiIntensityGate.isMax(project);
+            boolean willRetry;
+            try {
+                willRetry = decisionRetryService.markFailed(job, e.getMessage(), LocalDateTime.now(), unlimited);
+            } catch (Exception me) {
+                log.warn("[世界引擎] 决策重试失败收口异常（隔离继续）: job={} : {}", job.getId(), me.getMessage());
+                return;
+            }
+            log.warn("[世界引擎] 决策重试失败: char={} 原定时刻={} 尝试={}次{} : {}",
+                    job.getCharacterId(), job.getGameSecond(),
+                    (job.getAttemptCount() == null ? 0 : job.getAttemptCount()),
+                    willRetry ? "（指数退避重排）" : "（重试耗尽，落决策缺失）", e.getMessage());
+            if (!willRetry) {
+                // 重试耗尽 → 显式决策缺失留痕（不伪造活动文本；编年史「该时段无记录」）
+                try {
+                    ActorCharacter ch = characterRepository.findById(job.getCharacterId()).orElse(null);
+                    if (ch != null && decisionLedgerService != null) {
+                        decisionLedgerService.recordMissing(project, ch, job.getGameSecond(),
+                                "决策重试耗尽（" + job.getAttemptCount() + " 次）: " + e.getMessage());
+                    }
+                } catch (Exception le) {
+                    log.warn("[世界引擎] 重试耗尽缺失留痕失败（隔离继续）: char={} : {}",
+                            job.getCharacterId(), le.getMessage());
+                }
+            }
+        }
     }
 
     /**
@@ -1955,15 +2332,16 @@ public class WorldEngine {
 
     /**
      * 程序化角色状态更新（逐时）：活动文本变化才写库（减少重复写）。
-     * <p>治理批次 0 · 卡4-A：引擎程序化决策同步写 {@code actor_state}（经
-     * 活动文本经映射表唯一来源 {@code toActivityState} 映射）——修「引擎写
-     * {@code profile.current_activity} 但不写 actor_state → 普通 NPC 感知读方取旧值」分歧；
-     * 失败零阻断（作息运行态是旁路增强）。</p>
+     * <p>⚠️ P0-02 诚实化止血 (a)：本方法<b>已不再从决策失败路径调用</b>——决策失败改为
+     * 决策缺失（不伪造新活动文本，见 {@link #dispatchOneCharacter} 的 catch）。
+     * 保留方法本身（含 actor_state 同步语义）供未来「明确配置 programmatic-fallback-allowed=true
+     * 且必须打标」的真实度档位工作复用（审计 P0-02 止血 (b)），当前零调用方。</p>
      *
      * @param ch 角色实体
      *
      * @param hourOfDay 当日游戏小时（0-23）
      */
+    @SuppressWarnings("unused")
     private void programmaticUpdate(ActorCharacter ch, int hourOfDay) {
         String activity = programmaticActivity(ch.getLocation(), hourOfDay);
         if (!java.util.Objects.equals(activity, ch.getCurrentActivity())) {
@@ -2018,6 +2396,80 @@ public class WorldEngine {
      */
     private int rateOf(ActorWorldClock clock) {
         return clock.getRate() == null ? DEFAULT_RATE : clock.getRate();
+    }
+
+    /**
+     * 记录本轮推进的 tick 队列状况（P0-01 根治可观测；backlog=0 且无丢弃表示已追平）。
+     * <p>口径：积压 &gt;0 记 INFO（世界落后真实流逝、正在追平——余量显式留在队列）；<b>本轮丢弃
+     * &gt;0 升 WARN</b>（队列溢出=显式丢弃并记录，异常事件）；积压 ≥ 阈值且创新高再补一条 WARN——
+     * 避免离线回补/长耗时轮次的连续刷屏，同时让「积压持续扩大」的真实异常显眼。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param backlogGameSeconds 本轮结束后队列积压（frontier − 已消费位置；0=已追平）
+     *
+     * @param droppedThisRound 本轮显式丢弃的游戏秒（队列溢出部分；0=未溢出）
+     *
+     * @param cumulativeDropped 显式丢弃累计（落库口径）
+     *
+     * @param committedGameSecond 本轮结束后的已消费位置（快照用）
+     *
+     * @param reason 积压来源（queue=自走路径墙钟生产；external=外部时钟上报）
+     */
+    private void recordDeferred(Long projectId, long backlogGameSeconds, long droppedThisRound,
+                                long cumulativeDropped, long committedGameSecond, String reason) {
+        TimeBacklogMetric m = timeBacklog.computeIfAbsent(projectId, k -> new TimeBacklogMetric());
+        m.backlogGameSeconds = backlogGameSeconds;
+        m.committedGameSecond = committedGameSecond;
+        m.droppedGameSeconds = cumulativeDropped;
+        if (backlogGameSeconds > 0) {
+            m.deferredRounds++;
+            // 峰值积压持续跟踪（无论是否触发告警；积压回落期不更新）
+            if (backlogGameSeconds > m.peakBacklogGameSeconds) {
+                m.peakBacklogGameSeconds = backlogGameSeconds;
+            }
+            log.info("[世界引擎] 时间回补积压: project={} 当前积压 {} 游戏秒（{}），余量留在队列逐轮追平",
+                    projectId, backlogGameSeconds, reason);
+        }
+        if (droppedThisRound > 0) {
+            log.warn("[世界引擎] tick 队列溢出，显式丢弃并记录: project={} 本轮丢弃 {} 游戏秒（容量上限 "
+                            + "{} 游戏秒），累计丢弃 {} 游戏秒——世界落后真实流逝的部分已显式计数，不再静默丢失",
+                    projectId, droppedThisRound, tickQueueCapacityGameSeconds, cumulativeDropped);
+        }
+        // 告警口径：仅当「当前积压 ≥ 阈值 且 创出新高（== 峰值）」才升 WARN——
+        // 避免离线回补/长耗时轮次的连续刷屏，同时让「积压持续扩大」的真实异常显眼。
+        if (backlogGameSeconds >= deferralWarnThresholdGameSeconds
+                && backlogGameSeconds == m.peakBacklogGameSeconds) {
+            log.warn("[世界引擎] 时间回补积压超阈值: project={} 当前落后 {} 游戏秒（≥{}），"
+                            + "世界时间持续落后真实流逝——请关注单轮耗时或降低速率",
+                    projectId, backlogGameSeconds, deferralWarnThresholdGameSeconds);
+        }
+    }
+
+    /**
+     * 时间回补可观测快照（P0-01 调试查询入口；无记录时返回 null）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 队列统计（committedGameSecond/currentBacklogGameSeconds/peakBacklogGameSeconds/
+     * deferredRounds/droppedGameSeconds/queueCapacityGameSeconds/unit）；
+     * 该项目从未推进时 null
+     */
+    public Map<String, Object> timeBacklogSnapshot(Long projectId) {
+        TimeBacklogMetric m = timeBacklog.get(projectId);
+        if (m == null) {
+            return null;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("projectId", projectId);
+        out.put("committedGameSecond", m.committedGameSecond);
+        out.put("currentBacklogGameSeconds", m.backlogGameSeconds);
+        out.put("peakBacklogGameSeconds", m.peakBacklogGameSeconds);
+        out.put("deferredRounds", m.deferredRounds);
+        out.put("droppedGameSeconds", m.droppedGameSeconds);
+        out.put("queueCapacityGameSeconds", tickQueueCapacityGameSeconds);
+        out.put("unit", "game-seconds");
+        return out;
     }
 
     /** S2 沙盘 clock 广播（失败仅告警，不影响推进主流程）。 */
@@ -2096,10 +2548,12 @@ public class WorldEngine {
      * ⚠️ R1 起同步等待被「预热+异步补发」取代，本字段恒为 0（保留接口兼容）。</p>
      * <p>R1 新增 {@code lookaheadSkipped}：边界时预热命中被跳过（不重复触发）的角色数——
      * 与边界补发派发数相加 = 角色数（每角色每游戏小时恰好一次决策入口的可观测口径）。</p>
+     * <p>P0-02 新增 {@code missingDecisions}：决策缺失数（决策失败→本时段无决策记录，
+     * 不伪造活动文本；串行路径统计，异步路径缺失落台账但不在本统计）。</p>
      */
     private record EngineStats(int actions, int crowds, int events, int aiCalls, int dispatchTimeouts,
                                int barrierWaits, long barrierWaitedMs, int barrierTimeouts,
-                               int barrierDeferred, int lookaheadSkipped, String summary) {
+                               int barrierDeferred, int lookaheadSkipped, int missingDecisions, String summary) {
     }
 
     /**
@@ -2110,7 +2564,9 @@ public class WorldEngine {
      * @param timedOut 恒 0（异步不等待，字段保留接口兼容——历史语义：等待预算用尽被放弃等待的角色数）
      *
      * @param skipped 预热命中被跳过（不重复触发）的角色数
+     *
+     * @param missing 决策缺失数（串行路径统计；异步路径恒 0——缺失落台账但不在派发结果内）
      */
-    private record DispatchOutcome(int completed, int timedOut, int skipped) {
+    private record DispatchOutcome(int completed, int timedOut, int skipped, int missing) {
     }
 }

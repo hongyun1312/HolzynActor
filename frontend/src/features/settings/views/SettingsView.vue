@@ -37,10 +37,12 @@
     </div>
   </AppShell>
 
-  <!-- 项目模式：外壳已由 ProjectLayout 提供，这里只渲染子页 -->
-  <div v-else class="content-col">
+  <!-- 项目模式：外壳已由 ProjectLayout 提供（设置区自带导航轨道），这里只渲染子页。
+       V2.0：统一走 PageShell width="content"（1200），替换原 .content-col（1440）——
+       设置类页面是"正文/表单"性质，1200 的阅读列与其它正文页一致。 -->
+  <PageShell v-else width="content">
     <router-view />
-  </div>
+  </PageShell>
 </template>
 
 <script setup>
@@ -60,6 +62,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppShell from '@/shared/layout/AppShell.vue'
 import SideNav from '@/shared/layout/SideNav.vue'
+import PageShell from '@/shared/layout/PageShell.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -74,7 +77,10 @@ const navItems = computed(() => [
   { key: 'apis', name: 'API 配置', icon: 'ic_public_connection', desc: '模型供应商与密钥', path: `${base.value}/apis` },
   { key: 'prompts', name: 'Prompt 模板', icon: 'ic_public_edit', desc: '场景模板覆盖与版本', path: `${base.value}/prompts` },
   { key: 'usage', name: 'AI 用量', icon: 'ic_public_view_list', desc: 'Token 与场景用量统计', path: `${base.value}/usage` },
-  { key: 'appearance', name: '界面与布局', icon: 'ic_public_highlight', desc: '侧栏宽度、密度、面板固定与导览', path: `${base.value}/appearance` }
+  { key: 'appearance', name: '界面与布局', icon: 'ic_public_highlight', desc: '侧栏宽度、密度、面板固定与导览', path: `${base.value}/appearance` },
+  { key: 'assistant', name: '助手设置', icon: 'ic_public_message', desc: '项目级 AI 助手：说明、docs 索引与工具', path: `${base.value}/assistant` },
+  { key: 'player-profile', name: '玩家档案', icon: 'ic_public_contacts', desc: '玩家 persona 与角色关系设定', path: `${base.value}/player-profile` },
+  { key: 'update', name: '更新与版本', icon: 'ic_public_download', desc: '检查更新、下载与数据备份回滚', path: `${base.value}/update` }
 ])
 
 /** 全局模式的单分组导航（SideNav 需要 sections 结构） */

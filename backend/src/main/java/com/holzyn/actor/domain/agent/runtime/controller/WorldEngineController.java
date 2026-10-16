@@ -25,6 +25,7 @@ import com.holzyn.actor.domain.agent.runtime.ActorWorldEngine;
 import com.holzyn.actor.domain.agent.runtime.ActorWorldEngineRepository;
 import com.holzyn.actor.domain.agent.runtime.AiIntensityGate;
 import com.holzyn.actor.domain.agent.runtime.RunModes;
+import com.holzyn.actor.domain.agent.runtime.WorldEngine;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,6 +33,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
@@ -55,6 +57,15 @@ public class WorldEngineController {
     private final ActorProjectRepository projectRepository;
     private final CurrentUserProvider currentUserProvider;
     private final AiIntensityGate aiIntensityGate;
+    private final WorldEngine worldEngine;
+    private final com.holzyn.actor.domain.agent.runtime.DecisionLedgerService decisionLedgerService;
+
+    /**
+     * 决策重试作业服务（P0-02 根治 · 可重试性）。字段注入 required=false：未装配（单测/壳）
+     * 时端点返回空统计，不阻断。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.agent.runtime.DecisionRetryService decisionRetryService;
 
     /**
      * 读取世界引擎配置（含 run_mode + ai_intensity）。
@@ -76,6 +87,110 @@ public class WorldEngineController {
         String intensity = aiIntensityGate.intensityOf(projectId);
         out.put("aiIntensity", intensity);
         out.put("aiIntensityLabel", AiIntensityGate.label(intensity));
+        return R.ok(out);
+    }
+
+    /**
+     * 时间回补可观测（P0-01 调试查询入口）。
+     * <p>返回 tick 队列统计：{@code committedGameSecond} 已消费位置（引擎实际走到哪）、
+     * {@code currentBacklogGameSeconds} 未消费积压（授权前沿−已消费位置；0=已追平）、
+     * {@code peakBacklogGameSeconds} 观测到的峰值积压（WARN 高水位）、{@code deferredRounds} 出现积压的轮次数、
+     * {@code droppedGameSeconds} 显式丢弃累计（队列溢出部分）、{@code queueCapacityGameSeconds} 队列容量。
+     * 配合世界时钟 VO 的 {@code flowingGameSecond / clockLagGameSeconds / authorizedTargetSecond / backlogGameSeconds}
+     * 诊断字段，可观测「引擎位置 vs 墙钟推算位置」两条线是否持续偏离（P0-01 验收标准 3）。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 时间回补统计（该项目从未推进时为全 0 基线）
+     */
+    @GetMapping("/time-metrics")
+    public R<Map<String, Object>> timeMetrics(@PathVariable("projectId") Long projectId) {
+        requireProject(projectId);
+        Map<String, Object> m = worldEngine.timeBacklogSnapshot(projectId);
+        if (m == null) {
+            m = new LinkedHashMap<>();
+            m.put("projectId", projectId);
+            m.put("committedGameSecond", 0L);
+            m.put("currentBacklogGameSeconds", 0L);
+            m.put("peakBacklogGameSeconds", 0L);
+            m.put("deferredRounds", 0L);
+            m.put("droppedGameSeconds", 0L);
+            m.put("queueCapacityGameSeconds", 0L);
+            m.put("unit", "game-seconds");
+        }
+        return R.ok(m);
+    }
+
+    /**
+     * 决策来源统计（P0-03 度量基座；P0-02 验收 1「三类之和 = 该日决策点总数」）。
+     * <p>按 {@code gameDay} 统计决策台账：{@code ai}=AI 决策（AI/AI_RETRY）、
+     * {@code fallback}=程序化兜底 + 预算耗尽降级、{@code missing}=决策缺失；
+     * {@code total}=决策点总数，{@code aiRatio/fallbackRatio/missingRatio}=占比（%），
+     * {@code bySource}=按枚举名细分。关闭模型空跑时面板应显示 {@code ai=0 / fallback=0 / missing=全部}
+     * （不得显示「一切正常」）。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param gameDay 游戏日（自纪元起；缺省=最近一次 tick 统计的游戏日）
+     *
+     * @return 决策来源统计
+     */
+    @GetMapping("/decision-stats")
+    public R<Map<String, Object>> decisionStats(@PathVariable("projectId") Long projectId,
+                                                @RequestParam(name = "gameDay", required = false) Long gameDay) {
+        requireProject(projectId);
+        Long day = gameDay;
+        if (day == null) {
+            var recent = decisionLedgerService.recentTickStats(projectId, 1);
+            day = recent.isEmpty() ? 0L : (recent.get(0).get("gameSecond") == null ? 0L
+                    : Math.floorDiv((Long) recent.get(0).get("gameSecond"), 86400L));
+        }
+        return R.ok(decisionLedgerService.dayStats(projectId, day));
+    }
+
+    /**
+     * 决策重试队列统计（P0-02 根治 · 可重试性可观测）。
+     * <p>返回 {@code pending}=待重试（未到退避到期/等待扫描认领）、{@code retrying}=认领中、
+     * {@code succeeded}=重试成功（决策点已以 AI/AI_RETRY 回填）、{@code abandoned}=重试耗尽
+     * 放弃（决策点落显式缺失），以及退避/容量配置。配合决策来源统计（{@code /decision-stats}）
+     * 可核对「决策失败 → 重试补算 → AI 占比恢复」的完整闭环。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 重试队列统计（服务未装配时返回空基线）
+     */
+    @GetMapping("/decision-retries")
+    public R<Map<String, Object>> decisionRetries(@PathVariable("projectId") Long projectId) {
+        requireProject(projectId);
+        if (decisionRetryService == null) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("projectId", projectId);
+            out.put("enabled", false);
+            out.put("unit", "decision-retry-job");
+            return R.ok(out);
+        }
+        return R.ok(decisionRetryService.stats(projectId));
+    }
+
+    /**
+     * 最近 N 轮 tick 预算统计（P0-03：BudgetGuard 消耗持久化查询——预算/已用/降级/各来源决策数，
+     * 修「预算耗尽只在内存、endTick 即 remove」）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param limit 条数上限（缺省 10）
+     *
+     * @return 最近 N 轮 tick 统计（最新在前）
+     */
+    @GetMapping("/tick-stats")
+    public R<Map<String, Object>> tickStats(@PathVariable("projectId") Long projectId,
+                                            @RequestParam(name = "limit", required = false) Integer limit) {
+        requireProject(projectId);
+        int lim = limit == null || limit <= 0 ? 10 : Math.min(limit, 100);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("projectId", projectId);
+        out.put("rows", decisionLedgerService.recentTickStats(projectId, lim));
+        out.put("unit", "tick-stat");
         return R.ok(out);
     }
 

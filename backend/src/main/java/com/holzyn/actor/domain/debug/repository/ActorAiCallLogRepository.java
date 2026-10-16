@@ -23,6 +23,7 @@ import com.holzyn.actor.domain.debug.vo.AiCallBrief;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -35,7 +36,8 @@ import java.util.Optional;
  * AI 调用 trace 仓库（actor_ai_call_log，调试可视化前端专用）。
  * <p>职责：全量 AI 调用记录的存取；列表页筛选/分页/排序通过 JpaSpecificationExecutor
  * 动态拼装（projectId/scene/status/keyword/时间范围），详情按 id 直查。</p>
- * <p>无滚动保留：本仓库不做删除清理，未来保留策略落地时在此扩展。</p>
+ * <p>滚动保留：删除入口 {@link #deleteByCreatedAtBefore}，由 {@code AiCallLogRetentionService}
+ * 定时调用（保留天数见配置 {@code holzyn.actor.debug.ai-log.retention.days}，默认 7 天）。</p>
  */
 @Repository
 public interface ActorAiCallLogRepository extends JpaRepository<ActorAiCallLog, Long>,
@@ -135,4 +137,20 @@ public interface ActorAiCallLogRepository extends JpaRepository<ActorAiCallLog, 
      * @return 最近记录（按 id 倒序）
      */
     List<ActorAiCallLog> findTop10ByProjectIdAndStepTypeOrderByIdDesc(Long projectId, String stepType);
+
+    /**
+     * 滚动保留：删除创建时间早于截止时刻的全部记录（P1-5 数据膨胀治理）。
+     * <p>批量删除（单条 DELETE SQL），供 {@code AiCallLogRetentionService} 的定时维护调用；
+     * 调用方须处于事务中（服务层 {@code @Transactional}）。</p>
+     * <p>与 {@code data/ai-call-logs/} 文件副本联动：本方法只删 DB 行，对应的
+     * {@code ai-call-*.json} 文件由 {@code AiCallLogRetentionService} 按文件修改时间同步清理，
+     * 保证双份存储口径一致（删除顺序：先删 DB 行，再删同名文件，DB 为主、文件为副）。</p>
+     *
+     * @param cutoff 截止时刻（含）；创建时间早于该时刻的行删除
+     *
+     * @return 删除行数
+     */
+    @Modifying
+    @Query("delete from ActorAiCallLog r where r.createdAt < :cutoff")
+    int deleteByCreatedAtBefore(@Param("cutoff") LocalDateTime cutoff);
 }

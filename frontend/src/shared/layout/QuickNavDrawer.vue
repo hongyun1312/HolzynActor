@@ -58,13 +58,15 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLayoutStore } from '@/shared/store/layout'
-import { DOMAINS, PINNED_ITEMS, NAV_ITEMS, itemPath, findItemByPath } from './navModel'
+import { DOMAINS, PINNED_ITEMS, NAV_ITEMS, DIALOGUE_ITEMS, DIALOGUE_SETTINGS_ITEMS, itemPath, findItemByPath } from './navModel'
 
 const props = defineProps({
   /** 域 key（world/cast/mind/observe/settings），或 'pinned' 表示置顶组 */
   domainKey: { type: String, required: true },
   /** 项目 ID（拼绝对路径） */
-  projectId: { type: Number, default: null }
+  projectId: { type: Number, default: null },
+  /** 当前界面（浮生 / 对谈）：'pinned' 置顶组在对话界面展示对谈界面项 */
+  interfaceKey: { type: String, default: 'fusheng' }
 })
 
 const route = useRoute()
@@ -73,15 +75,23 @@ const layout = useLayoutStore()
 
 const meta = computed(() => {
   if (props.domainKey === 'pinned') {
-    return { name: '主工作区', icon: 'ic_gallery_map_all', desc: '世界地图与对话' }
+    // 主工作区抽屉随界面切换：对谈界面显示对谈项
+    return props.interfaceKey === 'dialogue'
+      ? { name: '对谈', icon: 'ic_public_message', desc: '与角色对谈 · 世界静止' }
+      : { name: '主工作区', icon: 'ic_gallery_map_all', desc: '世界地图与对话' }
   }
   const d = DOMAINS.find(x => x.key === props.domainKey)
   return d ? { name: d.name, icon: d.icon, desc: d.desc } : { name: '快捷入口', icon: 'ic_public_file', desc: '' }
 })
 
-const items = computed(() => props.domainKey === 'pinned'
-  ? PINNED_ITEMS.map(i => ({ ...i }))
-  : NAV_ITEMS.filter(i => i.domain === props.domainKey).map(i => ({ ...i })))
+const items = computed(() => {
+  if (props.domainKey === 'pinned') {
+    return props.interfaceKey === 'dialogue'
+      ? [...DIALOGUE_ITEMS, ...DIALOGUE_SETTINGS_ITEMS].map(i => ({ ...i }))
+      : PINNED_ITEMS.map(i => ({ ...i }))
+  }
+  return NAV_ITEMS.filter(i => i.domain === props.domainKey).map(i => ({ ...i }))
+})
 
 const activeKey = computed(() => findItemByPath(route.path, props.projectId)?.key || '')
 

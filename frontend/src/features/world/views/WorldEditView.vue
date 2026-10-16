@@ -29,9 +29,8 @@
     </PageHeader>
 
     <!-- 分节编辑（与详情页同款左侧 Tab 导航，各区块就地编辑） -->
-    <div v-if="!worldForm.name && !loadingDone" class="empty-card tech-card">
-      <el-empty description="加载中…" />
-    </div>
+    <!-- V2.0 §5.6：这是加载态，不是空态——不再用空态框写「加载中…」 -->
+    <div v-if="!worldForm.name && !loadingDone" v-loading="true" class="empty-card tech-card edit-loading" />
     <div v-else class="edit-body">
       <PageTabs v-model="activeSection" position="left">
         <el-tab-pane label="基本信息" name="basic">
@@ -176,6 +175,8 @@ onMounted(loadAll)
 .world-edit-view { width: 100%; max-width: var(--content-max-w, 1440px); margin: 0 auto; }
 /* 页头与左置标签样式由全局类/PageTabs 统一提供 */
 .empty-card { padding: 40px 0; }
+/* 加载占位需要有高度，否则 v-loading 的遮罩只有一行高（视觉上像页面坏了） */
+.edit-loading { min-height: 240px; }
 .edit-body { min-height: 360px; }
 .world-card { padding: 20px 24px; }
 .section-form { padding-top: 4px; }

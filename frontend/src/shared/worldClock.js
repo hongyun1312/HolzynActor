@@ -18,7 +18,7 @@
 
 // ==================== 世界时钟前端实时化共享工具 ====================
 // 职责：与后端「单一连续权威 + 引擎高频追平」时间模型对齐的前端本地插值与格式化纯函数，
-// 沙盘时钟条（WorldSandboxView）与总览仪表盘（DashboardView）共用。
+// 世界地图首页与总览仪表盘（DashboardView）共用。
 // 核心协议：
 // 流动时钟插值：gameSecond_now = anchorGameSecond + (now - refRealTime)/1000 × rate，暂停冻结不跳；
 // 引擎位置插值：engine_now = engineGameSecond + min((now - engineRefRealTime)/1000 × rate,

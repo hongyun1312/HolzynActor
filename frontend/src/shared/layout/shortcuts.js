@@ -35,6 +35,7 @@ export const SHORTCUTS = [
   { id: 'escape', group: '全局', keys: ['Esc'], title: '逐层关闭', desc: '命令面板 → 右键菜单 → 未固定面板（固定的不关）', when: '任意页面' },
   { id: 'domain', group: '全局', keys: ['Alt', '1–5'], title: '跳到第 N 个功能域', desc: '世界 / 角色 / 心智 / 观测 / 设置', when: '项目空间内' },
   { id: 'tour', group: '全局', keys: ['Ctrl', 'Shift', 'T'], title: '重看界面导览', desc: '新布局上手引导', when: '任意页面' },
+  { id: 'assistant', group: '全局', keys: ['Ctrl', 'Shift', 'A'], title: '项目级 AI 助手', desc: '唤起 / 收起世界讲解助手（项目页内）', when: '项目空间内' },
 
   // ===== 以下为「页面内键位」，由各页自行实现（列在此处只为速查面板可见） =====
   { id: 'chat-send', group: '对话页', keys: ['Enter'], title: '发送消息', desc: '输入框聚焦时（Shift+Enter 换行）', when: '对话页输入框' },

@@ -12,7 +12,10 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="dashboard-view">
+  <!-- V2.0：页面骨架化（PageShell width="wide"）——此前本页内联 max-width:1100px 居中，
+       与对谈页的 1440、角色页的"铺满"并存，导致同一产品在 1920 宽下出现三种内容列左边界
+       （实测 x=300 / 378 / 548）。现由骨架统一档位，页面不再自写限宽。 -->
+  <PageShell width="wide" class="dashboard-view">
     <!-- 欢迎区：项目名 + 题材标签 + 快捷操作 -->
     <div class="welcome-card tech-card">
       <div class="welcome-left">
@@ -24,11 +27,15 @@
         <div class="welcome-desc">{{ world?.name ? `世界观：${world.name}` : (project?.summary || '暂无概要') }}</div>
       </div>
       <div class="welcome-ops">
-        <el-button type="primary" @click="go('/chat')"><el-icon><HIcon name="ChatDotRound" /></el-icon>&nbsp;进入对话</el-button>
-        <el-button @click="go('/evolve')"><el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;世界演化</el-button>
-        <el-button plain @click="go('/characters')"><el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增角色</el-button>
-        <!-- 世界初始化/重新初始化入口（点击弹提醒确认后进入独立初始化页） -->
-        <el-button plain type="warning" @click="openWorldInit"><el-icon><HIcon name="Setting" /></el-icon>&nbsp;世界初始化</el-button>
+        <!-- V2.0：统一工具条（常驻动作预算 ≤2 + 其余进「⋯」，且窄屏自动降为 1 个而不是折行）。
+             这里四个按钮原有相同视觉权重，用户不知道哪个是首要动作；现在只保留
+             「进入对话」为主按钮 + 「世界地图」次级，其余收纳。 -->
+        <Toolbar
+          :max-inline="2"
+          :narrow-max-inline="1"
+          :actions="welcomeActions"
+          @action="onWelcomeAction"
+        />
       </div>
     </div>
 
@@ -50,20 +57,29 @@
       <div class="wo-divider"></div>
       <div class="wo-cell">
         <div class="wo-label">世界模拟状态</div>
-        <div class="wo-value" style="display:flex; align-items:center; gap:6px;">
-          <el-tag :type="clock?.paused ? 'warning' : 'success'" effect="light" size="small">
-            {{ clock?.paused ? '已暂停' : '推进中' }}
-          </el-tag>
-          <!-- +：世界运行时状态（启动全静止；打开沙盘/演化页自动运行，或手动常开） -->
-          <el-tag :type="rtDecision.active ? 'success' : 'info'" effect="plain" size="small">
-            {{ rtDecision.active ? '世界运行中' : '世界静止（启动全静止，进入沙盘才运行）' }}
-          </el-tag>
+        <!-- V2.0：状态指示唯一化——改造前此处并排两个措辞近似的标签
+             （「已暂停/推进中」+「世界运行中/世界静止（启动全静止，进入沙盘才运行）」），
+             用户无法分辨两者差别。现在只保留一个状态胶囊（RuntimeStatusPill），
+             实时决策是否激活降为 tooltip 说明；时间控制入口仍只在沙盘页。 -->
+        <div class="wo-value">
+          <RuntimeStatusPill
+            :status="clock?.paused ? 'paused' : 'running'"
+            :status-label="clock?.paused ? '已暂停' : '推进中'"
+            primary-text=""
+            advance-text=""
+            :time-text="''"
+          />
+          <el-tooltip placement="top" :content="rtStatusHint">
+            <span class="wo-rt-note">{{ rtDecision.active ? '实时决策已激活' : '实时决策未激活' }}</span>
+          </el-tooltip>
         </div>
-        <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
-          <el-button size="small" text type="primary" @click="go('/evolve')">前往世界演化控制 →</el-button>
-          <span style="display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--text-secondary);">
+        <div class="wo-state-ops">
+          <el-button size="small" text type="primary" @click="go('/sandbox')">前往世界地图（世界演化面板 / 时钟控制）→</el-button>
+          <!-- 「手动常开」此前被挤成竖排 4 字并贴到卡片右缘（实测截图），
+               现改为 nowrap + tooltip 说明语义 -->
+          <span class="wo-switch">
             <el-switch size="small" :model-value="rtDecision.manualEnabled" :loading="rtBusy" @change="toggleRtManual" />
-            手动常开
+            <span class="wo-switch-label" title="常开：即使不打开世界地图页，世界也持续推进（手动优先于页面自动态）">手动常开</span>
           </span>
         </div>
       </div>
@@ -74,7 +90,13 @@
       <div class="wo-cell">
         <div class="wo-label">宏观社会</div>
         <div class="wo-value">{{ macro?.templateId ? templateLabel(macro.templateId) : '未初始化' }}</div>
-        <div class="wo-sub" v-if="macro">AI 强度：{{ aiIntensityLabel }} · 第 {{ (macro.gameDay || 0) + 1 }} 日</div>
+        <!-- V2.0 §8.1：原先固定宽度下这句被截断成「AI 强度：标准 · 第 150…」且无 tooltip，
+             用户既看不到完整值也不知道口径。现补全 tooltip（口径写清）+ 不再截断。 -->
+        <div
+          v-if="macro"
+          class="wo-sub"
+          :title="`AI 强度：${aiIntensityLabel} —— 智能体使用 AI 的密度档位（与运行模式正交）；世界已运行至第 ${(macro.gameDay || 0) + 1} 日`"
+        >AI 强度：{{ aiIntensityLabel }} · 第 {{ (macro.gameDay || 0) + 1 }} 日</div>
         <div class="wo-sub" v-else>世界模拟推进后自动初始化（每日 00:05 宏观 tick）</div>
       </div>
       <div class="wo-divider"></div>
@@ -103,7 +125,8 @@
       <div class="wo-cell">
         <div class="wo-label">季节 · 收成</div>
         <div class="wo-value">{{ seasonName(macro?.season) }}{{ macro?.harvestFactor ? ' · ' + macro.harvestFactor.toFixed(2) : '' }}</div>
-        <div class="wo-sub">收成系数（季节×天气×累积）</div>
+        <!-- V2.0 §8.1：缺失值不能只给一个破折号，要说明「什么时候会有」 -->
+        <div class="wo-sub">{{ macro?.season ? '收成系数（季节×天气×累积）' : '世界运行满 1 天后生成' }}</div>
       </div>
       <div class="wo-divider"></div>
       <!-- 宏观详情入口 → 沙盘宏观面板（实时民怨/事件流） -->
@@ -114,44 +137,65 @@
       </div>
     </div>
 
-    <!-- 统计行（四张统计卡） -->
+    <!-- 统计行（四张指标卡）
+         V2.0：改用 MetricCard（**一卡一指标** + 单位 + 口径 tooltip + 可解释缺失）。
+         改造前每张卡并排两个同尺寸大数字（7/10、38/0、18/0、0/0），下方才是小字标签，
+         用户无法判断是分数、对比还是两项独立指标；现在主值只有一个（总量），
+         第二项数据降级为小字行（breakdown），缺失值给出原因而不是无解释的破折号。 -->
     <div class="stats-row">
-      <!-- 角色 -->
-      <div class="stat-card tech-card" @click="go('/characters')">
-        <div class="stat-title">角色</div>
-        <div class="stat-nums">
-          <div class="stat-num"><span class="num">{{ charCount.special }}</span><span class="lbl">特殊型</span></div>
-          <div class="stat-num"><span class="num">{{ charCount.common }}</span><span class="lbl">普通型</span></div>
-        </div>
-        <div class="stat-link">前往角色详情 →</div>
-      </div>
-      <!-- 知识库 -->
-      <div class="stat-card tech-card" @click="go('/knowledge')">
-        <div class="stat-title">知识库</div>
-        <div class="stat-nums">
-          <div class="stat-num"><span class="num">{{ kb.docs }}</span><span class="lbl">文档</span></div>
-          <div class="stat-num"><span class="num">{{ kb.chunks }}</span><span class="lbl">向量块</span></div>
-        </div>
-        <div class="stat-link">已向量化 {{ kb.vectorRate }}% →</div>
-      </div>
-      <!-- 记忆 -->
-      <div class="stat-card tech-card" @click="go('/world')">
-        <div class="stat-title">记忆</div>
-        <div class="stat-nums">
-          <div class="stat-num"><span class="num">{{ memory.character }}</span><span class="lbl">角色级</span></div>
-          <div class="stat-num"><span class="num">{{ memory.project }}</span><span class="lbl">项目级</span></div>
-        </div>
-        <div class="stat-link">查看世界大事记 →</div>
-      </div>
-      <!-- 用量 -->
-      <div class="stat-card tech-card" @click="go('/settings/usage')">
-        <div class="stat-title">AI 用量</div>
-        <div class="stat-nums">
-          <div class="stat-num"><span class="num">{{ fmtTokens(usage.tokens) }}</span><span class="lbl">Tokens</span></div>
-          <div class="stat-num"><span class="num">{{ usage.count }}</span><span class="lbl">调用次数</span></div>
-        </div>
-        <div class="stat-link">前往 AI 用量 →</div>
-      </div>
+      <MetricCard
+        label="角色"
+        :value="charCount.special + charCount.common"
+        unit="位"
+        hint="特殊型拥有独立 11 维档案与记忆；普通型按群体调度"
+        :missing="charCount.special + charCount.common === 0"
+        missing-reason="尚未创建角色"
+        :breakdown="[
+          { label: '特殊型', value: charCount.special },
+          { label: '普通型', value: charCount.common }
+        ]"
+        action-text="前往角色详情"
+        @action="go('/characters')"
+      />
+      <MetricCard
+        label="知识库"
+        :value="kb.docs"
+        unit="篇文档"
+        hint="世界设定、角色知识等文档；检索时按向量相似度召回"
+        :missing="kb.docs === 0"
+        missing-reason="尚未导入知识文档"
+        :breakdown="[
+          { label: '向量块', value: kb.chunks },
+          { label: '已向量化', value: kb.vectorRate + '%' }
+        ]"
+        action-text="前往知识库"
+        @action="go('/knowledge')"
+      />
+      <MetricCard
+        label="记忆"
+        :value="memory.character + memory.project"
+        unit="条"
+        hint="角色级=角色个人经历；项目级=世界编年史与大事记"
+        :missing="memory.character + memory.project === 0"
+        missing-reason="世界运行后开始沉淀"
+        :breakdown="[
+          { label: '角色级', value: memory.character },
+          { label: '项目级', value: memory.project }
+        ]"
+        action-text="查看世界大事记"
+        @action="go('/world-memory')"
+      />
+      <MetricCard
+        label="AI 用量"
+        :value="fmtTokens(usage.tokens)"
+        unit="Tokens"
+        hint="本项目累计推理消耗（含决策/对话/记忆等全部场景）"
+        :missing="!usage.count"
+        missing-reason="还没有调用过模型"
+        :breakdown="[{ label: '调用次数', value: usage.count }]"
+        action-text="前往 AI 用量"
+        @action="go('/settings/usage')"
+      />
     </div>
 
     <!-- 最近动态区 -->
@@ -162,11 +206,11 @@
         <div v-for="(r, i) in recent" :key="i" class="recent-item" @click="jumpTo(r)">
           <span class="recent-time">{{ fmtTime(r.time) }}</span>
           <el-tag size="small" :type="recentTagType(r.type)" effect="plain">{{ recentTypeLabel(r.type) }}</el-tag>
-          <span class="recent-text">{{ r.text }}</span>
+          <span class="recent-text" :title="r.text">{{ r.text }}</span>
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>
 
 <script setup>
@@ -181,6 +225,10 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import PageShell from '@/shared/layout/PageShell.vue'
+import MetricCard from '@/shared/components/MetricCard.vue'
+import RuntimeStatusPill from '@/shared/components/RuntimeStatusPill.vue'
+import Toolbar from '@/shared/components/Toolbar.vue'
 import { createSubscription } from '@/shared/sse/sseClient'
 import { gameSecondNow, engineSecondNow, formatWorldTimeMinute, calendarNameOf } from '@/shared/worldClock'
 import {
@@ -476,10 +524,44 @@ async function toggleRtManual(enabled) {
     rtBusy.value = false
   }
 }
+
+/**
+ * 实时决策状态的完整口径说明（V2.0）。
+ *
+ * <p>改造前这里直接铺了一整句「世界静止（启动全静止，进入沙盘才运行）」当作标签，
+ * 既挤占宽度又与旁边的「已暂停/推进中」语义重叠。现在标签只留「实时决策已激活/未激活」，
+ * 完整口径进 tooltip。</p>
+ */
+const rtStatusHint = computed(() => {
+  const parts = []
+  if (rtDecision.manualEnabled) parts.push('手动常开')
+  if (rtDecision.sandboxActive) parts.push('世界地图页已打开')
+  if (rtDecision.evolutionActive) parts.push('演化会话进行中')
+  const why = parts.length ? `当前来源：${parts.join(' + ')}` : '当前没有来源（世界时间可在世界地图页手动推进）'
+  return `实时决策：让角色按自己的日程自动行动。${why}`
+})
+
+/** 欢迎区动作（V2.0：交给统一工具条做优先级与收纳，不再平铺 4 个同权重按钮） */
+const welcomeActions = computed(() => [
+  { key: 'chat', label: '进入对话', icon: 'ChatDotRound', kind: 'primary', title: '与角色单聊 / 群聊（世界继续推进）' },
+  { key: 'sandbox', label: '世界地图', icon: 'MapLocation', title: '看世界正在发生什么，并控制世界时钟' },
+  { key: 'characters', label: '新增角色', icon: 'Plus', title: '创建特殊 NPC 并生成 11 维档案' },
+  { key: 'init', label: '世界初始化', icon: 'Setting', kind: 'danger', title: '重新生成世界设定与角色阵容（需二次确认）' }
+])
+
+/** 欢迎区动作分发 */
+function onWelcomeAction(key) {
+  if (key === 'chat') { go('/chat'); return }
+  if (key === 'sandbox') { go('/sandbox'); return }
+  if (key === 'characters') { go('/characters'); return }
+  if (key === 'init') { openWorldInit(); return }
+}
 </script>
 
 <style scoped>
-.dashboard-view { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+/* V2.0：本页不再自写限宽（原 max-width:1100px 造成与其它页的内容列错位）——
+   限宽与居中交给 PageShell width="wide"，这里只保留页面纵向节奏的兜底。 */
+.dashboard-view { display: flex; flex-direction: column; gap: 16px; }
 
 /* 欢迎区 */
 .welcome-card { padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; }
@@ -498,6 +580,8 @@ async function toggleRtManual(enabled) {
 
 /* 统计行 */
 .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+/* 旧 .stat-card/.stat-nums/.stat-num/.stat-link 样式在 V2.0 已被 MetricCard 组件取代
+   （删掉以免成为第二套"指标卡"实现；保留 .stat-num 的单数字观感由组件内部承担）。 */
 .stat-card { padding: 16px 20px; cursor: pointer; transition: all 0.2s; }
 .stat-card:hover { border-color: var(--brand-primary); box-shadow: var(--card-shadow-hover); }
 .stat-title { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
@@ -506,6 +590,13 @@ async function toggleRtManual(enabled) {
 .stat-num .num { font-size: 1.6rem; font-weight: 700; color: var(--brand-primary); line-height: 1.2; }
 .stat-num .lbl { font-size: 0.75rem; color: var(--text-secondary); }
 .stat-link { font-size: 0.75rem; color: var(--brand-primary); margin-top: 10px; }
+
+/* V2.0：世界模拟状态单元格——状态胶囊 + 一句补充说明 + 操作行（标签一律 nowrap，杜绝竖排） */
+.wo-value { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wo-rt-note { font-size: 0.72rem; color: var(--text-tertiary); cursor: help; white-space: nowrap; }
+.wo-state-ops { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+.wo-switch { display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: var(--text-secondary); }
+.wo-switch-label { white-space: nowrap; cursor: help; }
 
 /* 最近动态 */
 .recent-card { padding: 18px 24px; }

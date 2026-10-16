@@ -381,7 +381,9 @@ onMounted(loadList)
 </script>
 
 <style scoped>
-.model-api-view { max-width: 1200px; margin: 0 auto; }
+/* V2.0：页面级限宽改走令牌 --page-w-content（1200），不再内联魔法数字；
+   本组件有 embedded 形态（嵌在设置弹窗里），故保留自身容器而不走 PageShell。 */
+.model-api-view { max-width: var(--page-w-content, 1200px); margin: 0 auto; }
 /* 内嵌到设置弹窗：去掉页面级最大宽度限制、压缩头部与表格卡片内边距 */
 .model-api-view.embedded { max-width: none; }
 /* 嵌入设置弹窗时的紧凑页头（页头基础样式由全局类/PageHeader 提供） */

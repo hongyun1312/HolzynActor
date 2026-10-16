@@ -133,11 +133,12 @@ onMounted(init)
 <style scoped>
 /* 页面容器与背景由外壳提供；卡片居中由 .content-col + 卡片自身 max-width 决定 */
 .account-page { display: flex; flex-direction: column; align-items: center; }
-.ac-card { width: 100%; max-width: 720px; background: var(--bg-layer-1); border-radius: 18px; box-shadow: 0 10px 32px rgba(24, 50, 100, 0.10); padding: 32px 40px; height: fit-content; }
+.ac-card { width: 100%; max-width: var(--page-w-form, 720px); background: var(--bg-layer-1); border-radius: 18px; box-shadow: 0 10px 32px rgba(24, 50, 100, 0.10); padding: 32px 40px; height: fit-content; }
 .ac-section-title { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin: 18px 0 10px; padding-left: 10px; border-left: 3px solid var(--brand-primary, #1d5cff); }
 .ac-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
 .avatar-line { display: flex; align-items: center; gap: 12px; width: 100%; }
 .ac-avatar { flex-shrink: 0; background: var(--brand-gradient, linear-gradient(135deg, #1d5cff, #7b4dff)); }
 .ac-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-light, var(--border-l2)); }
-@media (max-width: 640px) { .ac-grid-2 { grid-template-columns: 1fr; } .ac-card { padding: 24px 20px; } }
+/* V2.0 批次二：断点 640 → 1024（全站三档；<1024 为单栏兜底档） */
+@media (max-width: 1024px) { .ac-grid-2 { grid-template-columns: 1fr; } .ac-card { padding: 24px 20px; } }
 </style>

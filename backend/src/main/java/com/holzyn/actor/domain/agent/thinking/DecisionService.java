@@ -23,6 +23,8 @@ import com.holzyn.actor.common.JsonUtil;
 import com.holzyn.actor.domain.npc.profile.entity.ActorAgentProfile;
 import com.holzyn.actor.domain.agent.brain.service.BrainProfileService;
 import com.holzyn.actor.domain.agent.perception.PerceptionService;
+import com.holzyn.actor.domain.agent.runtime.DecisionSource;
+import com.holzyn.actor.domain.agent.runtime.DecisionSources;
 import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
 import com.holzyn.actor.domain.character.service.PromptService;
 import com.holzyn.actor.domain.debug.service.AiCallContext;
@@ -258,10 +260,13 @@ public class DecisionService {
                                 ch.getProjectId(), ch, userId, com.holzyn.actor.domain.agent.brain.strategy.NpcKind.SPECIAL,
                                 brainLevel, situation, null, null, hasStimulus));
                 if (outcome != null) {
+                    // P0-03 决策源可追溯：链命中由策略名判定来源（programmatic_fallback/physio_danger
+                    // → FALLBACK_PROGRAMMATIC；其余 AI 策略 → AI），打标进决策 Map（落库侧透传）
+                    DecisionSource chainSource = DecisionSources.fromStrategy(outcome.hitStrategy());
                     if (outcome.postProcess()) {
-                        return postProcessDecision(ch, outcome.decision());
+                        return DecisionSources.tag(postProcessDecision(ch, outcome.decision()), chainSource);
                     }
-                    return outcome.decision();
+                    return DecisionSources.tag(outcome.decision(), chainSource);
                 }
             }
             // ===== 既有内联管线（router 未装配[单测]；行为与 P2-3 前一致） =====
@@ -277,7 +282,9 @@ public class DecisionService {
                                     String.valueOf(physioDanger.getOrDefault("action", "")), 40), 0);
                     log.info("[Thinking] 生理需求危险区强制决策: char={} 行动={}",
                             ch.getId(), physioDanger.get("action"));
-                    return postProcessDecision(ch, physioDanger);
+                    // P0-03：生理危险区程序化强制=0 AI 产出，打标 FALLBACK_PROGRAMMATIC
+                    return DecisionSources.tag(postProcessDecision(ch, physioDanger),
+                            DecisionSource.FALLBACK_PROGRAMMATIC);
                 }
             }
             // 脑力门控：programmatic 档直接程序化（AI 0 成本，对齐「分层脑力 + 程序化兜底」原则）
@@ -285,7 +292,7 @@ public class DecisionService {
                 log.debug("[Thinking] programmatic 档决策（0 AI 成本）: char={}", ch.getId());
                 AiCallContext.recordStep(ch.getProjectId(), "agent_decision", "thinking",
                         "思考组件：programmatic 档程序化决策（0 AI 成本，brainProfile 门控）", 0);
-                return programmaticDecision(ch);
+                return DecisionSources.tag(programmaticDecision(ch), DecisionSource.FALLBACK_PROGRAMMATIC);
             }
             // 空间候选选择：空间有效 + space_decision 场景开时，特殊 NPC 的 action 决策
             // 由 NanoJev 在空间 possible_actions + 通用三项内亚秒选择（40s→亚秒 ≈40×）——Qwen 只负责
@@ -294,16 +301,17 @@ public class DecisionService {
             // （决策前空间保障已内置于 trySpaceDecision：空间缺失/过期才 AI 生成，有效直接复用零成本）
             Map<String, Object> spaceDecision = trySpaceDecision(ch, situation);
             if (spaceDecision != null) {
-                // 与 AI 路径同后处理：护栏 + 前瞻 + 沙盘想法
-                return postProcessDecision(ch, spaceDecision);
+                // 与 AI 路径同后处理：护栏 + 前瞻 + 沙盘想法；P0-03：快判=AI 通道产出，打标 AI
+                return DecisionSources.tag(postProcessDecision(ch, spaceDecision), DecisionSource.AI);
             }
             // AI 深思（System 2）：action_gen 生成式决策（重试≤2 + 程序化回退指标埋点）；
             // 全部重试失败 → null → 程序化兜底 continue（与 P2-3 前行为一致）
             Map<String, Object> aiDecision = deliberateDecision(ch, userId, situation);
             if (aiDecision != null) {
-                return postProcessDecision(ch, aiDecision);
+                // P0-03：AI 深思成功=真实 AI 产出，打标 AI
+                return DecisionSources.tag(postProcessDecision(ch, aiDecision), DecisionSource.AI);
             }
-            return programmaticDecision(ch);
+            return DecisionSources.tag(programmaticDecision(ch), DecisionSource.FALLBACK_PROGRAMMATIC);
         } finally {
             // 主动检索段随本次决策结束清理（防虚拟线程复用泄漏）
             com.holzyn.actor.domain.debug.service.AiCallContext.clearProactiveSegment();
@@ -658,7 +666,9 @@ public class DecisionService {
      * @return 决策 Map
      */
     public Map<String, Object> generateProgrammaticDecision(ActorCharacter ch) {
-        return programmaticDecision(ch);
+        // P0-03 决策源可追溯：默认打标 FALLBACK_PROGRAMMATIC（0 AI 产出必须打标；
+        // AgentRuntime 预算用尽场景在返回后覆盖为 BUDGET_EXHAUSTED）
+        return DecisionSources.tag(programmaticDecision(ch), DecisionSource.FALLBACK_PROGRAMMATIC);
     }
 
     // ==================== 私有辅助（原 ActionEngine 对应方法迁入） ====================

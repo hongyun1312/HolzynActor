@@ -57,6 +57,15 @@ public class ActorActionLog {
     @Column(name = "log_time", nullable = false)
     private LocalDateTime logTime;
 
+    /**
+     * 决策来源（P0-03 决策源可追溯，VARCHAR(32) 存 {@code DecisionSource} 枚举名）：
+     * AI 真实决策 / AI_RETRY 重试决策 / FALLBACK_PROGRAMMATIC 程序化兜底 /
+     * BUDGET_EXHAUSTED 预算耗尽降级 / DECISION_MISSING 决策缺失。
+     * 空值=旧数据/未打标路径（视为 AI，不隔离）。
+     */
+    @Column(name = "decision_source", length = 32)
+    private String decisionSource;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

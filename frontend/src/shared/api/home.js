@@ -111,7 +111,6 @@ export const fetchHomeMovements = (projectId) => http.get(`/api/projects/${proje
 
 export {
   fetchSandboxOverview,
-  fetchSandboxStates,
   sandboxStreamUrl,
   sandboxInterveneTalk,
   sandboxInterveneAction,

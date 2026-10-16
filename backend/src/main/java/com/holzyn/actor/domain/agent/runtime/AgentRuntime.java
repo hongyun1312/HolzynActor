@@ -155,6 +155,14 @@ public class AgentRuntime {
     private com.holzyn.actor.domain.agent.runtime.IdleFrequencyService idleFrequencyService;
 
     /**
+     * 决策台账服务（P0-03 决策源可追溯：每个决策点落 {@code actor_decision_log} 一行，
+     * AI/程序化兜底/预算降级来源打标；决策缺失由 WorldEngine catch 落）。
+     * 字段注入保持构造器不变；null=未装配（单测）跳过，台账是观测旁路不阻断决策）
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.agent.runtime.DecisionLedgerService decisionLedgerService;
+
+    /**
      * AI 强度闸门（微层接线， 决策生成按项目档位生效——
      * programmatic=强制程序化决策[generateProgrammaticDecision，零 AI] / light=预算减半
      * [WorldEngine 侧折算] / full=标准 / max=预算耗尽也放行 AI[全 AI 必调]；
@@ -363,6 +371,12 @@ public class AgentRuntime {
                 // 否则手动触发行动（前端「行动」按钮）不产生当日计划，planning 仅在引擎决策时生效）
                 maybeEnsurePlanLazy(projectId, com.holzyn.actor.common.NpcRefs.of(characterId), null);
                 Map<String, Object> decision = resolveDecision(ch, userId, situationText, false, false);
+                // P0-03 决策源可追溯：复合行动触发（manual/after_dialog/event/scheduled）产出的决策点
+                // 同样落决策台账（来源已打标在决策 Map）
+                if (decision != null) {
+                    ledgerDecision(projectId, characterId, com.holzyn.actor.common.NpcRefs.of(characterId),
+                            null, decision, triggerType);
+                }
                 // 计划时间：显式 plannedTime 优先；否则取决策 JSON 内的 scheduled 计划时间
                 if (plannedHolder[0] == null) {
                     Object scheduled = decision == null ? null : decision.get("plannedTime");
@@ -602,6 +616,22 @@ public class AgentRuntime {
                 ctx == null ? null : ctx.situation(), programmatic,
                 ctx != null && ctx.stimulusType() != null);
         steps.add("thinking");
+        // P0-02 根治：重试补算的成功决策打标 AI_RETRY——决策 Map 内 _decisionSource 覆盖为
+        // AI_RETRY（仅当原来源为 AI/未打标；兜底/预算降级不打标，保持原来源可辨识），
+        // 随计划 JSON 透传动作日志/记忆/事件/编年史，可追溯「这条 AI 决策经过重试」
+        // （审计 P0-02 验收 3：重试成功的决策来源为 AI，gameSecond=原定时刻）。
+        if (ctx != null && ctx.retry() && decision != null) {
+            DecisionSource src = DecisionSources.of(decision);
+            if (src == null || src == DecisionSource.AI) {
+                decision = DecisionSources.tag(decision, DecisionSource.AI_RETRY);
+            }
+        }
+        // P0-03 决策源可追溯：非对话触发且产出决策 → 落决策台账（engine_tick/manual/stimulus
+        // 等决策点；AI/程序化兜底/预算降级来源已打标在决策 Map 内；缺失由 WorldEngine catch 落）
+        if (!dialogue && decision != null) {
+            ledgerDecision(projectId, actorId, characterRef, ctx == null ? null : ctx.gameSecond(),
+                    decision, trigger == null ? null : trigger.name().toLowerCase(Locale.ROOT));
+        }
 
         // ④ 行动（非对话触发且决策已生成：计划持久化 → AgentActionService.execute 执行决策计划）
         // Prompt 工程：action_type=continue 表示 AI 判定「继续当前行为」——
@@ -801,7 +831,11 @@ public class AgentRuntime {
                     : (programmatic ? "brainProfile=programmatic 档" : "AI 预算用尽");
             AiCallContext.recordStep(projectId, "agent_decision", "thinking",
                     "思考组件：程序化兜底决策（" + reason + "，0 AI 成本）", 0);
-            return decisionService.generateProgrammaticDecision(ch);
+            // P0-03 决策源可追溯：预算用尽 → BUDGET_EXHAUSTED（预算耗尽事实落库，修「只在内存、
+            // endTick 即 remove」）；纯程序化档/强度降级 → FALLBACK_PROGRAMMATIC（0 AI 产出打标）
+            DecisionSource source = (!programmatic && !intensityProgrammatic)
+                    ? DecisionSource.BUDGET_EXHAUSTED : DecisionSource.FALLBACK_PROGRAMMATIC;
+            return DecisionSources.tag(decisionService.generateProgrammaticDecision(ch), source);
         }
         AiCallContext.recordStep(projectId, "agent_decision", "thinking",
                 "思考组件：DecisionService 生成决策（brainLevel=" + resolveBrainLevel(projectId, com.holzyn.actor.common.NpcRefs.of(ch.getId()))
@@ -871,6 +905,37 @@ public class AgentRuntime {
         }
         AiCallContext.recordStep(projectId, "agent_decision", "learning",
                 "学习组件：LearningService 周期巩固骨架（反思/关系/偏好/生态留 D 阶段）", 0);
+    }
+
+    /**
+     * 落决策点台账（P0-03 决策源可追溯）：从决策 Map 读已打标来源（AI/程序化兜底/预算降级），
+     * 非对话触发且产出决策时每点一行。失败隔离（台账是观测旁路，不阻断决策）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param actorId 角色 ID
+     *
+     * @param characterRef 统一角色引用
+     *
+     * @param gameSecond 决策感知时刻（可空）
+     *
+     * @param decision 已打标决策 Map（非空）
+     *
+     * @param triggerType 触发源（engine_tick/manual/after_dialog/event/stimulus 等）
+     */
+    private void ledgerDecision(Long projectId, Long actorId, String characterRef, Long gameSecond,
+                                Map<String, Object> decision, String triggerType) {
+        if (decisionLedgerService == null || decision == null || projectId == null) {
+            return;
+        }
+        try {
+            decisionLedgerService.record(projectId, actorId, characterRef, gameSecond,
+                    DecisionSources.of(decision),
+                    decision.get("action") == null ? null : String.valueOf(decision.get("action")),
+                    triggerType);
+        } catch (Exception e) {
+            log.debug("[AgentRuntime] 决策台账写入失败（隔离继续）: ref={} : {}", characterRef, e.getMessage());
+        }
     }
 
     /** 决策 Map → JSON（失败兜底占位文本，不阻断计划创建） */

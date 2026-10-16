@@ -13,8 +13,8 @@
 -->
 <template>
   <div class="world-detail-view">
-    <!-- 头部：名称 + 修改 + 版本标签 + 历史版本入口 + worldgen 来源标记 -->
-    <PageHeader desc="项目世界观设定（只读全文展示），修改走专属编辑页；保存生成新版本（当前为覆盖更新）。">
+    <!-- 头部：名称 + 修改 + 版本标签 + worldgen 来源标记 -->
+    <PageHeader desc="项目世界观设定（只读全文展示），修改走专属编辑页；保存为覆盖更新（不产生历史版本记录）。">
       <template #default>
         {{ world?.name || '世界详情' }}
         <el-tag v-if="world" size="small" effect="plain" class="version-tag">v{{ world.version || 1 }}</el-tag>
@@ -25,9 +25,6 @@
         </el-tag>
       </template>
       <template #actions>
-        <el-button @click="openVersions">
-          <el-icon><HIcon name="Clock" /></el-icon>&nbsp;历史版本
-        </el-button>
         <!-- character 工作流「生成角色」入口（按世界观自动生成核心角色，落 actor_profile） -->
         <el-button :loading="charGenStarting" @click="startCharacterGen">
           <el-icon><HIcon name="User" /></el-icon>&nbsp;生成角色
@@ -44,9 +41,14 @@
 
     <!-- 世界观全文区（只读，无输入框） -->
     <div v-if="!world" class="empty-card tech-card">
-      <el-empty description="该项目尚未创建世界观设定">
-        <el-button type="primary" @click="$router.push(`/project/${projectId}/world/edit`)">创建世界观</el-button>
-      </el-empty>
+      <EmptyState
+        size="page"
+        icon="ic_public_file"
+        title="这个项目还没有世界观设定"
+        desc="世界观决定角色会说什么、世界如何运转。可以从一段文字开始写，也可以让 AI 依据题材生成。"
+        primary-text="创建世界观"
+        @primary="$router.push(`/project/${projectId}/world/edit`)"
+      />
     </div>
     <div v-else class="world-body">
       <!-- 左侧导航分块查看：各部分不再平铺，避免页面过长 -->
@@ -175,11 +177,16 @@
               <span class="story-tip">世界叙事力学与风格档案——只定义「力的性质与规律」，不定义具体事件；角色不感知此档案（零 OOC）。其「世界氛围」已注入环境描述 / 宏观叙事 / 世界事件。</span>
             </div>
             <div v-loading="storyLoading" class="story-body">
-              <el-empty v-if="storyPlans.length === 0" description="尚未生成故事规划——点击右上角「生成故事规划」按世界观 + 角色自动生成">
-                <el-button type="primary" :loading="storyGenStarting" @click="startStoryGen">
-                  <el-icon><HIcon name="Document" /></el-icon>&nbsp;生成故事规划
-                </el-button>
-              </el-empty>
+              <EmptyState
+                v-if="storyPlans.length === 0"
+                size="page"
+                icon="ic_public_albums"
+                title="还没有故事宏观规划"
+                desc="它定义世界叙事「力的性质与规律」（世界氛围、冲突倾向），不定义具体事件——角色不感知，因此不会造成 OOC。"
+                :points="['按世界观 + 现有角色自动生成', '只影响世界氛围与事件倾向', '可保留多个版本对比']"
+                primary-text="生成故事规划"
+                @primary="startStoryGen"
+              />
               <template v-else>
                 <div class="story-versions">
                   <el-radio-group v-model="storyVersionIdx" size="small">
@@ -211,7 +218,10 @@
     <el-dialog v-model="wgDialog" title="worldgen 生成预览（只读）" width="760px" top="6vh">
       <div v-loading="wgLoading" class="wg-body">
         <div v-if="!wgPreview && !wgLoading" class="wg-empty">
-          <el-empty description="预览不可用（可能因维度不完整或任务数据已清理）" />
+          <EmptyState
+            size="inline"
+            title="预览不可用——可能某个维度被跳过，或任务数据已清理"
+          />
         </div>
         <template v-if="wgPreview">
           <div class="wg-sec">
@@ -237,20 +247,6 @@
       </div>
       <template #footer>
         <el-button @click="wgDialog = false">关闭</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 历史版本占位对话框 -->
-    <el-dialog v-model="versionDialog" title="世界观版本历史" width="520px">
-      <el-alert type="info" :closable="false" show-icon
-        title="版本历史为待开发功能。"
-        description="当前后端保存世界观为「覆盖更新」（不产生新版本记录）；版本化存取将在后续阶段实现（设计文档 §6.1-5）。" />
-      <div class="ver-current" v-if="world">
-        当前版本：<el-tag size="small">v{{ world.version || 1 }}</el-tag>
-        <span class="ver-time">（更新于 {{ (world.updatedAt || '').slice(0, 16).replace('T', ' ') }}）</span>
-      </div>
-      <template #footer>
-        <el-button @click="versionDialog = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -331,8 +327,8 @@
 /**
  * 世界详情页。
  * <p>职责：完整呈现项目世界观设定（只读全文渲染，不使用输入框）+ 项目级记忆（世界大事记）；
- * 头部提供「修改」入口（跳专属修改页 /world/edit）与「历史版本」入口（占位：当前后端为覆盖更新）。
- * 走专属编辑页，展示区保持只读优先。</p>
+ * 头部提供「修改」入口（跳专属修改页 /world/edit）。保存为覆盖更新（后端不产生历史版本记录），
+ * 版本标签 v{version} 仅展示当前版本号；世界观版本化存取留待后续阶段。</p>
  * <p>数据来源：/api/projects/{id}/world-setting、memories。</p>
  */
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
@@ -343,6 +339,8 @@ import {
   createWorldgenTask, fetchWorldgenTask, fetchStoryPlans
 } from '@/shared/api'
 import WorldLocationTable from '@/shared/components/WorldLocationTable.vue'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 import PageTabs from '@/shared/layout/PageTabs.vue'
 
@@ -353,7 +351,6 @@ const projectId = Number(route.params.id)
 const world = ref(null)
 const projectMemories = ref([])
 const memLoading = ref(false)
-const versionDialog = ref(false)
 // 左侧导航当前分块（基本信息/地理设定/地点详情/势力阵营/规则体系/文化风俗/历史背景/完整世界观/项目大事记）
 const activeSection = ref('basic')
 
@@ -396,9 +393,6 @@ const wgSections = computed(() => {
     .filter((k) => secs[k] != null && secs[k] !== '')
     .map((k) => ({ key: k, label: WG_SECTION_LABELS[k], text: secs[k] }))
 })
-
-/** 打开历史版本占位对话框 */
-function openVersions() { versionDialog.value = true }
 
 /** 加载世界观全文 + 项目级记忆 + 故事规划 */
 async function loadAll() {
@@ -581,6 +575,8 @@ async function loadStoryPlans() {
  * → 弹窗轮询进度；完成后刷新展示区。
  */
 async function startStoryGen() {
+  // V2.0：重入保护（空态按钮不再带 loading 视觉禁用，连点会叠出多个确认框与任务）
+  if (storyGenStarting.value) return
   try {
     await ElMessageBox.confirm(
       `将按本项目世界观与核心角色自动生成「故事宏观规划」：三层力学引擎（显性层/引擎层/兑现层）+ 风格档案（世界风格宪法）。\n\n产出为导演视角档案（角色不感知，零 OOC），其「世界氛围片段」将注入环境描述 / 宏观叙事 / 世界事件。`,
@@ -719,8 +715,6 @@ onBeforeUnmount(() => { stopCharPolling(); stopStoryPolling() })
 .mem-del { margin-left: auto; opacity: 0; transition: opacity .15s; }
 .mem-item:hover .mem-del { opacity: 1; }
 .mem-content { font-size: 0.86rem; color: var(--text-primary); margin-top: 8px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-.ver-current { margin-top: 14px; font-size: 0.85rem; color: var(--text-regular); }
-.ver-time { font-size: 0.75rem; color: var(--text-secondary); }
 /* worldgen 预览弹窗 */
 .wg-body { min-height: 120px; }
 .wg-empty { padding: 10px 0; }

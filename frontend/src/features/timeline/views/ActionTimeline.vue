@@ -55,7 +55,11 @@
           <el-tag v-if="live" size="small" type="success">实时订阅中</el-tag>
         </div>
         <div v-if="timeline.length === 0" class="tl-empty">
-          <el-empty description="暂无行动记录，可手动触发一次行动" />
+          <EmptyState
+            size="inline"
+            icon="ic_public_clock"
+            title="还没有行动记录——世界推进或手动触发一次行动后出现"
+          />
         </div>
         <div v-else class="tl-list">
           <div v-for="n in timeline" :key="`${n.kind}-${n.id}`" class="tl-node" :class="`kind-${n.kind}`" @click="selectNode(n)">
@@ -143,6 +147,8 @@ import {
   fetchCharacters, fetchProjectActionTimeline, triggerAction, updateActionStatus, actionStreamUrl
 } from '@/shared/api'
 import { createSubscription, SSE_EVENTS } from '@/shared/sse/sseClient'
+// V2.0 批次二：空态统一走 EmptyState
+import EmptyState from '@/shared/components/EmptyState.vue'
 
 const route = useRoute()
 const projectId = Number(route.params.id)

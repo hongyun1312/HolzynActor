@@ -30,6 +30,18 @@ import java.time.LocalDateTime;
 @Data
 public class WorldFrameVO {
 
+    /**
+     * 是否已生成生效帧。
+     * <p><b>契约（UI V2.0 §8.4）</b>：首个游戏日 00:00 之前「还没有世界帧」是世界的**正常状态**，
+     * 不是错误，故 {@code GET /world-frame} 恒返回 200——未生成时 {@code generated=false} 且
+     * 其余帧字段为空，界面据本字段走「尚未生成」分支（读 {@link #hint} 展示原因），
+     * 不再靠捕获 404 来判断。</p>
+     */
+    private Boolean generated = Boolean.TRUE;
+
+    /** 未生成时的原因说明（人类可读，界面可直接展示；已生成时为 null） */
+    private String hint;
+
     /** 帧 ID */
     private Long frameId;
 

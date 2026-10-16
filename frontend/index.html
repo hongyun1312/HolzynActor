@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Holzyn 全境 · 以全息之境，复刻整个世界</title>
     <meta name="description" content="Holzyn 全境——以 1:1 复刻地球为终极目标的超大型虚拟现实系统。以全息之全，入合成之境。" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- 标签页图标：原先指向 /favicon.svg，但该文件在源码树与构建产物里都不存在（实测 404 + 标签页空白图标）。
+     改为复用项目自己的应用图标（desktop/build/icon.png）缩到 64×64 的 PNG，放在 public/ 由 Vite 原样拷贝到产物根目录。
+     不改图标本身的设计——应用窗口图标与标签页图标保持同一个。 -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
   </head>
   <body>
     <div id="app"></div>

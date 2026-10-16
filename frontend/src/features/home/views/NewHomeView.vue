@@ -30,6 +30,8 @@
       :advancing="advancing"
       :rt-busy="rtBusy"
       :weather-busy="weatherBusy"
+      :left-collapsed="leftCollapsed"
+      :right-collapsed="rightCollapsed"
       @rate-change="onRateChange"
       @toggle-pause="togglePause"
       @advance="advanceOne"
@@ -37,12 +39,14 @@
       @weather-change="onWeatherChange"
       @open-intervene="interveneOpen = true"
       @open-roleplay="roleplayOpen = true"
+      @toggle-left="toggleLeftPanel"
+      @toggle-right="toggleRightPanel"
     />
 
     <!-- 三层主体 -->
-    <div class="hm-body">
+    <div class="hm-body" :class="{ 'no-left': leftCollapsed, 'no-right': rightCollapsed }">
       <!-- 左栏：角色活动流 -->
-      <aside class="hm-col hm-col-left">
+      <aside v-show="!leftCollapsed" class="hm-col hm-col-left">
         <CharacterActivityPanel
           :npcs="npcList"
           :selected-ref="selectedRef"
@@ -53,6 +57,7 @@
           @talk="doTalk"
           @act="doAction"
           @event-inject="doEvent"
+          @ask="askAssistantAbout"
         />
       </aside>
 
@@ -74,12 +79,35 @@
           @pick-home="onPickHome"
           @pick-npc="onPickNpc"
           @pick-empty="onPickEmpty"
+          @toggle-layer="(k, v) => (showLayers[k] = v)"
         />
-        <!-- 图层筛选（中栏地图右下角） -->
-        <div class="hm-layers">
-          <el-checkbox v-model="showLayers.roads" size="small">道路</el-checkbox>
-          <el-checkbox v-model="showLayers.buildings" size="small">建筑</el-checkbox>
-          <el-checkbox v-model="showLayers.homes" size="small">住所</el-checkbox>
+        <!-- 时钟暂停：单行细横幅（纯提示，不自带 CTA）
+             V2.0：世界时间状态的**唯一控制入口**已收敛到工具条（时钟徽标 + ▶ 开始推进 / ⏸ 暂停），
+             这里若再放一个「开始推进」按钮就是同一动作的第二个入口（审计 UI-07 的核心问题）。
+             因此本横幅只做"首次进入的一次性提示"，点一次「知道了」不再出现。 -->
+        <div
+          v-if="pausedBanner" class="hm-banner"
+          :title="`世界时钟已暂停 · ${pausedBanner.time} · 角色不会自主推进`"
+        >
+          <span class="hm-banner-icon">⏸</span>
+          <b class="hm-banner-title">世界已暂停</b>
+          <span class="hm-banner-hint">角色不会自主推进 · 用上方「▶ 开始推进」继续</span>
+          <button type="button" class="hm-banner-close" title="知道了，不再提示" @click="pausedHintDismissed = true">✕</button>
+        </div>
+        <!-- 阻塞态（未初始化 / 加载失败）：仍居中提示（这两种状态地图本身没有内容可看） -->
+        <div v-else-if="homeStatus" class="hm-status" :class="'is-' + homeStatus.kind">
+          <div class="hm-status-icon">{{ homeStatus.icon }}</div>
+          <div class="hm-status-title">{{ homeStatus.title }}</div>
+          <div class="hm-status-desc">{{ homeStatus.desc }}</div>
+          <el-button
+            :type="homeStatus.btnType || 'primary'"
+            size="large"
+            class="hm-status-btn"
+            :loading="homeStatus.loading"
+            @click="homeStatus.run()"
+          >
+            {{ homeStatus.action }}
+          </el-button>
         </div>
         <!-- 地点详情卡（点击区域/建筑/住所弹出） -->
         <div v-if="locationDetail" class="hm-loc-card">
@@ -104,7 +132,7 @@
       </main>
 
       <!-- 右栏：世界演化面板 -->
-      <aside class="hm-col hm-col-right">
+      <aside v-show="!rightCollapsed" class="hm-col hm-col-right">
         <WorldEvolutionPanel
           :feed="feed"
           :macro="macro"
@@ -143,7 +171,7 @@
 
 <script setup>
 /**
- * 新首页（M4）——项目默认落地页，取代旧 3D 沙盘（WorldSandboxView + Three.js）。
+ * 新首页（M4）——项目默认落地页，取代旧 3D 沙盘（WorldSandboxView + Three.js 已于 P0-4 删除）。
  * <p>职责：三层壳内「双主角并置」——左栏角色活动流 / 中栏 2D 世界地图（主角）/ 右栏世界演化面板，
  * 顶栏世界时钟 + 实时决策 + 天气 + 干预 + 对戏抽屉。数据源全复用（零新后端）：</p>
  * <ul>
@@ -157,7 +185,7 @@
  * {@link RoleplayDrawer} 抽屉保留（用户决策：废弃演化页、保留对戏能力）。</p>
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createSubscription } from '@/shared/sse/sseClient'
 import { gameSecondNow, engineSecondNow, formatWorldTimeMinute, formatCompactDayTime, calendarNameOf } from '@/shared/worldClock'
@@ -178,13 +206,27 @@ import CharacterActivityPanel from '../components/CharacterActivityPanel.vue'
 import WorldEvolutionPanel from '../components/WorldEvolutionPanel.vue'
 import InterventionDrawer from '../components/InterventionDrawer.vue'
 import RoleplayDrawer from '../components/RoleplayDrawer.vue'
+import { askAssistant } from '@/features/assistant/assistantStore'
 
 const route = useRoute()
+const router = useRouter()
 const projectId = Number(route.params.id)
 
 // ==================== 状态 ====================
 const loaded = ref(false)
 const liveConnected = ref(false)
+
+/**
+ * 首屏地图数据加载状态（P0-2）：
+ * - loading：首次加载中（v-loading 已覆盖，不弹卡）
+ * - ok：地图数据就绪（有区域/建筑/住所任一项）
+ * - empty：地图加载成功但世界未初始化（无任何布局数据）
+ * - error：地图接口失败（显示错误 + 重试）
+ */
+const mapLoadState = ref('loading')
+const mapLoadError = ref('')
+/** 时钟暂停提示是否被用户手动关闭（会话内） */
+const pausedHintDismissed = ref(false)
 
 /** 世界时钟 */
 const clock = reactive({ gameDay: 1, gameHour: 0, gameSecond: 0, paused: 0, rate: 4, gameTimeText: '', refRealTime: null, calendarName: null })
@@ -235,7 +277,7 @@ const rtBusy = ref(false)
 const rtDecision = reactive({ active: false, manualEnabled: false, sandboxActive: false, evolutionActive: false })
 
 /** 天气 */
-const weather = reactive({ condition: null, temperature: null, wind: null, region: null, season: null, seasonName: null, month: null, phase: null, phaseName: null, sunrise: null, sunset: null, feelsLikeC: null })
+const weather = reactive({ condition: null, temperature: null, wind: null, region: null, season: null, seasonName: null, month: null, phase: null, phaseName: null, sunrise: null, sunset: null, feelsLikeC: null, framePending: false, frameHint: '' })
 
 /** 宏观 + 曲线 */
 const macro = ref(null)
@@ -280,6 +322,66 @@ const clockText = computed(() => {
   return '—'
 })
 
+/**
+ * 首屏阻塞态提示（P0-2 保留：世界未初始化 / 地图加载失败）。
+ * <p>第 65 次拆分：**时钟暂停不再走这里**——它原来是一张盖住地图正中的大卡（240×300），
+ * 世界一停就把地图挡掉一半；现改为地图顶部一条紧凑横幅（见 pausedBanner），
+ * 只有「没有地图内容可看」的阻塞态才继续居中提示。</p>
+ */
+const homeStatus = computed(() => {
+  // ① 地图接口失败：错误 + 重试
+  if (mapLoadState.value === 'error') {
+    return {
+      kind: 'error',
+      icon: '⚠️',
+      title: '世界地图加载失败',
+      desc: mapLoadError.value || '暂时无法获取世界地图，请检查网络后重试。',
+      action: '重新加载',
+      run: reloadMap
+    }
+  }
+  // ② 世界未初始化：地图为空 → 引导去初始化
+  if (mapLoadState.value === 'empty') {
+    return {
+      kind: 'uninit',
+      icon: '🗺️',
+      title: '世界尚未初始化',
+      desc: '还没有生成世界地图与角色场景。初始化后，角色才会在这片大地上生活、移动。',
+      action: '去初始化',
+      run: goInit
+    }
+  }
+  return null
+})
+
+/** 时钟暂停横幅（第 65 次：由居中大卡改为地图顶部紧凑横幅） */
+const pausedBanner = computed(() => {
+  if (mapLoadState.value !== 'ok' || !clock.paused || pausedHintDismissed.value) return null
+  return { time: clockText.value }
+})
+
+// ==================== 面板收放（第 65 次：数据栏太多 → 可一键收起，把画面还给地图） ====================
+const PANEL_KEY = 'holzyn-actor.home.panels.v1'
+/** 左栏（角色活动流）是否收起 */
+const leftCollapsed = ref(loadPanel('left'))
+/** 右栏（世界演化）是否收起 */
+const rightCollapsed = ref(loadPanel('right'))
+
+function loadPanel(side) {
+  try {
+    const raw = localStorage.getItem(PANEL_KEY)
+    if (raw) return !!JSON.parse(raw)[side]
+  } catch (_) { /* 忽略 */ }
+  return false
+}
+function savePanels() {
+  try {
+    localStorage.setItem(PANEL_KEY, JSON.stringify({ left: leftCollapsed.value, right: rightCollapsed.value }))
+  } catch (_) { /* 忽略 */ }
+}
+function toggleLeftPanel() { leftCollapsed.value = !leftCollapsed.value; savePanels() }
+function toggleRightPanel() { rightCollapsed.value = !rightCollapsed.value; savePanels() }
+
 // ==================== 初始化 + SSE ====================
 
 let sub = null
@@ -312,6 +414,8 @@ async function loadOverview() {
 
 /** 世界地图：区域/道路/建筑/住所（home.js 已换算中心化坐标） */
 async function loadWorldMap() {
+  mapLoadState.value = 'loading'
+  mapLoadError.value = ''
   try {
     const m = await fetchHomeWorldMap(projectId)
     if (m?.sceneSize) sceneSize.value = m.sceneSize
@@ -319,7 +423,23 @@ async function loadWorldMap() {
     roads.value = m.roads || []
     placements.value = m.placements || []
     homes.value = m.homes || []
-  } catch (_) { /* 无地图静默（空画布） */ }
+    // 世界未初始化 = 地图加载成功但没有任何布局数据（区域/建筑/住所全空）
+    mapLoadState.value = (regions.value.length || placements.value.length || homes.value.length) ? 'ok' : 'empty'
+  } catch (e) {
+    mapLoadState.value = 'error'
+    mapLoadError.value = e?.message || '加载世界地图失败'
+  }
+}
+
+/** P0-2：地图加载失败后的「重新加载」（地图 + 在途移动一起重拉） */
+async function reloadMap() {
+  await loadWorldMap()
+  await loadMovements()
+}
+
+/** P0-2：去初始化 → 进入世界初始化页（独立全屏，6 步工作流；默认「跳过已生成」幂等模式） */
+function goInit() {
+  router.push(`/project/${projectId}/init`)
 }
 
 /** 在途移动列表 */
@@ -331,7 +451,7 @@ async function loadMovements() {
 
 /** 并行加载天气与地点表 */
 async function loadWeatherAndLocations() {
-  try { applyFrameWeather(await fetchWorldFrame(projectId)) } catch (_) { /* 静默 */ }
+  try { applyFrameWeather(await fetchWorldFrame(projectId)) } catch (_) { /* 仅网络/服务异常时兜底：未生成已由 generated 字段表达，不再是异常 */ }
   try { applyWeatherPayload(await fetchEnvironmentContext(projectId)) } catch (_) { /* 静默 */ }
   try { worldLocations.value = await fetchWorldLocations(projectId) || [] } catch (_) { worldLocations.value = [] }
 }
@@ -655,6 +775,13 @@ async function doEvent(content) {
   finally { injecting.value = false }
 }
 
+/** 沙盘「问问助手」：把选中角色上下文带入助手提问（唤起全局助手侧边栏，问题带 npcRef 提升实体解析鲁棒性）。 */
+function askAssistantAbout(npcRef) {
+  const npc = npcList.value.find((n) => n.npcRef === npcRef)
+  const name = npc?.npcName || npcRef || '这个角色'
+  askAssistant(`讲讲${name}（${npcRef}）现在的情况`)
+}
+
 async function togglePause() {
   clockBusy.value = true
   try {
@@ -706,7 +833,7 @@ async function activateSandbox() {
   try {
     const st = await setRealtimeDecision(projectId, { action: 'open', reason: 'sandbox' })
     applyRtState(st)
-    pushFeed('clock', '实时决策', '新首页打开：世界已激活，继续推进')
+    pushFeed('clock', '实时决策', '世界已开始运行')
   } catch (_) { /* 静默 */ }
 }
 
@@ -766,8 +893,25 @@ async function refreshClockAnchor() {
 
 // ==================== 天气 ====================
 
+/**
+ * 应用世界帧里的天气。
+ *
+ * <p>UI V2.0 §8.4 契约（2026-10-15 改判）：`GET /world-frame` <b>恒 200</b>——首个游戏日 00:00
+ * 之前还没有世界帧，这是世界的正常状态而非错误。未生成时 `generated === false` 且带 `hint`，
+ * 此处<b>显式读字段</b>并把原因透出（顶栏「⋯ 更多 → 天气」会显示它），
+ * 不再像改造前那样靠 `catch` 吞掉 404——那样"未生成"和"接口挂了"在前端无从区分，
+ * 且每次首访都在 DevTools 留一条红色 4xx（实测唯一 4xx 来源）。</p>
+ */
 function applyFrameWeather(frame) {
-  if (!frame || !frame.weatherJson) return
+  if (!frame) return
+  if (frame.generated === false) {
+    weather.framePending = true
+    weather.frameHint = frame.hint || ''
+    return
+  }
+  weather.framePending = false
+  weather.frameHint = ''
+  if (!frame.weatherJson) return
   try {
     const parsed = JSON.parse(frame.weatherJson)
     const keys = Object.keys(parsed || {})
@@ -798,7 +942,7 @@ function applyWeatherPayload(data) {
 }
 
 async function refreshWeather() {
-  try { applyFrameWeather(await fetchWorldFrame(projectId)) } catch (_) { /* 静默 */ }
+  try { applyFrameWeather(await fetchWorldFrame(projectId)) } catch (_) { /* 仅网络/服务异常时兜底：未生成已由 generated 字段表达，不再是异常 */ }
   try { applyWeatherPayload(await fetchEnvironmentContext(projectId)) } catch (_) { /* 静默 */ }
 }
 
@@ -852,7 +996,7 @@ function validSceneSize(v) {
   display: flex; flex-direction: column;
   width: 100%; height: 100%; min-height: 0;
   gap: 10px; padding: 10px;
-  background: #0b1220;
+  background: var(--hm-page-bg);
   box-sizing: border-box;
 }
 .hm-body {
@@ -861,47 +1005,128 @@ function validSceneSize(v) {
   grid-template-columns: 300px minmax(0, 1fr) 340px;
   gap: 10px;
 }
+/* 面板收起：把宽度还给地图（第 65 次「数据栏太多」的兜底手段）
+   ⚠ 三列必须显式声明 grid-column：面板用 v-show 收起后 display:none 的网格项不再占位，
+   若不指定列号，剩下的元素会自动落到第 1 条轨道（= 收起的 0px 轨道）→ 地图宽度变 0。 */
+.hm-body.no-left { grid-template-columns: 0 minmax(0, 1fr) 340px; }
+.hm-body.no-right { grid-template-columns: 300px minmax(0, 1fr) 0; }
+.hm-body.no-left.no-right { grid-template-columns: 0 minmax(0, 1fr) 0; }
 .hm-col { min-width: 0; min-height: 0; position: relative; }
+.hm-col-left { grid-column: 1; }
+.hm-col-center { grid-column: 2; }
+.hm-col-right { grid-column: 3; }
 .hm-loading { position: absolute; inset: 0; z-index: 9; display: flex; align-items: center; justify-content: center; }
+/* 右下角常驻「AI 助手」悬浮球（fixed 48px + 22px 边距）：两栏都收起时地图会一直顶到视口
+   右下角，底部控件必须给悬浮球让位，否则图例最后一项被盖住 */
+.hm-body.no-left.no-right :deep(.hm-ctls) { right: 84px; }
 
-/* 中栏地图 + 图层筛选 + 地点卡 */
+/* 中栏地图 + 状态提示 + 地点卡 */
 .hm-col-center { display: flex; align-items: center; justify-content: center; }
-.hm-layers {
-  position: absolute; right: 10px; top: 10px; z-index: 3;
-  display: flex; align-items: center; gap: 10px;
-  padding: 5px 10px; border-radius: 8px;
-  background: rgba(13, 20, 36, 0.8); backdrop-filter: blur(4px);
-  border: 1px solid rgba(120, 160, 255, 0.25);
-  font-size: 11px; color: #9db8e8;
+/* 时钟暂停横幅（单行细条，停在地图顶部，不遮挡地图主体） */
+.hm-banner {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+  z-index: 5;
+  display: flex; align-items: center; gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 4px 8px 4px 12px;
+  border-radius: 999px;
+  background: var(--hm-panel-strong); backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--hm-gold) 55%, transparent);
+  box-shadow: var(--shadow-lv2);
+  color: var(--hm-text);
+  font-size: 12px; white-space: nowrap;
 }
-.hm-layers :deep(.el-checkbox__label) { font-size: 11px; color: #9db8e8; }
+.hm-banner-icon { font-size: 13px; line-height: 1; }
+/* V2.0：800 → 700（分片只保留 400/700；原写法会被浏览器就近解析到 900 字重，多下一个完整字重） */
+.hm-banner-title { font-size: 12.5px; font-weight: 700; }
+.hm-banner-time { font-style: normal; font-size: 12px; color: var(--hm-gold); font-variant-numeric: tabular-nums; }
+.hm-banner-hint { font-size: 11px; color: var(--hm-text-faint); }
+.hm-banner-close {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--hm-text-faint); font-size: 12px; padding: 0 2px; line-height: 1;
+}
+.hm-banner-close:hover { color: var(--hm-text); }
+
+/* P0-2 阻塞态卡（未初始化 / 加载失败）：地图本身无内容，居中提示 */
+.hm-status {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  width: min(360px, 86%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 22px 24px;
+  text-align: center;
+  background: var(--hm-panel-strong); backdrop-filter: blur(10px);
+  border: 1px solid var(--hm-border); border-radius: 16px;
+  color: var(--hm-text); box-shadow: var(--shadow-lv3);
+}
+.hm-status.is-error { border-color: color-mix(in srgb, var(--hm-red) 60%, transparent); }
+.hm-status-icon { font-size: 30px; line-height: 1; }
+/* V2.0：800 → 700（分片只保留 400/700；原写法会被浏览器就近解析到 900 字重，多下一个完整字重） */
+.hm-status-title { font-size: 16px; font-weight: 700; color: var(--hm-text); }
+.hm-status-desc { font-size: 12.5px; color: var(--hm-text-dim); line-height: 1.7; }
+.hm-status-btn { margin-top: 6px; min-width: 140px; }
 .hm-loc-card {
   position: absolute; left: 12px; top: 12px; z-index: 4;
   width: 280px; max-height: 62%; overflow-y: auto;
   display: flex; flex-direction: column; gap: 8px;
-  background: rgba(13, 20, 36, 0.94); backdrop-filter: blur(8px);
-  border: 1px solid rgba(120, 160, 255, 0.35); border-radius: 12px;
-  padding: 12px 14px; color: #e8f0ff; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  background: var(--hm-panel-strong); backdrop-filter: blur(8px);
+  border: 1px solid var(--hm-border); border-radius: 12px;
+  padding: 12px 14px; color: var(--hm-text); box-shadow: var(--shadow-lv2);
 }
 .hm-loc-head { display: flex; align-items: center; gap: 8px; }
-.hm-loc-name { font-size: 14px; font-weight: 700; color: #fff; }
-.hm-loc-close { margin-left: 0; color: #6b7fa8; }
-.hm-loc-intro { font-size: 11.5px; color: #cfe0ff; line-height: 1.7; }
-.hm-loc-stats { display: flex; gap: 10px; font-size: 11px; color: #9db8e8; }
+.hm-loc-name { font-size: 14px; font-weight: 700; color: var(--hm-text); }
+.hm-loc-close { margin-left: 0; color: var(--hm-text-faint); }
+.hm-loc-intro { font-size: 11.5px; color: var(--hm-text-soft); line-height: 1.7; }
+.hm-loc-stats { display: flex; gap: 10px; font-size: 11px; color: var(--hm-text-dim); }
 .hm-loc-stat { font-variant-numeric: tabular-nums; }
-.hm-loc-nearby { border-top: 1px solid rgba(120, 160, 255, 0.18); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-.hm-loc-sub { font-size: 11px; font-weight: 700; color: #9db8e8; }
+.hm-loc-nearby { border-top: 1px solid var(--hm-border-soft); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.hm-loc-sub { font-size: 11px; font-weight: 700; color: var(--hm-text-dim); }
 .hm-loc-npc {
-  display: flex; align-items: center; gap: 7px; font-size: 12px; color: #cfe0ff;
+  display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--hm-text-soft);
   padding: 3px 6px; border-radius: 6px; cursor: pointer;
 }
-.hm-loc-npc:hover { background: rgba(77, 159, 255, 0.12); }
-.hm-loc-dot { width: 7px; height: 7px; border-radius: 50%; background: #8fb1ff; flex-shrink: 0; }
+.hm-loc-npc:hover { background: var(--accent-soft); }
+.hm-loc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--hm-blue); flex-shrink: 0; }
 .hm-loc-card::-webkit-scrollbar { width: 5px; }
-.hm-loc-card::-webkit-scrollbar-thumb { background: rgba(120, 160, 255, 0.3); border-radius: 3px; }
+.hm-loc-card::-webkit-scrollbar-thumb { background: var(--hm-border); border-radius: 3px; }
 
-/* 响应式：窄屏堆叠 */
-@media (max-width: 1280px) {
-  .hm-body { grid-template-columns: 260px minmax(0, 1fr) 300px; }
+/* 响应式（V2.0：断点收敛为档位值 1440 / 1024 两档，原有 1500/1280/1199/1023/860 五个野值已归并）。
+   原则：**窄屏降级的是"栏"，不是中央内容**——地图是主角，不许被两侧数据栏压扁。
+   - ≥1441：三栏（左角色活动流 | 中地图 | 右世界演化）
+   - 1025–1440：**地图独占整列 + 右侧 320px 侧轨**（角色活动流与世界演化上下两卡），
+     地图框恢复竖长（实测 1036×480 的横向空框问题即由此解决）
+   - ≤1024：地图整行 + 两卡在下并排（<1024 只做"不破相"兜底，桌面端 minWidth=1024 不会到达）
+   ⚠ 此处不改 `.hm-home` 的高度链：`.hm-body` 保持 flex:1 + min-height:0 才有确定高度，
+   否则 auto 高度下的 1fr 行会按内容撑开（实测被面板撑到 1242px）。 */
+@media (max-width: 1440px) {
+  .hm-body {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .hm-col-center { grid-column: 1; grid-row: 1 / 3; }
+  .hm-col-left { grid-column: 2; grid-row: 1; }
+  .hm-col-right { grid-column: 2; grid-row: 2; }
+  .hm-body.no-left { grid-template-columns: minmax(0, 1fr) 0; }
+  .hm-body.no-left .hm-col-right { grid-column: 2; grid-row: 1 / 3; }
+  .hm-body.no-right { grid-template-columns: minmax(0, 1fr) 0; }
+  .hm-body.no-right .hm-col-left { grid-column: 2; grid-row: 1 / 3; }
+  .hm-body.no-left.no-right { grid-template-columns: minmax(0, 1fr) 0; }
+}
+@media (max-width: 1024px) {
+  .hm-home { height: auto; min-height: 100%; }
+  .hm-body {
+    flex: none;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(400px, 56vh) auto;
+  }
+  .hm-col-center { grid-column: 1 / -1; grid-row: 1; }
+  .hm-col-left { grid-column: 1; grid-row: 2; height: 420px; }
+  .hm-col-right { grid-column: 2; grid-row: 2; height: 420px; }
+  .hm-body.no-left,
+  .hm-body.no-right,
+  .hm-body.no-left.no-right { grid-template-columns: minmax(0, 1fr); }
+  .hm-body.no-left .hm-col-right,
+  .hm-body.no-right .hm-col-left { grid-column: 1 / -1; grid-row: 2; }
 }
 </style>

@@ -305,6 +305,21 @@ public class AgentMemoryService {
      * fact+observation 记忆做文本重叠去重（复用 MemoryService.isDuplicate），写入后预算淘汰。</p>
      */
     public void recordObservation(Long projectId, String characterRef, String content, Integer importance) {
+        recordObservation(projectId, characterRef, content, importance, null);
+    }
+
+    /**
+     * 为当事人写一条经历记忆（kind=observation，），带决策来源（P0-03 决策源可追溯）。
+     * <p>由行动组件（AgentActionService.execute 重要度≥阈值）与事件订阅者
+     * （{@link AgentMemoryEventSubscriber} 在场当事人经历）调用（统一身份 {@code npc:{id}}，特殊型双写
+     * character_id + character_ref，普通型仅写 character_ref）；写入前对同 ref 已有
+     * fact+observation 记忆做文本重叠去重（复用 MemoryService.isDuplicate），写入后预算淘汰。</p>
+     *
+     * @param source 决策来源（AI/程序化兜底/预算降级；可空=旧路径视为 AI）。兜底/降级产出
+     *               打标后进学习管线被过滤（不吸收兜底数据学习，见 {@code DecisionSources#isAbsorbableByLearning}）
+     */
+    public void recordObservation(Long projectId, String characterRef, String content, Integer importance,
+                                  com.holzyn.actor.domain.agent.runtime.DecisionSource source) {
         if (projectId == null || characterRef == null || characterRef.isBlank()
                 || content == null || content.isBlank()) {
             return;
@@ -339,6 +354,10 @@ public class AgentMemoryService {
         m.setType(ActorMemoryTypes.TYPE_EPISODIC);
         m.setContent(content);
         m.setImportance(imp);
+        // P0-03 决策源可追溯：经历记忆打标来源（兜底/预算降级产出进学习管线被过滤）
+        if (source != null) {
+            m.setDecisionSource(source.name());
+        }
         memoryRepository.save(m);
         log.debug("[记忆沉淀] 写入 observation：project={} ref={} 重要度={}", projectId, ref, imp);
         evictOverBudget(projectId, ref);

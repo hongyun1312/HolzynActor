@@ -90,6 +90,13 @@ class RoutingYamlMaxTokensTest {
         assertEquals(2048, intAt(env, P + "scenes.growth_wedding_narrative.max-tokens"));
         assertEquals(2048, intAt(env, P + "scenes.space_trigger.max-tokens"));
         assertEquals(2048, intAt(env, P + "scenes.agent_decision.max-tokens"));
+        // 对谈五场景（第 61 轮冒烟抓修）：显式固化输出上限，阻断 default-tier 4096 覆盖
+        // （此前 dialogue_reply 落 default-tier → 回复过长 → 上下文膨胀 → 撞上游 ~60s 流式时限）
+        assertEquals(260, intAt(env, P + "scenes.dialogue_reply.max-tokens"));
+        assertEquals(160, intAt(env, P + "scenes.dialogue_greeting.max-tokens"));
+        assertEquals(300, intAt(env, P + "scenes.dialogue_group_reply.max-tokens"));
+        assertEquals(300, intAt(env, P + "scenes.dialogue_summary.max-tokens"));
+        assertEquals(512, intAt(env, P + "scenes.dialogue_consolidation.max-tokens"));
     }
 
     @Test

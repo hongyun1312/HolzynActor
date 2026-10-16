@@ -25,7 +25,11 @@ import {
   SIDEBAR_MAX_WIDTH
 } from '@/shared/store/layout'
 
-/** 断点（与 variables.css 注释中的 --shell-bp-* 同源；JS 侧为权威） */
+/**
+ * 断点（**唯一事实来源在 CSS 令牌**：`variables.css` 的 `--bp-md/--bp-lg/--bp-xl`；
+ * 本文件的两个常量必须与之保持同值——改一处必须同时改另一处，别处不得再定义断点）。
+ * V2.0 起 CSS 侧只允许使用这三个档位值。
+ */
 export const BREAKPOINT_MEDIUM = 1440
 export const BREAKPOINT_SMALL = 1024
 
@@ -77,10 +81,11 @@ export function useShellLayout() {
 
   /**
    * 实际生效的侧栏宽度（px）。
-   * <p>覆盖式下宽度仍按记忆值渲染（滑入面板），但内容区不为其让位。</p>
+   * <p>覆盖式（<1024）下：只有「滑入打开」时才按记忆值渲染，收起时为 0——
+   * 旧实现恒返回记忆宽度，导致窄屏侧栏始终占位、内容区被挤窄，且遮罩出现侧栏却不动。</p>
    */
   const effectiveSidebarWidth = computed(() => {
-    if (shellMode.value === 'overlay') return sidebarWidth.value
+    if (shellMode.value === 'overlay') return layout.overlaySidebarOpen ? sidebarWidth.value : 0
     if (shellMode.value === 'medium' && !layout.sidebarManualExpand) return SIDEBAR_COLLAPSED_WIDTH
     return sidebarCollapsed.value ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth.value
   })
@@ -147,8 +152,20 @@ export function useShellLayout() {
 
   /** 开关侧栏（按当前形态决定是折叠还是覆盖式滑入） */
   function toggleSidebar() {
-    if (shellMode.value === 'overlay') layout.setOverlaySidebar(!layout.overlaySidebarOpen)
-    else layout.toggleSidebar()
+    if (shellMode.value === 'overlay') {
+      layout.setOverlaySidebar(!layout.overlaySidebarOpen)
+      return
+    }
+    if (shellMode.value === 'medium') {
+      // 中屏（1024–1439）自动收窄为图标栏；用户手动展开可覆盖该行为。
+      // 旧实现只翻转 sidebarCollapsed，而中屏自动态下宽度由 sidebarManualExpand 决定，
+      // 于是「展开侧栏」点了毫无反应——这里改管 manualExpand：展开⇄回到自动收窄。
+      const expanded = layout.sidebarManualExpand && !layout.sidebarCollapsed
+      layout.setSidebarManualExpand(!expanded)
+      layout.toggleSidebar(false)
+      return
+    }
+    layout.toggleSidebar()
   }
 
   /** 点击导航后关闭覆盖式侧栏（窄屏体验） */

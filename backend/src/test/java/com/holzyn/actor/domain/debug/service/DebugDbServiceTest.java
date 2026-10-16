@@ -205,4 +205,47 @@ class DebugDbServiceTest {
             }
         }
     }
+
+    /**
+     * 项目级 AI 助手（2026-10-12 M5 收尾）：助手三表（actor_assistant_session / actor_assistant_message /
+     * actor_assistant_intervention）可在调试 DB 浏览（白名单同步确认，会话/消息/干预留痕调试可见）。
+     */
+    @Test
+    void assistantTablesInWhitelist() {
+        DebugDbService service = new DebugDbService(null);
+        for (String table : new String[]{"actor_assistant_session", "actor_assistant_message",
+                "actor_assistant_intervention"}) {
+            try {
+                service.browse(table, 1, 10, null);
+            } catch (NullPointerException npe) {
+                // 校验放行后才会因 jdbcTemplate==null 走到 NPE —— 证明未被白名单拒绝 ✓
+                continue;
+            } catch (BizException be) {
+                throw new AssertionError("表 " + table + " 应在调试 DB 白名单内（校验被拒）", be);
+            }
+        }
+    }
+
+    /**
+     * 对谈模式（2026-10-12 M1 对谈地基 + 2026-10-13 M4/M5）：对谈六表（actor_talk_session /
+     * actor_talk_message / actor_talk_player_profile / actor_talk_player_relation /
+     * actor_talk_worldbook[M4] / actor_talk_group_member[M5]）可在调试 DB 浏览
+     * （白名单同步确认，会话/消息/玩家档案/玩家-角色关系/世界书/群聊成员调试可见）。
+     */
+    @Test
+    void dialogueTablesInWhitelist() {
+        DebugDbService service = new DebugDbService(null);
+        for (String table : new String[]{"actor_talk_session", "actor_talk_message",
+                "actor_talk_player_profile", "actor_talk_player_relation", "actor_talk_worldbook",
+                "actor_talk_group_member"}) {
+            try {
+                service.browse(table, 1, 10, null);
+            } catch (NullPointerException npe) {
+                // 校验放行后才会因 jdbcTemplate==null 走到 NPE —— 证明未被白名单拒绝 ✓
+                continue;
+            } catch (BizException be) {
+                throw new AssertionError("表 " + table + " 应在调试 DB 白名单内（校验被拒）", be);
+            }
+        }
+    }
 }

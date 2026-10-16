@@ -1435,7 +1435,8 @@ onBeforeUnmount(() => { closeStream(); closeLiveStream(); stopClockPolling() })
 .composer-card:focus-within { border-color: var(--accent-border); box-shadow: var(--shadow-lv3); }
 .composer-scroll { max-height: var(--composer-text-max-height); overflow-y: auto; }
 .composer-input {
-  width: 100%; border: none; outline: none; resize: none;
+  /* V2.0 a11y：不写裸 outline:none（键盘聚焦由 global.css 的 textarea:focus-visible 提供） */
+  width: 100%; border: none; resize: none;
   background: transparent; color: var(--text-primary);
   font-size: 16px; line-height: 24px; font-family: inherit;
   padding: 2px 2px 4px;
@@ -1468,7 +1469,7 @@ onBeforeUnmount(() => { closeStream(); closeLiveStream(); stopClockPolling() })
 }
 .info-header { display: flex; align-items: center; justify-content: space-between; font-weight: 600; color: var(--text-primary); padding: 4px 2px 8px; }
 .info-tabs { flex: 1; min-height: 0; }
-.info-pre { margin: 0; padding: 10px; background: var(--bg-layer-2); border: 1px solid var(--border-l1); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: calc(100vh - 300px); overflow-y: auto; }
+.info-pre { margin: 0; padding: 10px; background: var(--bg-layer-2); border: 1px solid var(--border-l1); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: var(--panel-scroll-max, min(46vh, 520px)); overflow-y: auto; }
 /* 结构化角色卡分节渲染（右栏紧凑版） */
 .p-section { margin-bottom: 12px; }
 .p-title { font-weight: 700; color: var(--text-primary); font-size: 0.82rem; margin-bottom: 6px; }
@@ -1494,7 +1495,7 @@ onBeforeUnmount(() => { closeStream(); closeLiveStream(); stopClockPolling() })
 /* 长期记忆 Tab */
 .memory-ops { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .memory-hint { font-size: 0.72rem; color: var(--text-secondary); }
-.memory-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 340px); overflow-y: auto; }
+.memory-list { display: flex; flex-direction: column; gap: 8px; max-height: var(--panel-scroll-max, min(46vh, 520px)); overflow-y: auto; }
 .memory-item { border: 1px solid var(--border-l1); border-radius: 8px; padding: 8px 10px; }
 .memory-item.summary { background: color-mix(in srgb, var(--state-success) 8%, transparent); }
 .memory-item.fact { background: var(--bg-layer-2); }
@@ -1515,12 +1516,14 @@ onBeforeUnmount(() => { closeStream(); closeLiveStream(); stopClockPolling() })
 .working-memory-time { font-size: 0.7rem; color: var(--text-placeholder); margin-left: auto; }
 .working-memory-content { font-size: 0.78rem; color: var(--text-primary); margin-top: 5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
-/* ===== 窄屏自适应：收缩左右固定列，避免把中栏对话流压成细竖条 ===== */
-@media (max-width: 1320px) {
+/* ===== 窄屏自适应：收缩左右固定列，避免把中栏对话流压成细竖条 =====
+   V2.0 批次二：断点收敛到全站三档（1024 / 1440）。原先 1320 / 1160 两个野值
+   分别并入 1440 / 1024 —— 在采集覆盖的 1280 与 1024 两档行为完全一致。 */
+@media (max-width: 1440px) {
   .chat-side { width: calc(var(--page-aside-w, 260px) - 40px); }
   .chat-info { width: calc(var(--page-info-w, 340px) - 40px); }
 }
-@media (max-width: 1160px) {
+@media (max-width: 1024px) {
   /* 窗口过窄时隐藏右栏角色信息，保证对话流可用（角色卡在「NPC 角色」页仍可查看） */
   .chat-info { display: none; }
   .chat-side { width: calc(var(--page-aside-w, 260px) - 60px); }

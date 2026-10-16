@@ -191,7 +191,7 @@ public class DebugOverviewService {
         long uptimeMs = System.currentTimeMillis() - startTime;
 
         m.put("appName", appName);
-        m.put("version", "1.0.0");
+        m.put("version", "1.1.0-beta.1");
         m.put("status", "UP");
         m.put("time", LocalDateTime.now().toString());
         m.put("startTime", java.time.Instant.ofEpochMilli(startTime).toString());

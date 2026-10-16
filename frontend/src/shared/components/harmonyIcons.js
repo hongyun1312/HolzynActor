@@ -156,6 +156,10 @@ export const ELEMENT_TO_HARMONY = {
   MoreFilled: 'ic_public_more',
   UploadFilled: 'ic_public_upload_filled',
   FolderOpened: 'ic_public_folder',
+  // P1 补齐：此前三处使用了未登记的名称 → HIcon 取不到 SVG 直接不渲染（标题/按钮左侧空一格）
+  Collection: 'ic_public_albums',   // 世界书（知识条目）→ 知识库图标
+  EditPen: 'ic_public_edit',        // 作者注释（常驻提示）→ 编辑图标
+  Warning: 'ic_public_ring',        // 紧急状态预警（图标集无三角警告，用提示铃近似）
   // 世界沙盘 S1：地图定位标记（来自 HarmonyOS_Icons.zip ic_gallery_map_all）
   MapLocation: 'ic_gallery_map_all',
   LocationFilled: 'ic_gallery_map_all'

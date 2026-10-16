@@ -164,10 +164,15 @@ watch(() => menu.open, async (v) => {
   text-align: left;
   font-family: inherit;
 }
-.ctx-item:hover:not(:disabled),
+.ctx-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+/* V2.0 a11y：原实现把键盘焦点与 hover 合并后 outline:none，等于键盘用户没有任何焦点指示。
+   右键菜单是纯键盘可操作场景（方向键 + Enter），焦点必须可见 → 实心主色内缩环。 */
 .ctx-item:focus-visible {
   background: var(--bg-hover);
-  outline: none;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .ctx-item.is-danger {
   color: var(--el-color-danger);

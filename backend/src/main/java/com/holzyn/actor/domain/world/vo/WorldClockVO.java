@@ -117,6 +117,23 @@ public class WorldClockVO {
     private Long engineRefRealTime;
 
     /**
+     * tick 队列授权前沿（游戏秒，P0-01 根治新增）：墙钟/Unity 已授权、尚未被世界消费的队列尾。
+     * <p>与 {@link #engineGameSecond}（已消费位置）之差 = 未消费积压（{@link #backlogGameSeconds}）——
+     * 调试面板「引擎位置 vs 墙钟推算位置」的队列口径第二线（叠加既有 flowingGameSecond 诊断线）。</p>
+     */
+    private Long authorizedTargetSecond;
+
+    /**
+     * 未消费积压（游戏秒，P0-01 根治新增）= authorizedTargetSecond − 已消费位置；0=已追平。
+     */
+    private Long backlogGameSeconds;
+
+    /**
+     * 显式丢弃累计（游戏秒，P0-01 根治新增）：队列溢出（容量上限）被显式丢弃、未进入世界历史的部分。
+     */
+    private Long droppedGameSeconds;
+
+    /**
      * 引擎单次推进插值上限（游戏秒，：= tick-game-minutes×60 默认 300——前端插值钳制值，
      * 保证显示的「实际时间」永不超前引擎位置超过一个感知 tick）
      */

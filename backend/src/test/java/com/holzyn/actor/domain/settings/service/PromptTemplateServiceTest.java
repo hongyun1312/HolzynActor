@@ -49,7 +49,14 @@ class PromptTemplateServiceTest {
         // 位置移动与地图生成系统 M1（2026-10-06）：新增 world_map_generate 世界地图生成模板 → 80 → 81
         // 位置移动与地图生成系统 M3（2026-10-06）：新增 move_encounter 途中轻量交互模板 → 81 → 82
         // V2.0 规范化结构段 1A（2026-10-08 外网冒烟）：新增 world_common_knowledge 世界常识摘要模板 → 82 → 83
-        assertEquals(83, builtins.size());
+        // 项目级 AI 助手（2026-10-10 第 50 次）：新增 assistant_tool 工具决策 / assistant_chat 最终回答
+        // 两模板 → 83 → 85
+        // 对谈模式（2026-10-12 第 54 次 · M1）：新增 dialogue_reply 单聊回复 / dialogue_greeting AI 开场白
+        // 两模板 → 85 → 87
+        // 对谈 M4（2026-10-12 第 57 次）：新增 dialogue_summary 超窗自动摘要模板 → 87 → 88
+        // 对谈 M5（2026-10-13 第 58 次）：新增 dialogue_group_reply 群聊逐角色回复模板 → 88 → 89
+        // 对谈 M6（2026-10-13 第 59 次）：新增 dialogue_consolidation 沉淀（关系 delta + 记忆要点）模板 → 89 → 90
+        assertEquals(90, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_CARD_GEN));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOG));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_GROUP));
@@ -153,8 +160,13 @@ class PromptTemplateServiceTest {
         // 位置移动与地图生成系统 M1（2026-10-06）：新增 world_map_generate 世界地图生成模板 → 80 → 81，
         // 位置移动与地图生成系统 M3（2026-10-06）：新增 move_encounter 途中轻量交互模板 → 81 → 82，
         // V2.0 规范化结构段 1A（2026-10-08 外网冒烟）：新增 world_common_knowledge 世界常识摘要模板 → 82 → 83，
-        // 此处的逐段计数断言与最终断言（L46=83）保持一致，避免历史注释计数误导。
-        assertEquals(83, builtins.size());
+        // 项目级 AI 助手（2026-10-10 第 50 次）：新增 assistant_tool / assistant_chat 两模板 → 83 → 85，
+        // 对谈模式（2026-10-12 第 54 次 · M1）：新增 dialogue_reply / dialogue_greeting 两模板 → 85 → 87，
+        // 对谈 M4（2026-10-12 第 57 次）：新增 dialogue_summary 超窗自动摘要模板 → 87 → 88，
+        // 对谈 M5（2026-10-13 第 58 次）：新增 dialogue_group_reply 群聊逐角色回复模板 → 88 → 89，
+        // 对谈 M6（2026-10-13 第 59 次）：新增 dialogue_consolidation 沉淀模板 → 89 → 90，
+        // 此处的逐段计数断言与最终断言保持一致，避免历史注释计数误导。
+        assertEquals(90, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_A));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_B));
         // 世界常识摘要（2026-10-08）：world_common_knowledge 模板含世界观占位符 + 300-500 字要求
@@ -163,6 +175,43 @@ class PromptTemplateServiceTest {
                 .contains("{{world_setting}}"));
         assertTrue(builtins.get(PromptTemplateService.CODE_WORLD_COMMON_KNOWLEDGE).template()
                 .contains("300-500"));
+        // 项目级 AI 助手（2026-10-10 第 50 次）：assistant_tool 含工具决策 JSON 契约；assistant_chat 含零 OOC 铁律
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_ASSISTANT_TOOL));
+        assertTrue(builtins.get(PromptTemplateService.CODE_ASSISTANT_TOOL).template().contains("tool_calls"));
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_ASSISTANT_CHAT));
+        assertTrue(builtins.get(PromptTemplateService.CODE_ASSISTANT_CHAT).template().contains("零 OOC"));
+        // 对谈模式（2026-10-12 第 54 次 · M1）：dialogue_reply 含角色铁律/占位符；dialogue_greeting 含开场白契约
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOGUE_REPLY));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("{{character_name}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("{{user_message}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("绝不能跳出角色"));
+        // 第 61 轮冒烟抓修：回复软约束（简短克制 ≤120 字）已入模板
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("回复克制"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("120 字"));
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOGUE_GREETING));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GREETING).template().contains("开场白"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GREETING).template().contains("80 字"));
+        // 对谈 M4（2026-10-12 第 57 次）：dialogue_summary 超窗自动摘要模板含既有摘要/新增对话占位符 + ≤300 字契约
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOGUE_SUMMARY));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_SUMMARY).template().contains("{{existing_summary}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_SUMMARY).template().contains("{{new_messages}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_SUMMARY).template().contains("300 字"));
+        // 对谈 M5（2026-10-13 第 58 次）：dialogue_group_reply 群聊逐角色回复模板含群聊占位符 + 不替他人说话契约
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("{{scene_context}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("{{counterpart_context}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("{{user_message}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("不要替其他角色"));
+        // 对谈 M6（2026-10-13 第 59 次）：dialogue_consolidation 沉淀模板含角色清单/最近对话占位符 + JSON 契约
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION).template()
+                .contains("{{characters_context}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION).template()
+                .contains("{{recent_dialog}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION).template()
+                .contains("\"relations\""));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION).template()
+                .contains("memory_points"));
         // 自省-行为一致性校验（2026-10-02）：self_check 模板含判定输入占位符 + 输出契约
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_SELF_CHECK));
         assertTrue(builtins.get(PromptTemplateService.CODE_SELF_CHECK).template().contains("{{recent_insights}}"));

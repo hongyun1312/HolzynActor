@@ -56,10 +56,12 @@
 /**
  * 域侧栏（项目空间）。
  *
- * <p>职责：① 依据 {@link navModel} 生成「置顶项 + 五域分组」导航；② 处理点击导航（路由跳转 +
+ * <p>职责：① 依据 {@link navModel} 生成「置顶项 + 五域分组」导航（浮生界面），
+ * 或「对谈界面独立项」导航（对谈界面）；② 处理点击导航（路由跳转 +
  * 窄屏覆盖式侧栏自动收起）；③ 提供宽度拖拽手柄；④ 展示项目状态小卡。</p>
  *
- * <p>导航顺序（对齐设计规格 §2.1）：置顶 = 世界沙盘 / 对话；域 = 世界 / 角色 / 心智 / 观测 / 设置。</p>
+ * <p>导航顺序（对齐设计规格 §2.1）：浮生 = 置顶（世界地图 / 对话）+ 域（世界 / 角色 / 心智 / 观测 / 设置）；
+ * 对谈 = 独立侧边栏（对谈会话 / 玩家档案），与浮生完全分开。</p>
  *
  * <p>高亮规则：由 {@link findItemByPath} 按当前路由反查命中的导航项 key，
  * 因此「旧路由（如 /world/edit）仍可直接访问，且高亮落在合并入口（世界详情）上」。</p>
@@ -70,13 +72,15 @@ import { ElMessage } from 'element-plus'
 import SideNav from './SideNav.vue'
 import { useShellLayout } from './useShellLayout'
 import { openContextMenu } from './useContextMenu'
-import { DOMAINS, PINNED_ITEMS, NAV_ITEMS, itemPath, findItemByPath } from './navModel'
+import { DOMAINS, PINNED_ITEMS, NAV_ITEMS, DIALOGUE_ITEMS, DIALOGUE_SECTIONS, itemPath, findItemByPath } from './navModel'
 
 const props = defineProps({
   /** 项目 ID（用于拼装绝对路径） */
   projectId: { type: Number, required: true },
   /** 项目详情（状态小卡数据源） */
   project: { type: Object, default: null },
+  /** 当前界面（浮生 / 对谈）：决定侧边栏内容——浮生 = 置顶项 + 五域；对谈 = 对谈界面独立项 */
+  interfaceKey: { type: String, default: 'fusheng' },
   /** 是否图标窄栏形态（由 shell 传入） */
   isIconOnly: { type: Boolean, default: false }
 })
@@ -85,16 +89,22 @@ const route = useRoute()
 const router = useRouter()
 const { startResize, resetWidth, layout } = useShellLayout()
 
-/** 置顶项（补全绝对路径，供 SideNav 展示与 title 提示） */
-const pinnedItems = computed(() => PINNED_ITEMS.map(i => ({ ...i })))
+const isDialogue = computed(() => props.interfaceKey === 'dialogue')
 
-/** 五域分组（每个域 = 一个可折叠分组；空域自动隐藏） */
-const sections = computed(() => DOMAINS.map(d => ({
-  key: d.key,
-  name: d.name,
-  icon: d.icon,
-  items: NAV_ITEMS.filter(i => i.domain === d.key).map(i => ({ ...i }))
-})).filter(s => s.items.length > 0))
+/** 置顶项（补全绝对路径，供 SideNav 展示与 title 提示）：对谈界面 = 对谈界面独立项 */
+const pinnedItems = computed(() => (isDialogue.value ? DIALOGUE_ITEMS : PINNED_ITEMS).map(i => ({ ...i })))
+
+/**
+ * 域分组：浮生 = 五域；对谈 = 对谈分组（「设置」共享页收进一组，置顶项仍为对谈会话/玩家档案）。
+ */
+const sections = computed(() => isDialogue.value
+  ? DIALOGUE_SECTIONS.map(s => ({ ...s, items: s.items.map(i => ({ ...i })) }))
+  : DOMAINS.map(d => ({
+      key: d.key,
+      name: d.name,
+      icon: d.icon,
+      items: NAV_ITEMS.filter(i => i.domain === d.key).map(i => ({ ...i }))
+    })).filter(s => s.items.length > 0))
 
 /** 当前激活项 key：按路由反查（含 aliases 与子路径匹配） */
 const activeKey = computed(() => {

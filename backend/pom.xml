@@ -12,7 +12,7 @@
 
     <groupId>com.holzyn</groupId>
     <artifactId>holzyn-actor</artifactId>
-    <version>1.0.0-beta.1</version>
+    <version>1.1.0-beta.1</version>
     <name>holzyn-actor</name>
     <description>Holzyn 全境 - NPC 角色 AI 驱动模块（Spring Boot）</description>
 
@@ -95,6 +95,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <!-- U3 数据库版本化迁移（2026-10-15）：Flyway 12.4.0（Boot 4.1.0 管理，flyway-core 自带 H2 支持）。
+             schema 演进由 db/migration/*.sql 版本化迁移接管，JPA ddl-auto 收敛为 validate（见 application.yml）。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
         </dependency>
         <!-- 本地嵌入式数据库（主）：H2 MySQL 兼容模式，Web/exe 本地运行默认使用；
              compile 作用域（2026-08-21）：H2TcpServerConfig 编译期引用 org.h2.tools.Server 启动
