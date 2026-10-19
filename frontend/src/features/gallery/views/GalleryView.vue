@@ -13,8 +13,11 @@
 -->
 <template>
   <!-- 统一外壳（global 模式）：顶栏 = AppShell 的 ShellTopbar（品牌/命令面板/图标抽屉/主题密度/通知/账户），
-       本页不再自绘顶栏，避免与项目空间形成两套顶栏。 -->
+       本页不再自绘顶栏，避免与项目空间形成两套顶栏。
+       云间列车液态玻璃背景已由 AppShell 全站常驻（无需本页再挂 CloudTrainBackground）。 -->
   <AppShell mode="global" brand-label="HolzynActor" :show-sidebar="false" :show-back="false">
+    <!-- 场景内容：玻璃令牌由全局 .glass-scene（AppShell 根）提供 -->
+    <div class="gallery-scene">
     <div class="content-col">
       <!-- 操作区（统一页头）：标题 + 说明 + 新增/导入/设置 -->
       <PageHeader
@@ -27,7 +30,7 @@
           </el-button>
           <!-- 首页设置入口：统一 SettingsButton → 打开全局设置弹窗（零路由依赖，保证可用） -->
           <SettingsButton @click="openSettingsDialog" />
-          <el-button type="primary" @click="$router.push('/project/new')">
+          <el-button type="primary" data-tour="fr-add-project" @click="openNewProjectDialog">
             <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新增项目
           </el-button>
         </template>
@@ -59,7 +62,7 @@
       desc="每个项目是一个独立的世界：有自己的世界观、角色、时间与记忆，互不干扰。"
       primary-text="新建你的第一个项目"
       secondary-text="导入已有项目"
-      @primary="$router.push('/project/new')"
+      @primary="openNewProjectDialog"
       @secondary="openImportDialog"
     >
       <template #extra>
@@ -78,7 +81,7 @@
         </div>
         <div v-if="recentProjects.length === 0" class="section-empty">暂无最近项目</div>
         <div v-else class="recent-row">
-          <div v-for="p in recentProjects" :key="p.id" class="project-card tech-card" @click="openProject(p)">
+          <div v-for="p in recentProjects" :key="p.id" class="project-card tech-card" :data-tour="p.id === DEMO_PROJECT_ID ? 'fr-demo-card' : undefined" @click="openProject(p)">
             <div class="card-cover" :style="coverStyle(p)">
               <span class="cover-name">{{ p.name || '未命名项目' }}</span>
               <el-tag v-if="p.characterCount > 0" size="small" class="cover-tag">{{ p.characterCount }} 角色</el-tag>
@@ -106,7 +109,7 @@
         </div>
         <div v-if="filteredProjects.length === 0" class="section-empty">没有匹配的项目</div>
         <div v-else class="project-grid">
-          <div v-for="p in filteredProjects" :key="p.id" class="project-card tech-card">
+          <div v-for="p in filteredProjects" :key="p.id" class="project-card tech-card" :data-tour="p.id === DEMO_PROJECT_ID ? 'fr-demo-card' : undefined">
             <div class="card-cover" :style="coverStyle(p)" @click="openProject(p)">
               <span class="cover-name">{{ p.name || '未命名项目' }}</span>
               <el-tag v-if="p.characterCount > 0" size="small" class="cover-tag">{{ p.characterCount }} 角色</el-tag>
@@ -133,16 +136,16 @@
       </section>
     </template>
 
-    <!-- 导入项目对话框 -->
-    <el-dialog v-model="importDialog.visible" title="导入 .holzyn 项目包" width="520px">
-      <el-alert type="info" :closable="false" show-icon
-        title="导入后将完整还原项目（世界观/角色/对话/知识/记忆/设置）。"
+    <!-- 导入项目对话框（与「新增项目 / 设置」共用 h-dialog 弹窗规范） -->
+    <el-dialog v-model="importDialog.visible" title="导入项目" width="560px" top="6vh" class="h-dialog" destroy-on-close>
+      <el-alert class="h-dialog-alert" type="info" :closable="false" show-icon
+        title="导入 .holzyn 项目包，完整还原项目（世界观/角色/对话/知识/记忆/设置）。"
         description="已导入过的项目（相同 projectUid）会被幂等拦截避免脏数据；包内含密码加密的 API 配置时需输入导出时设置的密码。" />
-      <el-upload drag :auto-upload="false" :limit="1" accept=".holzyn,.zip" :on-change="onImportFileChange" :on-remove="() => (importDialog.file = null)" style="margin-top: 14px">
+      <el-upload drag :auto-upload="false" :limit="1" accept=".holzyn,.zip" :on-change="onImportFileChange" :on-remove="() => (importDialog.file = null)">
         <el-icon class="el-icon--upload"><HIcon name="UploadFilled" /></el-icon>
         <div class="el-upload__text">拖拽 .holzyn 文件到此处，或 <em>点击选择</em></div>
       </el-upload>
-      <el-form label-width="90px" style="margin-top: 12px">
+      <el-form label-width="90px" style="margin-top: 14px">
         <el-form-item label="密码（可选）">
           <el-input v-model="importDialog.password" type="password" show-password placeholder="包内含密码加密的 API 配置时填写" />
         </el-form-item>
@@ -176,7 +179,11 @@
 
     <!-- 首页设置弹窗：全局（用户级）设置四子页 Tab 内嵌，零路由依赖（操作区 / 空态两入口共用） -->
     <GlobalSettingsDialog ref="settingsRef" />
-    </div>
+
+    <!-- 新增项目弹窗：与「导入项目 / 设置」共用 h-dialog 规范，Tab 组织四种创建方式 -->
+    <NewProjectDialog ref="newProjectRef" />
+    </div><!-- /.content-col -->
+    </div><!-- /.gallery-scene -->
   </AppShell>
 </template>
 
@@ -198,9 +205,11 @@ import SettingsButton from '@/shared/components/SettingsButton.vue'
 // V2.0 批次二：空态统一走 EmptyState（空态即教学：标题 + 为什么空 + 唯一主 CTA）
 import EmptyState from '@/shared/components/EmptyState.vue'
 import GlobalSettingsDialog from '@/features/settings/views/GlobalSettingsDialog.vue'
+import NewProjectDialog from '../components/NewProjectDialog.vue'
 import { fetchProjects, deleteProject, importProjectPackage, exportProjectPackage, fetchModelApis } from '@/shared/api'
 
 const router = useRouter()
+
 const projects = ref([])
 const loading = ref(false)
 const searchText = ref('')
@@ -208,12 +217,21 @@ const importDialog = reactive({ visible: false, file: null, password: '', loadin
 const exportDialog = reactive({ visible: false, project: null, includeSensitive: false, password: '', loading: false })
 // 首页设置弹窗：全局（用户级）设置四子页 Tab 内嵌（零路由依赖，保证可用）
 const settingsRef = ref(null)
+// 新增项目弹窗（与导入/设置共用 h-dialog 弹窗规范；含四种创建方式 Tab）
+const newProjectRef = ref(null)
 // P0-5：未配置模型 API 提醒横幅（会话内可关闭；sessionStorage 记关闭，下次启动再提醒）
 const showApiBanner = ref(false)
+// 示例世界（内置演示项目）ID：青禾村——新手引导第③步的目标卡片
+const DEMO_PROJECT_ID = 1
 
 /** 打开首页设置弹窗（顶栏事件 / 操作区 / 空态三入口统一入口；可指定初始 Tab，默认 API 配置） */
 function openSettingsDialog(tab) {
   settingsRef.value?.open(tab)
+}
+
+/** 打开新增项目弹窗（替代原跳转 /project/new 页面，与导入/设置统一为弹窗形态） */
+function openNewProjectDialog() {
+  newProjectRef.value?.open()
 }
 
 /** 会话内未配置模型 API 时展示常驻提醒横幅 */
@@ -358,7 +376,8 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 页面内容由 .content-col（全局类）限宽居中；这里只保留画廊特有的段落间距与卡片样式 */
+/* 页面内容由 .content-col（全局类）限宽居中；这里只保留画廊特有的段落间距与卡片样式。
+   云间列车液态玻璃场景：文本/控件令牌由 .glass-scene 提供，此处只做玻璃面板材质。 */
 .gallery-loading { height: 300px; }
 
 /* P0-5：未配置模型 API 提醒横幅 */
@@ -370,15 +389,37 @@ onMounted(() => {
 .section-title { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
 .section-sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px; }
 .all-search { width: 240px; }
-.section-empty { background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px dashed var(--border-color); padding: 32px; text-align: center; color: var(--text-secondary); }
+.section-empty {
+  background: var(--glass-bg, rgba(14, 22, 34, 0.5));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(var(--glass-saturate, 1.4));
+  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(var(--glass-saturate, 1.4));
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border-color);
+  padding: 32px; text-align: center; color: var(--text-secondary);
+}
 
 /* 最近项目横排 */
 .recent-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
 /* 所有项目网格 */
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
 
-.project-card { cursor: pointer; overflow: hidden; border: 1px solid var(--border-light); border-radius: var(--radius-md); transition: box-shadow .2s; }
-.project-card:hover { box-shadow: var(--shadow-md); }
+/* 项目卡片：液态玻璃材质（覆盖全局 .tech-card 的实心底）
+   （-webkit- 前缀在标准属性之前，避免被 lightningcss 前缀合并吞掉） */
+.project-card {
+  cursor: pointer; overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-md);
+  background: rgba(10, 17, 28, 0.52);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(var(--glass-saturate, 1.5));
+  backdrop-filter: blur(var(--glass-blur, 20px)) saturate(var(--glass-saturate, 1.5));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 10px 30px rgba(0, 0, 0, 0.35);
+  transition: box-shadow .2s, border-color .2s, transform .2s;
+}
+.project-card:hover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 16px 40px rgba(0, 0, 0, 0.5);
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: translateY(-2px);
+}
 .card-cover { height: 110px; background: var(--brand-gradient); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.05rem; position: relative; padding: 10px; }
 .cover-name { text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all; }
 .cover-tag { position: absolute; right: 10px; bottom: 10px; }
@@ -388,4 +429,13 @@ onMounted(() => {
 .card-foot { display: flex; align-items: center; justify-content: space-between; }
 .card-time { font-size: 0.75rem; color: var(--text-placeholder); }
 .empty-ops { display: flex; gap: 10px; justify-content: center; }
+
+/* 空态卡片（EmptyState 是共享组件，内部不随玻璃场景变；在画廊场景内覆写为液态玻璃） */
+.gallery-scene :deep(.es-card) {
+  background: rgba(10, 17, 28, 0.52);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(var(--glass-saturate, 1.5));
+  backdrop-filter: blur(var(--glass-blur, 20px)) saturate(var(--glass-saturate, 1.5));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 48px rgba(0, 0, 0, 0.45);
+}
 </style>

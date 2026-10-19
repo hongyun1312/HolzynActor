@@ -19,10 +19,13 @@
     这样只需一层抽屉渲染逻辑，又能得到 flex 布局同等的挤压效果。
   -->
   <div
-    class="app-shell"
-    :class="{ 'is-fullbleed': fullbleed, 'is-overlay-mode': shellMode === 'overlay' && showSidebar, 'is-sidebar-overlay': sidebarIsOverlay }"
+    class="app-shell glass-scene"
+    :class="{ 'is-fullbleed': fullbleed, 'is-overlay-mode': shellMode === 'overlay' && showSidebar, 'is-sidebar-overlay': sidebarIsOverlay, 'is-glass': true, 'no-cloudtrain': !cloudTrainEnabled }"
     :style="shellVars"
   >
+    <!-- 云间列车液态玻璃背景：全站唯一实例（铺满视口、z-index:-1），浅色=落日云间 / 深色=夜空。
+         可在「设置 → 通用设置 → 主题与外观」关闭（关闭后为纯色背景，玻璃材质保留）或调整渲染分辨率。 -->
+    <CloudTrainBackground v-if="cloudTrainEnabled" :overrides="cloudTrainOverrides" />
     <ShellTopbar
       :mode="mode"
       :project-id="projectId"
@@ -125,6 +128,8 @@ import QuickNavDrawer from './QuickNavDrawer.vue'
 import ShortcutHelpPanel from './ShortcutHelpPanel.vue'
 import ContextMenu from './ContextMenu.vue'
 import AiRuntimePanel from './AiRuntimePanel.vue'
+import CloudTrainBackground from '@/shared/components/CloudTrainBackground.vue'
+import { useGlassScene } from '@/shared/composables/useGlassScene'
 import AssistantWidget from '@/features/assistant/AssistantWidget.vue'
 import { useShellLayout, SIDEBAR_MARGIN } from './useShellLayout'
 import { useAiRuntime } from './useAiRuntime'
@@ -156,7 +161,12 @@ const props = defineProps({
    */
   backTo: { type: String, default: '' },
   /** 内容区是否全屏（沙盘 3D） */
-  fullbleed: { type: Boolean, default: false }
+  fullbleed: { type: Boolean, default: false },
+  /**
+   * （历史兼容，保留但已不生效）云间列车液态玻璃场景已全站常驻——
+   * 外壳恒为玻璃化（.app-shell.is-glass + .glass-scene），不再按页开关。
+   */
+  glass: { type: Boolean, default: false }
 })
 
 const route = useRoute()
@@ -165,6 +175,17 @@ const themeApi = useTheme()
 const layout = useLayoutStore()
 const ctx = useContextDrawer()
 const { effectiveSidebarWidth, sidebarIsIconOnly, toggleSidebar, afterNavigate, shellMode } = useShellLayout()
+
+/** 液态玻璃场景：全站唯一外壳常驻 → body 常挂 holzyn-glass（Teleport 浮层吃到玻璃令牌） */
+useGlassScene()
+
+/** 云间列车背景是否渲染（设置页可开关；关闭后为纯色背景，玻璃材质保留） */
+const cloudTrainEnabled = computed(() => themeApi.theme.value.cloudTrain?.enabled !== false)
+/** 云间列车渲染参数覆盖（当前仅分辨率；主题夜空/落日参数由组件内部处理） */
+const cloudTrainOverrides = computed(() => {
+  const r = Number(themeApi.theme.value.cloudTrain?.resolution)
+  return Number.isFinite(r) && r > 0 ? { resolution: r } : {}
+})
 
 /** AI 运行状态轮询（顶栏活动点 + AI 抽屉共用一份快照） */
 const aiRuntime = useAiRuntime(() => props.projectId)
@@ -378,7 +399,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 外壳：满屏纵向布局，只有内容区滚动 */
+/* 外壳：满屏纵向布局，只有内容区滚动
+   背景：云间列车画布（z-index:-1）之上叠一层主题自适应压暗层（--glass-scrim），
+   既保证文字可读，又不遮挡动态背景（见 global.css .glass-scene） */
 .app-shell {
   height: 100vh;
   display: flex;
@@ -431,12 +454,45 @@ onBeforeUnmount(() => {
 /* fullbleed：交给页面自绘（沙盘 3D），去内边距并禁滚动 */
 .shell-content.is-fullbleed { padding: 0; overflow: hidden; }
 
-/* ===== 全屏沙盘：侧栏改为毛玻璃悬浮在 3D 之上（保留导航可用性） ===== */
+/* 全屏沙盘：侧栏改为毛玻璃悬浮在 3D 之上（保留导航可用性） */
 .app-shell.is-fullbleed :deep(.domain-sidebar) {
   background: color-mix(in srgb, var(--bg-nav) 78%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--shadow-lv2);
+}
+
+/* ===== 云间列车液态玻璃场景（全站常驻）：外壳透明化 + 顶栏玻璃 =====
+   外壳背景改为主题自适应压暗层（--glass-scrim，global.css 的 .glass-scene 定义，
+   浅色=浅玻璃白纱 / 深色=夜空暗纱），让云间列车画布透出且文字始终可读 */
+.app-shell.is-glass {
+  background: var(--glass-scrim, transparent);
+}
+/* 关闭云间列车背景：背景退化为纯色（跟随深浅主题），玻璃材质（glass-scene 令牌）仍保留 */
+.app-shell.is-glass.no-cloudtrain {
+  background: var(--bg-page);
+}
+/* 顶栏玻璃化：浅色=浅玻璃（继承深色文字令牌）；深色=深玻璃（本地文字令牌切浅色）。
+   -webkit- 前缀在标准属性之前，避免被 lightningcss 前缀合并吞掉 */
+.app-shell.is-glass :deep(.shell-topbar) {
+  background: var(--glass-topbar-bg, rgba(8, 14, 22, 0.55));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.4);
+  border-bottom: 1px solid var(--glass-topbar-border, rgba(255, 255, 255, 0.1));
+}
+/* 深色：顶栏背景深玻璃时，内部文字/控件令牌切到浅色系 */
+:global(html[data-theme="dark"]) .app-shell.is-glass :deep(.shell-topbar) {
+  --text-primary: #f2f6fc;
+  --text-regular: #dbe4f0;
+  --text-secondary: #b7c5d9;
+  --text-placeholder: #6c7d97;
+  --bg-hover: rgba(255, 255, 255, 0.1);
+  --bg-active: rgba(255, 255, 255, 0.16);
+  --bg-layer-1: rgba(255, 255, 255, 0.07);
+  --bg-layer-2: rgba(255, 255, 255, 0.05);
+  --border-l1: rgba(255, 255, 255, 0.12);
+  --border-l2: rgba(255, 255, 255, 0.2);
+  --accent-text: #9db9ff;
 }
 
 /* 窄屏侧栏遮罩 */

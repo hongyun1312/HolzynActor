@@ -27,6 +27,11 @@ export const fetchPlayerProfile = () => http.get('/api/player-profile')
 // 保存玩家档案（name/persona 选填；null 保持原值、空串清空；persona 按六维键合并）→ PlayerProfileVO
 export const savePlayerProfile = (data) => http.put('/api/player-profile', data)
 
+// AI 补充生成玩家 persona 六维（新用户引导「我的形象」页）：
+// 输入一段自我介绍 { text } → 返回 { persona: { identity, background, personality, voice, goals, ability } }，
+// 仅回填预览不落库（确认保存仍走 savePlayerProfile）。
+export const generatePlayerProfile = (text) => http.post('/api/player-profile/generate', { text })
+
 // 保存某角色关系设定（past/identity/attitude 选填）→ PlayerProfileVO
 export const savePlayerRelationSetting = (characterRef, data) =>
   http.put(`/api/player-profile/relation-settings/${encodeURIComponent(characterRef)}`, data)

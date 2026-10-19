@@ -53,6 +53,11 @@ public class ActorPromptTemplate {
     @Column(nullable = false, length = 50)
     private String code;
 
+    /** 功能分类键（dialogue / character / worldgen / world / action / memory / crowd / import / growth / judge 等；
+     *  由 PromptTemplateService 的 CODE_CATEGORY 在 seed/覆盖创建时回填，VO 按编码兜底） */
+    @Column(length = 40)
+    private String category;
+
     /** 模板名称 */
     @Column(nullable = false, length = 100)
     private String name;

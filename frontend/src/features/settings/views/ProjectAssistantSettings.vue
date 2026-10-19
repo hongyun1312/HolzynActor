@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="assistant-settings">
+  <div class="settings-stack">
     <!-- 一页一头：子页自己的页头（父级壳不自绘） -->
     <PageHeader
       title="助手设置"
@@ -20,9 +20,9 @@
     />
 
     <!-- ① 助手说明 -->
-    <div class="as-card tech-card">
-      <div class="as-title">项目级 AI 助手</div>
-      <div class="as-desc">
+    <div class="set-card">
+      <div class="set-card-title">项目级 AI 助手</div>
+      <div class="set-card-desc">
         <b>定位</b>：世界与你之间的对话入口——既能讲解项目本身，也能讲述你所在世界正在发生的一切。
         <br /><b>入口</b>：右下角浮窗（可拖拽），或快捷键 <code>Ctrl+Shift+A</code>；<code>Esc</code> 收起，跨页面保持。
         <br /><b>能力</b>：项目导览 · 世界状态 · 角色解读 · 宏观讲解 · 知识检索（世界知识 + 项目文档）。
@@ -32,9 +32,9 @@
     </div>
 
     <!-- ② docs 文档索引 -->
-    <div class="as-card tech-card">
-      <div class="as-title">项目文档索引（docs/ 向量检索）</div>
-      <div class="as-desc">
+    <div class="set-card">
+      <div class="set-card-title">项目文档索引（docs/ 向量检索）</div>
+      <div class="set-card-desc">
         助手回答「项目功能 / 设计文档怎么说」时从 docs/ 目录检索：首次使用自动全量切片 + 向量化，
         之后按文件变更增量重建；向量供应商未配置或向量化失败时自动降级关键词检索（来源标注「检索降级」）。
       </div>
@@ -53,12 +53,12 @@
     </div>
 
     <!-- ③ 工具清单 -->
-    <div class="as-card tech-card">
-      <div class="as-title">对话工具（只读数据源）</div>
-      <div class="as-desc">助手工具循环可调用的数据源；全部只读，不修改任何世界状态。</div>
+    <div class="set-card">
+      <div class="set-card-title">对话工具（只读数据源）</div>
+      <div class="set-card-desc">助手工具循环可调用的数据源；全部只读，不修改任何世界状态。</div>
       <div class="as-tools">
         <span v-for="t in tools" :key="t.name" class="as-tool-chip" :title="t.description">{{ t.name }}</span>
-        <span v-if="!tools.length" class="as-desc">工具清单加载中…</span>
+        <span v-if="!tools.length" class="set-card-desc">工具清单加载中…</span>
       </div>
     </div>
   </div>
@@ -105,34 +105,32 @@ async function rebuildIndex() {
 </script>
 
 <style scoped>
-/* V2.0 批次二：860 硬编码 → 正文档令牌（与其它设置页同源，不再自成一套限宽） */
-.assistant-settings { max-width: var(--page-w-content, 1200px); }
-.as-card { margin-bottom: 16px; }
-.as-title { font-size: 14px; font-weight: 600; color: var(--text-strong, #1f2a44); margin-bottom: 8px; }
-.as-desc { font-size: 13px; line-height: 1.8; color: var(--text-main, #3a4660); }
-.as-desc code {
-  background: var(--bg-hover, #eef1f6);
+/* V2.1：卡片/标题/描述走全局设置页规范（.settings-stack/.set-card/.set-card-title/.set-card-desc），
+   此处仅保留索引统计与工具清单的本页特有样式；颜色一律走令牌，深浅主题自适应。 */
+.set-card-desc code {
+  background: var(--bg-layer-3);
   padding: 1px 6px;
   border-radius: 5px;
-  font-size: 12px;
+  font-size: 0.75rem;
+  color: var(--accent-text);
 }
-.as-index-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+.as-index-grid { display: flex; flex-wrap: wrap; gap: var(--space-3, 12px); margin: var(--space-3, 12px) 0; }
 .as-index-item {
-  font-size: 12.5px;
+  font-size: var(--density-font-sm, 0.82rem);
   padding: 4px 12px;
   border-radius: 8px;
-  background: var(--bg-hover, #eef1f6);
-  color: var(--text-main, #3a4660);
+  background: var(--bg-layer-2);
+  color: var(--text-regular);
 }
-.as-index-error { color: var(--color-danger, #e5484d); font-size: 12.5px; margin-bottom: 8px; }
-.as-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.as-index-error { color: var(--state-error, #e5484d); font-size: var(--density-font-sm, 0.82rem); margin-bottom: var(--space-2, 8px); }
+.as-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-2, 8px); }
 .as-tool-chip {
-  font-size: 12px;
+  font-size: var(--density-font-sm, 0.82rem);
   font-family: ui-monospace, monospace;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid var(--border-l2, #e5e9f2);
-  color: var(--text-main, #3a4660);
-  background: var(--bg-elev, #fff);
+  border: 1px solid var(--border-l2);
+  color: var(--text-regular);
+  background: var(--bg-layer-1);
 }
 </style>

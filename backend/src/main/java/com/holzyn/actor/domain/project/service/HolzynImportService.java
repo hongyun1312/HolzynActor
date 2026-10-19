@@ -615,6 +615,11 @@ public class HolzynImportService {
                 Integer tv = readInt(t, "version");
                 pt.setVersion(tv == null ? 1 : tv);
                 pt.setEnabled(1);
+                // 分类：包内优先，缺失按编码兜底（保证设置页分组稳定）
+                String cat = readText(t, "category");
+                pt.setCategory(cat == null || cat.isBlank()
+                        ? com.holzyn.actor.domain.settings.service.PromptTemplateService.categoryOf(code)
+                        : cat);
                 promptTemplateRepository.save(pt);
             }
         }

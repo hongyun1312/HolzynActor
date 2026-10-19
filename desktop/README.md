@@ -15,14 +15,14 @@ desktop/
 
 ## 打包流程（Windows）
 
-1. 构建后端 fat jar（含前端产物）：仓库根 `build.bat`，产物 `backend\target\holzyn-actor-1.1.0-beta.1.jar`。
+1. 构建后端 fat jar（含前端产物）：仓库根 `build.bat`，产物 `backend\target\holzyn-actor-1.1.0-beta.2.jar`。
 2. 生成裁剪 JRE 运行时：`packaging/runtime`（jlink，约 62MB；缺失时 `build-desktop.bat` 会自动生成）。
 3. 打包安装包：在 `desktop/` 目录执行：
 
 ```bat
 npm install
-npm run pack          :: NSIS 安装版  → release\HolzynActor-Setup-1.1.0-beta.1.exe
-npm run pack:portable :: 免安装绿色版 → release\HolzynActor-Portable-1.1.0-beta.1.exe
+npm run pack          :: NSIS 安装版  → release\HolzynActor-Setup-1.1.0-beta.2.exe
+npm run pack:portable :: 免安装绿色版 → release\HolzynActor-Portable-1.1.0-beta.2.exe
 ```
 
 或一键执行 `desktop\build-desktop.bat`（步骤 1+2+3 全自动）。
@@ -35,11 +35,12 @@ npm run pack:portable :: 免安装绿色版 → release\HolzynActor-Portable-1.1
 - **后端 sidecar**：`java -jar holzyn-actor.jar`（`resources/runtime/bin/java.exe`），端口自动挑选**随机空闲端口**（不占用开发者本机固定端口 18080，避免与开发实例冲突）。
 - **数据目录**：`%LOCALAPPDATA%\HolzynActor\{data,uploads,logs}`——H2 数据库与上传文件都在这里，卸载/删除不影响用户数据；首次启动（data 为空）自动注入示例世界「青禾村」。
 - **日志**：`%LOCALAPPDATA%\HolzynActor\logs\holzyn-actor.log`（应用日志）与 `holzyn-actor-console.log`（后端控制台输出）。
-- **退出**：关闭窗口 → 自动结束后端子进程（单实例锁，重复双击只会聚焦已有窗口）。
+- **后台运行**：关闭窗口默认最小化到**系统托盘**，世界继续在后台推进（无人值守 · 世界不停止）——点击托盘图标回到主界面，托盘菜单「退出」才真正结束程序；设置页「更新与版本 → 后台运行」可改为「关闭窗口=直接退出程序」（选择持久化于 `%LOCALAPPDATA%\HolzynActor\desktop-settings.json`）。
+- **退出**：从托盘菜单「退出」→ 先优雅停后端（后端 `/api/system/shutdown`，H2 干净落盘）再退出应用（单实例锁，重复双击只会聚焦已有窗口）。
 
-## 自动更新（U1+U2+U3+U4，v1.1.0-beta.1 起）
+## 自动更新（U1+U2+U3+U4，v1.1.0-beta.2 起）
 
-桌面端接入 **electron-updater（GitHub Releases provider）**，安装版从 v1.1.0-beta.1 起支持自动更新：
+桌面端接入 **electron-updater（GitHub Releases provider）**，安装版从 v1.1.0-beta.2 起支持自动更新：
 
 - **检查**：启动后后台自动检查 + 设置页「更新与版本」手动检查（可关闭自动检查）。
 - **更新源**：`github.com/hongyun1312/HolzynActor` Releases（`latest.yml` / `latest-beta.yml` 元数据 + sha512 校验；`releaseType: draft` 先草稿后转正式）。

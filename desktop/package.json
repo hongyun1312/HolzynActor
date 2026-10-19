@@ -1,7 +1,7 @@
 {
   "name": "holzynactor-desktop",
   "productName": "HolzynActor",
-  "version": "1.1.0-beta.1",
+  "version": "1.1.0-beta.2",
   "description": "HolzynActor 全境众生 · 浮生 —— AI 世界模拟引擎桌面端（Electron 壳 + Spring Boot 后端 sidecar + 内置裁剪 JRE）",
   "main": "main.js",
   "author": "HONGYUN",
@@ -37,12 +37,20 @@
     ],
     "extraResources": [
       {
-        "from": "../backend/target/holzyn-actor-1.1.0-beta.1.jar",
+        "from": "../backend/target/holzyn-actor-1.1.0-beta.2.jar",
         "to": "backend/holzyn-actor.jar"
       },
       {
         "from": "../packaging/runtime",
         "to": "runtime"
+      },
+      {
+        "from": "tray/tray-icon.png",
+        "to": "tray/tray-icon.png"
+      },
+      {
+        "from": "tray/tray-icon@2x.png",
+        "to": "tray/tray-icon@2x.png"
       }
     ],
     "publish": [
@@ -68,7 +76,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "HolzynActor",
       "artifactName": "HolzynActor-Setup-${version}.exe",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "installerLanguages": ["zh_CN"]
     },
     "portable": {
       "artifactName": "HolzynActor-Portable-${version}.exe"

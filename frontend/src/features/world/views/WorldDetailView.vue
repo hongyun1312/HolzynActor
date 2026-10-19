@@ -63,11 +63,11 @@
             <div class="wc-grid">
               <div class="wc-cell">
                 <div class="wc-label">题材</div>
-                <div class="wc-value">{{ world.genre || '—' }}</div>
+                <div class="wc-md-value markdown-body" v-html="renderMarkdown(world.genre || '—')"></div>
               </div>
               <div class="wc-cell">
                 <div class="wc-label">时代背景</div>
-                <div class="wc-value">{{ world.era || '—' }}</div>
+                <div class="wc-md-value markdown-body" v-html="renderMarkdown(world.era || '—')"></div>
               </div>
             </div>
           </div>
@@ -77,7 +77,8 @@
           <div class="world-card tech-card">
             <div class="wc-section">
               <div class="wc-label">地理设定</div>
-              <div class="wc-text">{{ world.geography || '—' }}</div>
+              <div v-if="world.geography" class="wc-md markdown-body" v-html="renderMarkdown(world.geography)"></div>
+              <div v-else class="wc-text">—</div>
             </div>
           </div>
         </el-tab-pane>
@@ -99,7 +100,8 @@
           <div class="world-card tech-card">
             <div class="wc-section">
               <div class="wc-label">势力阵营</div>
-              <div class="wc-text">{{ world.factions || '—' }}</div>
+              <div v-if="world.factions" class="wc-md markdown-body" v-html="renderMarkdown(world.factions)"></div>
+              <div v-else class="wc-text">—</div>
             </div>
           </div>
         </el-tab-pane>
@@ -108,7 +110,8 @@
           <div class="world-card tech-card">
             <div class="wc-section">
               <div class="wc-label">规则体系</div>
-              <div class="wc-text">{{ world.magicSystem || '—' }}</div>
+              <div v-if="world.magicSystem" class="wc-md markdown-body" v-html="renderMarkdown(world.magicSystem)"></div>
+              <div v-else class="wc-text">—</div>
             </div>
           </div>
         </el-tab-pane>
@@ -117,7 +120,8 @@
           <div class="world-card tech-card">
             <div class="wc-section">
               <div class="wc-label">文化风俗</div>
-              <div class="wc-text">{{ world.culture || '—' }}</div>
+              <div v-if="world.culture" class="wc-md markdown-body" v-html="renderMarkdown(world.culture)"></div>
+              <div v-else class="wc-text">—</div>
             </div>
           </div>
         </el-tab-pane>
@@ -126,7 +130,8 @@
           <div class="world-card tech-card">
             <div class="wc-section">
               <div class="wc-label">历史背景</div>
-              <div class="wc-text">{{ world.history || '—' }}</div>
+              <div v-if="world.history" class="wc-md markdown-body" v-html="renderMarkdown(world.history)"></div>
+              <div v-else class="wc-text">—</div>
             </div>
           </div>
         </el-tab-pane>
@@ -135,7 +140,8 @@
           <div class="world-card tech-card">
             <div class="wc-section">
               <div class="wc-label">自由文本（完整世界观）</div>
-              <div class="wc-text">{{ world.freeText || '—' }}</div>
+              <div v-if="world.freeText" class="wc-md markdown-body" v-html="renderMarkdown(world.freeText)"></div>
+              <div v-else class="wc-text">—</div>
             </div>
           </div>
         </el-tab-pane>
@@ -343,6 +349,8 @@ import WorldLocationTable from '@/shared/components/WorldLocationTable.vue'
 import EmptyState from '@/shared/components/EmptyState.vue'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 import PageTabs from '@/shared/layout/PageTabs.vue'
+// 世界观设定文本 Markdown 渲染（MarkdownIt，配合全局 .markdown-body 排版）
+import { renderMarkdown } from '@/shared/markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -701,6 +709,16 @@ onBeforeUnmount(() => { stopCharPolling(); stopStoryPolling() })
 .wc-label { font-size: 0.78rem; color: var(--text-secondary); font-weight: 600; margin-bottom: 6px; }
 .wc-value { font-size: 0.95rem; color: var(--text-primary); font-weight: 600; }
 .wc-text { font-size: 0.92rem; color: var(--text-regular); line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+/* 世界观设定 Markdown 渲染：复用全局 .markdown-body 排版；去掉 pre-wrap（换行由 MarkdownIt breaks 处理） */
+.wc-md { font-size: 0.92rem; color: var(--text-regular); line-height: 1.8; word-break: break-word; }
+.wc-md :deep(h1) { font-size: 1.25rem; }
+.wc-md :deep(h2) { font-size: 1.1rem; }
+.wc-md :deep(h3) { font-size: 1rem; }
+.wc-md :deep(img) { max-width: 100%; }
+/* 基本信息（题材/时代背景）等短值字段：Markdown 渲染但保持单行块状观感 */
+.wc-md-value { font-size: 0.95rem; color: var(--text-primary); font-weight: 600; word-break: break-word; }
+.wc-md-value :deep(p) { margin: 0; }
+.wc-md-value :deep(strong) { font-weight: 700; }
 /* 项目级记忆 */
 .wc-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .wc-title { font-weight: 700; color: var(--text-primary); }

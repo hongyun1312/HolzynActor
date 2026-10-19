@@ -63,8 +63,8 @@
              实时决策是否激活降为 tooltip 说明；时间控制入口仍只在沙盘页。 -->
         <div class="wo-value">
           <RuntimeStatusPill
-            :status="clock?.paused ? 'paused' : 'running'"
-            :status-label="clock?.paused ? '已暂停' : '推进中'"
+            :status="simStatus.status"
+            :status-label="simStatus.label"
             primary-text=""
             advance-text=""
             :time-text="''"
@@ -245,6 +245,17 @@ const projectId = Number(route.params.id)
 const project = ref(null)
 const world = ref(null)
 const clock = ref(null)
+
+/**
+ * 世界模拟状态（V2.2 收敛「持续运行/模拟状态」重叠）：worldRunning=0 → 已停止；运行中且暂停 → 已暂停；否则推进中。
+ * 与设置页「世界时钟」/ 世界地图顶栏同源（同一权威字段），消除「世界已关闭却显示推进中」的误导。
+ */
+const simStatus = computed(() => {
+  const c = clock.value || {}
+  if (c.worldRunning !== 1) return { status: 'stopped', label: '已停止' }
+  if (c.paused) return { status: 'paused', label: '已暂停' }
+  return { status: 'running', label: '推进中' }
+})
 
 // ：宏观社会状态（/macro/state 摘要 + AI 强度标签；60s 周期刷新）
 const macro = ref(null)

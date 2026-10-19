@@ -19,7 +19,7 @@
     这里同时也是「重置到默认」的唯一出口。
     项目内外共用同一页（偏好是用户级、与项目无关）。
   -->
-  <div class="content-col appearance">
+  <div class="settings-stack">
     <PageHeader
       title="界面与布局"
       desc="侧栏宽度、信息密度、面板固定与导览。所有偏好保存在本地浏览器，不影响项目数据。"
@@ -34,15 +34,15 @@
     </PageHeader>
 
     <!-- ===== 侧栏 ===== -->
-    <section class="tech-card ap-card">
-      <div class="ap-card-head">
-        <span class="ap-card-title">域侧栏</span>
-        <span class="ap-card-hint">用于「去哪一页」；窄屏（&lt;1024）会自动改为滑入式</span>
+    <section class="set-card">
+      <div class="set-card-head">
+        <h3 class="set-card-title">域侧栏</h3>
+        <span class="set-tip">用于「去哪一页」；窄屏（&lt;1024）会自动改为滑入式</span>
       </div>
 
-      <div class="ap-row">
-        <span class="ap-label">侧栏宽度</span>
-        <div class="ap-control wide">
+      <div class="set-row">
+        <span class="set-row-label">侧栏宽度</span>
+        <div class="set-control wide">
           <el-slider
             :model-value="layout.sidebarWidth"
             :min="SIDEBAR_MIN_WIDTH"
@@ -53,31 +53,31 @@
             @update:model-value="onWidth"
           />
         </div>
-        <span class="ap-value">{{ effectiveSidebarWidth }}px</span>
+        <span class="set-value">{{ effectiveSidebarWidth }}px</span>
       </div>
 
-      <div class="ap-row">
-        <span class="ap-label">默认折叠</span>
-        <div class="ap-control">
+      <div class="set-row">
+        <span class="set-row-label">默认折叠</span>
+        <div class="set-control">
           <el-switch :model-value="layout.sidebarCollapsed" @update:model-value="v => layout.toggleSidebar(v)" />
         </div>
-        <span class="ap-value hint">折叠后仅显示图标（收起 56px）</span>
+        <span class="set-value is-fill">折叠后仅显示图标（收起 56px）</span>
       </div>
 
-      <div class="ap-row">
-        <span class="ap-label">允许拖拽改宽</span>
-        <div class="ap-control">
+      <div class="set-row">
+        <span class="set-row-label">允许拖拽改宽</span>
+        <div class="set-control">
           <el-switch :model-value="layout.dragEnabled" @update:model-value="v => layout.setDragEnabled(v)" />
         </div>
-        <span class="ap-value hint">关闭后侧栏右缘的拖拽手柄隐藏（避免误触）</span>
+        <span class="set-value is-fill">关闭后侧栏右缘的拖拽手柄隐藏（避免误触）</span>
       </div>
     </section>
 
     <!-- ===== 信息密度 ===== -->
-    <section class="tech-card ap-card">
-      <div class="ap-card-head">
-        <span class="ap-card-title">信息密度</span>
-        <span class="ap-card-hint">同时影响行高、间距、字号与内容区留白</span>
+    <section class="set-card">
+      <div class="set-card-head">
+        <h3 class="set-card-title">信息密度</h3>
+        <span class="set-tip">同时影响行高、间距、字号与内容区留白</span>
       </div>
       <div class="ap-density">
         <button
@@ -92,22 +92,22 @@
         </button>
       </div>
 
-      <div class="ap-row">
-        <span class="ap-label">内容宽度</span>
-        <div class="ap-control">
+      <div class="set-row">
+        <span class="set-row-label">内容宽度</span>
+        <div class="set-control">
           <el-radio-group :model-value="layout.contentMode" @update:model-value="v => layout.setContentMode(v)">
             <el-radio-button v-for="m in CONTENT_MODES" :key="m.key" :value="m.key">{{ m.name }}</el-radio-button>
           </el-radio-group>
         </div>
-        <span class="ap-value hint">{{ contentModeHint }}</span>
+        <span class="set-value is-fill">{{ contentModeHint }}</span>
       </div>
     </section>
 
     <!-- ===== 面板（抽屉）固定 ===== -->
-    <section class="tech-card ap-card">
-      <div class="ap-card-head">
-        <span class="ap-card-title">面板固定</span>
-        <span class="ap-card-hint">固定后的面板常驻显示并挤压内容区，不会被 Esc 或点击空白关闭</span>
+    <section class="set-card">
+      <div class="set-card-head">
+        <h3 class="set-card-title">面板固定</h3>
+        <span class="set-tip">固定后的面板常驻显示并挤压内容区，不会被 Esc 或点击空白关闭</span>
       </div>
       <div class="ap-drawers">
         <div v-for="d in DRAWERS" :key="d.id" class="ap-drawer-item">
@@ -129,24 +129,24 @@
     </section>
 
     <!-- ===== 导览与快捷键 ===== -->
-    <section class="tech-card ap-card">
-      <div class="ap-card-head">
-        <span class="ap-card-title">上手辅助</span>
-        <span class="ap-card-hint">新布局的入口变了，这些辅助能帮你快速找回肌肉记忆</span>
+    <section class="set-card">
+      <div class="set-card-head">
+        <h3 class="set-card-title">上手辅助</h3>
+        <span class="set-tip">新布局的入口变了，这些辅助能帮你快速找回肌肉记忆</span>
       </div>
-      <div class="ap-row">
-        <span class="ap-label">界面导览</span>
-        <div class="ap-control">
+      <div class="set-row">
+        <span class="set-row-label">界面导览</span>
+        <div class="set-control">
           <el-button size="small" @click="restartTour">播放导览</el-button>
         </div>
-        <span class="ap-value hint">{{ layout.tourSeen ? '已观看过（可随时重看）' : '尚未观看' }}</span>
+        <span class="set-value is-fill">{{ layout.tourSeen ? '已观看过（可随时重看）' : '尚未观看' }}</span>
       </div>
-      <div class="ap-row">
-        <span class="ap-label">快捷键速查</span>
-        <div class="ap-control">
+      <div class="set-row">
+        <span class="set-row-label">快捷键速查</span>
+        <div class="set-control">
           <el-button size="small" @click="layout.openDrawer('help')">打开帮助面板</el-button>
         </div>
-        <span class="ap-value hint">命令面板 Ctrl+K · 侧栏 Ctrl+B · 密度 Ctrl+Shift+D</span>
+        <span class="set-value is-fill">命令面板 Ctrl+K · 侧栏 Ctrl+B · 密度 Ctrl+Shift+D</span>
       </div>
     </section>
   </div>
@@ -208,20 +208,10 @@ function resetAll() {
 </script>
 
 <style scoped>
-.appearance { display: flex; flex-direction: column; gap: var(--space-4, 16px); }
-.ap-card { padding: var(--density-card-pad, 16px); }
-.ap-card-head { display: flex; align-items: baseline; gap: var(--space-2, 8px); margin-bottom: var(--space-3, 12px); flex-wrap: wrap; }
-.ap-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
-.ap-card-hint { font-size: 0.76rem; color: var(--text-tertiary); }
-
-.ap-row { display: flex; align-items: center; gap: var(--space-3, 12px); padding: 7px 0; }
-.ap-label { width: 108px; flex-shrink: 0; font-size: var(--density-font-sm, 0.82rem); color: var(--text-secondary); }
-.ap-control { display: flex; align-items: center; gap: var(--space-2, 8px); }
-.ap-control.wide { flex: 1; max-width: 420px; }
-.ap-value { font-size: 0.76rem; color: var(--text-tertiary); }
-.ap-value.hint { flex: 1; }
-
-.ap-density { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-2, 8px); margin-bottom: var(--space-2, 8px); }
+/* V2.1：卡片/标题/行控件/提示走全局设置页规范（.set-card/.set-card-head/.set-row 等），
+   此处仅保留密度选择器与抽屉清单的本页特有样式。 */
+/* 密度三档选择卡 */
+.ap-density { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-2, 8px); margin-bottom: var(--space-3, 12px); }
 .ap-density-item {
   display: flex; flex-direction: column; gap: 4px;
   padding: 10px 12px;
@@ -234,8 +224,9 @@ function resetAll() {
 .ap-density-item:hover { border-color: var(--accent-border); }
 .ap-density-item.active { border-color: var(--accent); background: var(--accent-soft); }
 .ap-density-name { font-size: var(--density-font, 0.9rem); font-weight: 600; color: var(--text-primary); }
-.ap-density-desc { font-size: 0.74rem; color: var(--text-tertiary); line-height: 1.5; }
+.ap-density-desc { font-size: var(--density-font-sm, 0.82rem); color: var(--text-tertiary); line-height: 1.5; }
 
+/* 面板（抽屉）固定清单：行分隔线式列表 */
 .ap-drawers { display: flex; flex-direction: column; }
 .ap-drawer-item { display: flex; align-items: center; gap: var(--space-2, 8px); padding: 7px 0; border-bottom: 1px dashed var(--border-l1); }
 .ap-drawer-item:last-child { border-bottom: none; }

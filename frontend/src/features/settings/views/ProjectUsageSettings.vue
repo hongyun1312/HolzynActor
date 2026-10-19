@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="project-usage-settings">
+  <div class="settings-stack">
     <!-- 统一页头（内嵌设置弹窗时由弹窗标题与 Tab 标签承担） -->
     <PageHeader
       v-if="!embedded"
@@ -22,10 +22,10 @@
         : '全部项目的用户级用量聚合：按项目 / 场景 / 模型 / 日期维度查看，支持近 7/30 天与自定义范围。'"
     />
     <!-- 项目级/全局用量说明（双模式；内嵌设置弹窗时由弹窗顶部说明承担） -->
-    <el-alert v-if="!embedded && projectId" type="success" :closable="false" show-icon class="usage-alert"
+    <el-alert v-if="!embedded && projectId" type="success" :closable="false" show-icon
       title="AI 用量为项目级统计（随 .holzyn 包导入导出）。"
       description="本页默认统计当前项目的用量（usage/stats 按 projectId 过滤，明细含角色维度），支持近 7/30 天与自定义时间范围筛选。" />
-    <el-alert v-else-if="!embedded" type="success" :closable="false" show-icon class="usage-alert"
+    <el-alert v-else-if="!embedded" type="success" :closable="false" show-icon
       title="AI 用量为全部项目的总用量（用户级聚合）。"
       description="本页统计当前用户所有项目的 AI 用量合计（不按项目过滤），支持按项目 / 场景 / 模型 / 日期维度查看，支持近 7/30 天与自定义时间范围筛选。" />
 
@@ -49,11 +49,11 @@
       </el-radio-group>
       <el-date-picker v-if="rangePreset === 'custom'" v-model="customRange" type="daterange" value-format="YYYY-MM-DD" range-separator="至" start-placeholder="开始" end-placeholder="结束" size="small" style="width: 240px" @change="loadUsage" />
       <el-button size="small" type="primary" @click="loadUsage">查询</el-button>
-      <span class="filter-tip">场景：dialog=对话 / card_gen=角色卡 / action=行动 / crowd=人群 / title_gen=标题 / location_extract=地点 / memory=记忆 / import=导入 / embedding=向量化 / world_event=世界事件生成</span>
+      <span class="set-tip">场景：dialog=对话 / card_gen=角色卡 / action=行动 / crowd=人群 / title_gen=标题 / location_extract=地点 / memory=记忆 / import=导入 / embedding=向量化 / world_event=世界事件生成</span>
     </div>
 
     <!-- 聚合 Tab -->
-    <div class="usage-group tech-card">
+    <div class="set-card">
       <el-tabs v-model="groupTab">
         <el-tab-pane v-if="!projectId" label="按项目" name="project">
           <el-table :data="usage.byProject || []" border size="small">
@@ -103,14 +103,14 @@
             <el-table-column prop="tokenOut" label="输出 Token" width="110" />
             <el-table-column prop="durationMs" label="耗时(ms)" width="100" />
           </el-table>
-          <div class="char-tip">按角色聚合由明细（detail 的 characterName）本地汇总，角色名由后端解析</div>
+          <div class="set-tip">按角色聚合由明细（detail 的 characterName）本地汇总，角色名由后端解析</div>
         </el-tab-pane>
       </el-tabs>
     </div>
 
     <!-- 明细 -->
-    <div class="usage-detail tech-card">
-      <div class="detail-title">明细</div>
+    <div class="set-card">
+      <div class="set-card-title">明细</div>
       <el-table :data="usage.detail || []" border size="small" max-height="320">
         <el-table-column label="时间" min-width="150">
           <template #default="{ row }">{{ (row.createdAt || '').slice(0, 16).replace('T', ' ') }}</template>
@@ -221,16 +221,18 @@ onMounted(loadUsage)
 </script>
 
 <style scoped>
-.project-usage-settings { }
-.usage-alert { margin-bottom: 14px; }
-.usage-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
-.usage-card { background: var(--bg-layer-2); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 14px; text-align: center; }
-.usage-card .num { font-size: 1.4rem; font-weight: 700; color: var(--primary, #409eff); }
-.usage-card .lbl { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
-.usage-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
-.filter-tip { font-size: 0.72rem; color: var(--text-placeholder); }
-.usage-group { padding: 12px 16px; margin-bottom: 14px; }
-.usage-detail { padding: 14px 16px; }
-.detail-title { font-weight: 700; color: var(--text-primary); margin-bottom: 10px; }
-.char-tip { font-size: 0.72rem; color: var(--text-placeholder); margin-top: 6px; }
+/* V2.1：卡片/标题/说明/提示走全局设置页规范（.settings-stack/.set-card/.set-card-title/.set-tip） */
+/* 统计概览卡片：与设置页卡片同材质（白底 + 描边），数字突出 */
+.usage-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3, 12px); }
+.usage-card {
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-l1);
+  border-radius: var(--radius-lg);
+  padding: 16px 14px;
+  text-align: center;
+}
+.usage-card .num { font-size: 1.4rem; font-weight: 700; color: var(--accent-text); line-height: 1.3; }
+.usage-card .lbl { font-size: 0.78rem; color: var(--text-secondary); margin-top: 4px; }
+/* 时间范围筛选工具条 */
+.usage-filter { display: flex; align-items: center; gap: var(--space-3, 12px); flex-wrap: wrap; }
 </style>

@@ -41,6 +41,8 @@
       @open-roleplay="roleplayOpen = true"
       @toggle-left="toggleLeftPanel"
       @toggle-right="toggleRightPanel"
+      @world-running-change="onWorldRunningChange"
+      @enable-run="enableWorldRun"
     />
 
     <!-- 三层主体 -->
@@ -229,7 +231,7 @@ const mapLoadError = ref('')
 const pausedHintDismissed = ref(false)
 
 /** 世界时钟 */
-const clock = reactive({ gameDay: 1, gameHour: 0, gameSecond: 0, paused: 0, rate: 4, gameTimeText: '', refRealTime: null, calendarName: null })
+const clock = reactive({ gameDay: 1, gameHour: 0, gameSecond: 0, paused: 0, rate: 4, worldRunning: 1, gameTimeText: '', refRealTime: null, calendarName: null })
 /** 本地插值后的当前游戏秒 */
 const liveGameSecond = ref(0)
 let clockTick = null
@@ -390,6 +392,7 @@ onMounted(async () => {
   await Promise.all([loadOverview(), loadWorldMap(), loadMovements(), loadWeatherAndLocations()])
   connectStream()
   startClockTick()
+  refreshClockAnchor()
   activateSandbox()
   loadMacro()
   macroTimer = setInterval(loadMacro, 60000)
@@ -789,6 +792,37 @@ async function togglePause() {
     applyClockPayload(res?.clock || {})
   } catch (e) { ElMessage.error(e.message || '时钟操作失败') }
   finally { clockBusy.value = false }
+}
+
+/**
+ * 世界运行主开关（V2.2 新增）：直接控制常驻运行 worldRunning。
+ * 关闭 = 引擎完全不推进本项目；开启 = 常驻自转（同时恢复暂停，避免开启后仍卡在暂停态）。
+ */
+async function onWorldRunningChange(v) {
+  clockBusy.value = true
+  try {
+    const res = await sandboxInterveneClock(projectId, { worldRunning: v ? 1 : 0, paused: v ? false : undefined })
+    applyClockPayload(res?.clock || {})
+    pushFeed('clock', '世界运行', v ? '世界运行已开启（常驻自转）' : '世界运行已关闭（引擎不再推进）')
+    ElMessage.success(v ? '世界运行已开启' : '世界运行已关闭')
+  } catch (e) {
+    ElMessage.error(e.message || '操作失败')
+    refreshClockAnchor()
+  } finally { clockBusy.value = false }
+}
+
+/** 主按钮（世界停止时）：开启世界运行并恢复推进（与开关同语义的一次性动作） */
+async function enableWorldRun() {
+  clockBusy.value = true
+  try {
+    const res = await sandboxInterveneClock(projectId, { worldRunning: 1, paused: false })
+    applyClockPayload(res?.clock || {})
+    pushFeed('clock', '世界运行', '世界运行已开启：世界开始推进')
+    ElMessage.success('世界运行已开启：世界开始推进')
+  } catch (e) {
+    ElMessage.error(e.message || '操作失败')
+    refreshClockAnchor()
+  } finally { clockBusy.value = false }
 }
 
 async function advanceOne() {

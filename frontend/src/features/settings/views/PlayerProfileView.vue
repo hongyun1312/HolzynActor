@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="pp-settings">
+  <div class="settings-stack">
     <PageHeader
       title="玩家档案"
       :desc="projectId
@@ -21,9 +21,9 @@
     />
 
     <!-- 全局提示：项目专属关系设定在项目内 -->
-    <div v-if="!projectId" class="pp-card tech-card">
-      <div class="pp-title">与角色的关系</div>
-      <div class="pp-desc">
+    <div v-if="!projectId" class="set-card">
+      <div class="set-card-title">与角色的关系</div>
+      <div class="set-card-desc">
         每角色的「与我的关系」设定（过往/身份关系/他对你的态度）与好感/信任/阶段基线按角色配置，
         需在<b>项目内</b>编辑（进入任意项目 → 对谈 → 玩家档案）。已有
         <b>{{ Object.keys(relationSettings).length }}</b> 个角色的设定将按现状注入对谈上下文。
@@ -31,12 +31,12 @@
     </div>
 
     <!-- 玩家 persona（全局，两态通用） -->
-    <div class="pp-card tech-card">
-      <div class="pp-head">
-        <div class="pp-title">玩家 persona</div>
+    <div class="set-card">
+      <div class="set-card-head">
+        <h3 class="set-card-title">玩家 persona</h3>
         <el-tag size="small" effect="plain">注入对谈上下文 · 无记忆/状态/行动</el-tag>
       </div>
-      <div class="pp-desc">对谈时角色会以这些信息认识你（「关于{你}」段）；与特殊 NPC 档案同构但裁剪——只留身份/背景/性格/说话风格/目标/能力。所有字段选填。</div>
+      <div class="set-card-desc">对谈时角色会以这些信息认识你（「关于{你}」段）；与特殊 NPC 档案同构但裁剪——只留身份/背景/性格/说话风格/目标/能力。所有字段选填。</div>
       <el-form :model="form" label-position="top" class="pp-form">
         <el-form-item label="玩家名（角色在对话中如何称呼你）">
           <el-input v-model="form.name" placeholder="例如：阿岚" maxlength="64" show-word-limit clearable />
@@ -62,23 +62,23 @@
           </el-form-item>
         </div>
       </el-form>
-      <div class="pp-actions">
+      <div class="set-actions">
         <el-button type="primary" :loading="savingProfile" @click="saveProfile">保存玩家档案</el-button>
       </div>
     </div>
 
     <!-- 玩家-角色关系（项目内：设定 + 关系行） -->
     <template v-if="projectId">
-      <div class="pp-card tech-card">
-        <div class="pp-head">
-          <div class="pp-title">与角色的关系</div>
+      <div class="set-card">
+        <div class="set-card-head">
+          <h3 class="set-card-title">与角色的关系</h3>
           <el-tag size="small" effect="plain">按角色 · 项目内</el-tag>
         </div>
-        <div class="pp-desc">
+        <div class="set-card-desc">
           「与我的关系」设定（过往/身份关系/他对你的态度）注入对谈上下文的关系段；好感/信任/阶段/备注为
           关系基线（好感信任 0~100），沉淀（M6）前由你设定，沉淀后 AI 在其上演进。
         </div>
-        <div v-if="characters.length === 0" class="pp-dim">本项目暂无角色；对谈将按缺省关系（陌生 / 0 / 0）进行，可先到「NPC 角色」建档。</div>
+        <div v-if="characters.length === 0" class="set-tip">本项目暂无角色；对谈将按缺省关系（陌生 / 0 / 0）进行，可先到「NPC 角色」建档。</div>
         <el-collapse v-else v-model="openRels" class="pp-collapse">
           <el-collapse-item v-for="c in characters" :key="'npc:' + c.id" :name="'npc:' + c.id">
             <template #title>
@@ -261,16 +261,11 @@ onMounted(load)
 </script>
 
 <style scoped>
-.pp-settings { display: flex; flex-direction: column; gap: 12px; padding: 2px 0 16px; }
-.pp-card { padding: 16px 18px; border-radius: 14px; }
-.pp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
-.pp-title { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
-.pp-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.7; margin-bottom: 10px; }
-.pp-dim { font-size: 0.78rem; color: var(--text-tertiary); line-height: 1.7; }
+/* V2.1：卡片/标题/描述/动作区/提示走全局设置页规范（.set-card/.set-card-head/.set-card-title/.set-card-desc/.set-actions/.set-tip），
+   此处仅保留 persona 双栏栅格与关系行的本页特有样式。 */
 .pp-form { margin-top: 6px; }
 .pp-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
-.pp-actions { display: flex; justify-content: flex-end; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border-light, var(--border-l2)); }
-.pp-collapse { border-top: 1px solid var(--border-light); }
+.pp-collapse { border-top: 1px solid var(--border-l1); }
 .pp-char-title { display: inline-flex; align-items: center; gap: 6px; }
 .pp-char-avatar { font-size: 0.6rem; background: var(--brand-gradient, linear-gradient(135deg, #1d5cff, #7b4dff)); }
 .pp-char-name { font-weight: 600; color: var(--text-primary); }

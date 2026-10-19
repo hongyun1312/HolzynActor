@@ -14,9 +14,9 @@
 <template>
   <!--
     设置中心外壳（双模式）。
-    关键重构点：项目模式**不再自绘顶部栏与左侧子导航**——外壳由 ProjectLayout/AppShell 提供，
-    设置子页作为「设置域」直接出现在域侧栏里（与其它域同一套导航），因此不再有「设置页里还有一层侧栏」的嵌套观感。
-    全局模式（首页 /settings/*）自身就是顶层路由，故自带 AppShell。
+    关键点：设置子页导航**不再用左侧「设置轨道」**（V2.0 P1 曾用它顶替域侧栏，观感上像进了另一套界面），
+    而是与「世界图谱」一致——在页面内用 PageTabs 页内主导航标签切换子页（域侧栏 → 页内标签 → 内容）。
+    项目模式外壳由 ProjectLayout 提供（域侧栏常驻）；全局模式（首页 /settings/*）自带 AppShell。
   -->
   <AppShell
     v-if="!projectId"
@@ -25,22 +25,28 @@
     :show-sidebar="false"
     :show-back="true"
   >
-    <template #sidebar>
-      <aside class="settings-rail">
-        <SideNav :sections="globalSections" :active-key="activeKey" @navigate="go" />
-      </aside>
-    </template>
-    <div class="content-col">
-      <!-- 不再自绘「设置」页头：域侧栏已标明当前位置，页头由各子页自己提供（一页一头）。
-           全局/项目差异由子页自身的说明承担，避免出现「设置 + 子页标题」双层页头。 -->
+    <PageShell width="content" class="settings-page">
+      <PageTabs
+        :model-value="activeKey"
+        position="top"
+        @tab-change="onTabChange"
+      >
+        <el-tab-pane v-for="item in tabItems" :key="item.key" :label="item.name" :name="item.key" />
+      </PageTabs>
+      <!-- 各子页自带 PageHeader（一页一头），此处只挂路由出口 -->
       <router-view />
-    </div>
+    </PageShell>
   </AppShell>
 
-  <!-- 项目模式：外壳已由 ProjectLayout 提供（设置区自带导航轨道），这里只渲染子页。
-       V2.0：统一走 PageShell width="content"（1200），替换原 .content-col（1440）——
-       设置类页面是"正文/表单"性质，1200 的阅读列与其它正文页一致。 -->
-  <PageShell v-else width="content">
+  <!-- 项目模式：外壳已由 ProjectLayout 提供，这里同样渲染页内标签 + 子页 -->
+  <PageShell v-else width="content" class="settings-page">
+    <PageTabs
+      :model-value="activeKey"
+      position="top"
+      @tab-change="onTabChange"
+    >
+      <el-tab-pane v-for="item in tabItems" :key="item.key" :label="item.name" :name="item.key" />
+    </PageTabs>
     <router-view />
   </PageShell>
 </template>
@@ -49,20 +55,16 @@
 /**
  * 设置页外壳。
  *
- * <p>职责：承载四个（现为五个）设置子页的路由出口，并按模式决定是否自带外壳：</p>
- * <ul>
- *   <li>**项目模式**（`/project/:id/settings/*`）：外壳来自 ProjectLayout，子导航来自域侧栏的「设置」域；</li>
- *   <li>**全局模式**（`/settings/*`）：自带 AppShell（全局品牌 + 左侧设置导航轨道）。</li>
- * </ul>
- *
- * <p>重构前后差异：原实现在项目模式下也渲染 ConsoleTopbar 与一层 180px 的左侧子导航，
- * 形成「侧栏里套侧栏」的双层导航；现统一到骨架，导航只有一处。</p>
+ * <p>职责：承载设置子页的路由出口，并用页内主导航标签（PageTabs）切换子页，
+ * 与「世界图谱」等带切面的项目页同一套交互，不再自绘左侧「设置轨道」。
+ * 项目 / 全局 / 对谈三种前缀下复用同一份子页清单（navModel.SETTINGS_SUB_ITEMS）。</p>
  */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppShell from '@/shared/layout/AppShell.vue'
-import SideNav from '@/shared/layout/SideNav.vue'
 import PageShell from '@/shared/layout/PageShell.vue'
+import PageTabs from '@/shared/layout/PageTabs.vue'
+import { SETTINGS_SUB_ITEMS } from '@/shared/layout/navModel'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,48 +72,36 @@ const router = useRouter()
 /** 当前项目 ID：项目空间内存在；全局设置（首页）为 null */
 const projectId = computed(() => (route.params.id ? Number(route.params.id) : null))
 
-/** 设置子页清单（项目/全局共用同一份定义，路径前缀不同） */
-const base = computed(() => (projectId.value ? `/project/${projectId.value}/settings` : '/settings'))
-const navItems = computed(() => [
-  { key: 'general', name: '通用设置', icon: 'ic_public_settings', desc: '账户、主题外观、世界时钟、导入导出', path: `${base.value}/general` },
-  { key: 'apis', name: 'API 配置', icon: 'ic_public_connection', desc: '模型供应商与密钥', path: `${base.value}/apis` },
-  { key: 'prompts', name: 'Prompt 模板', icon: 'ic_public_edit', desc: '场景模板覆盖与版本', path: `${base.value}/prompts` },
-  { key: 'usage', name: 'AI 用量', icon: 'ic_public_view_list', desc: 'Token 与场景用量统计', path: `${base.value}/usage` },
-  { key: 'appearance', name: '界面与布局', icon: 'ic_public_highlight', desc: '侧栏宽度、密度、面板固定与导览', path: `${base.value}/appearance` },
-  { key: 'assistant', name: '助手设置', icon: 'ic_public_message', desc: '项目级 AI 助手：说明、docs 索引与工具', path: `${base.value}/assistant` },
-  { key: 'player-profile', name: '玩家档案', icon: 'ic_public_contacts', desc: '玩家 persona 与角色关系设定', path: `${base.value}/player-profile` },
-  { key: 'update', name: '更新与版本', icon: 'ic_public_download', desc: '检查更新、下载与数据备份回滚', path: `${base.value}/update` }
-])
+/** 是否处于「对谈」界面的设置子树（该子树没有 player-profile 子路由，标签需过滤） */
+const isDialogueSettings = computed(() => route.path.includes('/dialogue/settings'))
 
-/** 全局模式的单分组导航（SideNav 需要 sections 结构） */
-const globalSections = computed(() => [{ key: 'settings', name: '设置', icon: 'ic_public_settings', items: navItems.value }])
+/** 设置子页路径前缀（项目/对谈/全局三态） */
+const base = computed(() => {
+  if (!projectId.value) return '/settings'
+  return isDialogueSettings.value
+    ? `/project/${projectId.value}/dialogue/settings`
+    : `/project/${projectId.value}/settings`
+})
 
-/** 当前激活子页 key（供 SideNav 高亮） */
-const activeKey = computed(() => navItems.value.find(i => isActive(i.path))?.key || 'general')
+/** 设置子页标签清单（与 navModel 同源；对谈子树去掉 player-profile 避免死链） */
+const tabItems = computed(() => SETTINGS_SUB_ITEMS
+  .filter(i => !(isDialogueSettings.value && i.rel === 'player-profile'))
+  .map(i => ({ ...i, path: `${base.value}/${i.rel}` })))
 
-/** 子导航激活判断 */
-function isActive(path) {
-  return route.path === path || route.path.startsWith(path + '/')
-}
+/** 当前激活子页 key（按路径匹配；未命中回退首项） */
+const activeKey = computed(() => {
+  const hit = tabItems.value.find(i => route.path === i.path || route.path.startsWith(i.path + '/'))
+  return hit?.key || tabItems.value[0]?.key || ''
+})
 
-/** SideNav 点击 → 路由跳转（SideNav 只抛事件，保持表现层纯净） */
-function go(item) {
-  if (item?.path) router.push(item.path)
+/** 标签点击 → 路由跳转（标签仅作导航，内容由 router-view 渲染） */
+function onTabChange(key) {
+  const item = tabItems.value.find(i => i.key === key)
+  if (item && route.path !== item.path) router.push(item.path)
 }
 </script>
 
 <style scoped>
-/* 全局模式左侧设置导航轨道：与域侧栏同款悬浮岛观感，宽度略窄 */
-.settings-rail {
-  width: 224px;
-  flex-shrink: 0;
-  margin: var(--shell-side-margin, 12px) 0 var(--shell-side-margin, 12px) var(--shell-side-margin, 12px);
-  background: var(--bg-nav);
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-lg, 16px);
-  box-shadow: var(--shadow-lv1);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
+/* 设置页：纵向节奏由 PageShell 承载；此处仅保留页面级兜底 */
+.settings-page { display: flex; flex-direction: column; gap: var(--content-gap, 16px); }
 </style>

@@ -78,7 +78,12 @@ function defaults() {
     mode: 'system',          // system | light | dark
     accent: DEFAULT_ACCENT,  // 用户默认主色
     genreFollow: true,       // 是否跟随世界题材换肤
-    overrides: {}            // { [projectId]: hex } 项目级主色覆盖
+    overrides: {},           // { [projectId]: hex } 项目级主色覆盖
+    // 云间列车液态玻璃背景偏好（全站常驻背景）
+    cloudTrain: {
+      enabled: true,         // 是否渲染云间列车动态背景（关闭后为纯色背景，玻璃材质保留）
+      resolution: 0.75       // 渲染分辨率（0.25~1，调低更省性能）
+    }
   }
 }
 
@@ -153,6 +158,17 @@ export function useTheme() {
     theme.value.overrides = next
   }
 
+  /** 开关云间列车动态背景（关闭后玻璃材质保留，背景为纯色） */
+  function setCloudTrainEnabled(v) {
+    theme.value.cloudTrain = { ...(theme.value.cloudTrain || {}), enabled: !!v }
+  }
+
+  /** 设置云间列车渲染分辨率（0.25~1；调低更省性能） */
+  function setCloudTrainResolution(v) {
+    const n = Number(v)
+    theme.value.cloudTrain = { ...(theme.value.cloudTrain || {}), resolution: Number.isFinite(n) ? Math.min(1, Math.max(0.25, n)) : 0.75 }
+  }
+
   /** 进入项目：记录项目 id 与题材（触发题材联动） */
   function setProjectContext(projectId, genre) {
     currentProjectId.value = projectId
@@ -177,6 +193,7 @@ export function useTheme() {
   return {
     theme, effectiveAccent, setMode, toggleMode, setAccent,
     setGenreFollow, setProjectOverride, removeProjectOverride,
+    setCloudTrainEnabled, setCloudTrainResolution,
     setProjectContext, clearProjectContext, mount
   }
 }

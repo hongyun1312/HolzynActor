@@ -86,6 +86,7 @@
             :show-grid="options.showGrid"
             :draggable="options.draggable"
             :insets="canvasInsets"
+            :min-fit-zoom="variant === 'tab' ? 0.7 : 0"
             :variant="variant"
             @node-click="onNodeClick"
             @edge-click="onEdgeClick"
@@ -889,7 +890,8 @@ function onToolbarAction(action) {
       legendOpen.value = !legendOpen.value
       break
     case 'fit':
-      canvasRef.value?.fitView(true)
+      // 「自适应视野（回到全图）」必须真的回到全图：不走默认的最小缩放下限
+      canvasRef.value?.fitAll(true)
       break
     case 'export':
       void exportPNG()
@@ -963,7 +965,7 @@ function onKeydown(e) {
     return
   }
   if (key === 'f' || key === 'F') {
-    canvasRef.value?.fitView(true)
+    canvasRef.value?.fitAll(true)
     return
   }
   if (key === '+' || key === '=') {
@@ -1512,10 +1514,13 @@ defineExpose({ reload: load, selectNode, setLayout: (v) => { layoutId.value = v 
 .relation-topology.page .topo-work { border-radius: 0; border: none; }
 .topo-stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
 
-/* 内嵌（tab）变体：画布高度由令牌给出，详情栏与画布同高 */
-.relation-topology.tab .topo-work { min-height: 0; }
+/* 内嵌（tab）变体：铺满可用高度——画布高度由父级（tab pane）决定，不再被 52vh 钉死；
+   详情栏（height:100% + 内部滚动）与画布同高，杜绝「画布只占顶部一小块、下方大片空白、
+   root 被详情栏撑出可视区被裁剪」的旧观感 */
+.relation-topology.tab { height: 100%; }
+.relation-topology.tab .topo-work { min-height: 0; height: 100%; }
 .relation-topology.tab :deep(.topo-canvas.tab) { max-height: none; border: none; border-radius: 0; }
-.relation-topology.tab .topo-stage { height: var(--canvas-h-embedded, min(58vh, 680px)); min-height: 380px; }
+.relation-topology.tab .topo-stage { min-height: 380px; }
 
 /* 浮层 */
 .float { position: absolute; z-index: 8; }

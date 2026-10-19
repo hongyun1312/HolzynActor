@@ -729,9 +729,15 @@ function sourceIcon(source) {
   bottom: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel, #fbfcfe);
-  border-left: 1px solid var(--border-l1, #eef1f6);
-  box-shadow: var(--shadow-lv3, 0 12px 32px rgba(31, 42, 68, 0.16));
+  /* 液态玻璃浮层：高不透明底 + 背景模糊——云间列车全站化后 --bg-panel（--bg-layer-1）被换成
+     半透明玻璃值且无 backdrop-filter，动态背景会透过面板干扰文字阅读；
+     改用 body.holzyn-glass 的浮层玻璃令牌（浅色=白玻璃 / 深色=夜空玻璃，均 ~86% 不透明 + 模糊），
+     背景与内容完全不影响可读性，同时保留玻璃质感。 */
+  background: var(--glass-overlay-bg, rgba(255, 255, 255, 0.92));
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
+  border-left: 1px solid var(--glass-overlay-border, var(--border-l1, #eef1f6));
+  box-shadow: var(--glass-overlay-shadow, var(--shadow-lv3, 0 12px 32px rgba(31, 42, 68, 0.16)));
 }
 .assistant-resize-handle {
   position: absolute;

@@ -101,7 +101,7 @@
                 size="page"
                 icon="ic_public_albums"
                 title="该角色还没有 11 维档案"
-                desc="由 AI 依据角色设定生成：身份、性格、目标、说话方式、关系态度等 11 个维度。生成后可在「记忆 / Prompt / 状态」等标签页复用。"
+                desc="由 AI 依据角色设定生成：身份、性格、目标、说话方式、关系态度等 11 个维度。生成后可在「记忆 / 状态」等标签页复用。"
                 primary-text="AI 生成角色档案"
                 :primary-icon="'MagicStick'"
                 @primary="generateOne(currentChar)"
@@ -116,22 +116,6 @@
                 <el-button size="small" text @click="openVersions">版本历史</el-button>
               </div>
             </template>
-            </template>
-          </el-tab-pane>
-
-          <!-- Tab 3 · Prompt：system_prompt 概念随 G1a 废弃（改为运行时按场景渲染分片），此页仅保留说明 -->
-          <el-tab-pane label="Prompt" name="prompt">
-            <div v-if="!currentChar" class="main-empty">
-              <EmptyState size="inline" icon="ic_public_contacts" title="从左侧选择一个角色查看详情" />
-            </div>
-            <template v-else>
-              <el-alert
-                type="info"
-                :closable="false"
-                show-icon
-                title="系统 Prompt 已废弃（O6 轨道 G1a）"
-                description="角色档案不再在生成时定稿一段 system_prompt，改为运行时按场景渲染分片（决策 S1 S2 S4 S6 S8 ／ 单聊 S1 S2 S3 S7 S8 S10 ／ 群聊 ／ 计划 ／ 人群）。档案本体请见「角色档案（11 维）」Tab；各场景实际注入文本可在调试前端「记忆注入预览」页查看。"
-              />
             </template>
           </el-tab-pane>
 
@@ -621,7 +605,7 @@
  * 左栏角色列表（头像/姓名/头衔/重要度/类型/主角标记，类型筛选，新增/编辑/删除）；
  * 右栏角色详情分 Tab：概览（基础档案只读，{@code CharacterOverviewPanel}）／角色档案（11 维，只读：服务端
  * personaRenderText 按维切分，由 {@code PersonaArchivePanel} 渲染，含"原始 JSON"折叠面板；编辑入口置灰，
- * 编辑器属 G1b）／ Prompt（system_prompt 已随 G1a 废弃，仅保留说明）／记忆（{@code CharacterMemoryPanel}，
+ * 编辑器属 G1b）／记忆（{@code CharacterMemoryPanel}，
  * 长期/工作/核心记忆 + 治理健康度 + 注入预览，接口调用在面板内）。</p>
  * <p>数据来源：/api/projects/{id}/characters、/api/characters/{id}/card(versions)、
  * /api/debug/npc-state、/api/debug/growth/*（记忆族接口见 CharacterMemoryPanel）。</p>
@@ -909,7 +893,7 @@ function pmFmt(v) {
  * 选中角色时加载一次——停留页面期间对话产生的记忆不会自动出现。切 Tab 时重新拉取保证所见即最新；
  * 目标/计划由世界引擎跨日/决策异步生成，同理切 Tab 时刷新。</p>
  *
- * @param name 切换到的 Tab 名称（overview/prompt/memory/goalplan）
+ * @param name 切换到的 Tab 名称（overview/card/memory/goalplan/state/topology/personamask）
  */
 function onInfoTabChange(name) {
   // 记忆面板自带接口，只叫它重拉（面板未挂载时空转，等价于原 loadMemories 的无角色提前返回）
@@ -1351,7 +1335,14 @@ onMounted(async () => {
 .detail-name { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
 .detail-ops { display: flex; align-items: center; gap: 8px; }
 .card-version { margin-right: 4px; }
-.info-tabs { flex: 1; min-height: 0; overflow-y: auto; }
+/* 右栏 Tab 区：让 el-tabs 填满可用高度（内容在 pane 内滚动，而不是把整个页面撑高）。
+   背景：此前 .info-tabs 直接 overflow-y:auto，el-tabs 内容高度由内容决定——
+   关系拓扑（tab 变体）的画布只有 52vh 高、但 root 被详情栏撑到上千像素，右栏出现大段空白
+   且超出可视区被裁剪。改为「tabs 根撑满 + content 区内部滚动 + pane 高度 100%」后，
+   拓扑画布能真正铺满右栏，其它 tab 的长内容也在 pane 内滚动。 */
+.info-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.info-tabs :deep(.el-tabs__content) { flex: 1; min-height: 0; overflow-y: auto; }
+.info-tabs :deep(.el-tab-pane) { height: 100%; }
 
 /* 概览 Tab 的 .ov-* 样式已随面板迁移到 CharacterOverviewPanel.vue（V2.0 §13.4） */
 
@@ -1370,11 +1361,6 @@ onMounted(async () => {
 .p-none { color: var(--text-placeholder); font-size: 0.82rem; }
 .p-bitem { margin-bottom: 2px; }
 .persona-ops { margin-top: 16px; display: flex; gap: 8px; }
-
-/* Prompt Tab */
-.prompt-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.prompt-hint { font-size: 0.78rem; color: var(--text-secondary); }
-.prompt-pre { margin: 0; padding: 14px; background: var(--bg-layer-2); border: 1px solid var(--border-light); border-radius: 8px; font-family: var(--font-mono, monospace); font-size: 0.78rem; line-height: 1.7; white-space: pre-wrap; word-break: break-word; max-height: var(--panel-scroll-max, min(46vh, 520px)); overflow-y: auto; }
 
 /* 人格与面具 Tab（O6 G3） */
 .personamask-ops { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }

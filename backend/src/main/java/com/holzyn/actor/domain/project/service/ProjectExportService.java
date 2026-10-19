@@ -335,6 +335,7 @@ public class ProjectExportService {
                     m.put("systemMessage", t.getSystemMessage());
                     m.put("version", t.getVersion());
                     m.put("enabled", t.getEnabled());
+                    m.put("category", com.holzyn.actor.domain.settings.service.PromptTemplateService.categoryOf(t.getCode()));
                     m.put("override", true);
                     return m;
                 }).toList();

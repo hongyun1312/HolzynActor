@@ -143,12 +143,11 @@ const routes = [
       //     因此在对谈界面侧边栏同样提供入口。路由挂在 /dialogue/settings/* 子树下、复用同一套
       //     设置子页组件（SettingsView 外壳 + 六个子页），从而打开设置时界面**保持「对谈」**，
       //     不会因跳转 /project/:id/settings/* 而切回浮生（见 navModel.DIALOGUE_SETTINGS_ITEMS）。
+      //     子页间切换由设置页内部 PageTabs 页内导航标签承担（域侧栏常驻，不再用「设置轨道」顶替侧栏）。
       {
         path: 'dialogue/settings',
         component: () => import('@/features/settings/views/SettingsView.vue'),
-        // V2.0（P1）：设置区自带导航轨道（railSidebar），因此不再依赖域侧栏逐个列出设置子页；
-        // 8 个子页仍全部可达（其中 player-profile 在对谈界面是独立置顶项，故不在本轨道内重复）。
-        meta: { title: '设置 · HolzynActor', domain: 'dialogue', railSidebar: true },
+        meta: { title: '设置 · HolzynActor', domain: 'dialogue' },
         children: [
           { path: '', redirect: 'general' },
           { path: 'general', name: 'project-dialogue-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { title: '通用设置 · HolzynActor', domain: 'dialogue' } },
@@ -171,11 +170,11 @@ const routes = [
       { path: 'characters', name: 'project-characters', component: () => import('@/features/character/views/CharacterView.vue'), meta: { title: 'NPC 角色 · HolzynActor', domain: 'cast' } },
       // 4. 对话（单聊）
       { path: 'chat', name: 'project-chat', component: () => import('@/features/chat/views/ChatView.vue'), meta: { title: '对话 · HolzynActor', domain: 'cast' } },
-      // 5. 设置（设置区自带导航轨道；子页 general/apis/prompts/usage/appearance/assistant/player-profile/update）
+      // 5. 设置（设置子页由设置页内部 PageTabs 导航：general/apis/prompts/usage/appearance/assistant/player-profile/update）
       {
         path: 'settings',
         component: () => import('@/features/settings/views/SettingsView.vue'),
-        meta: { title: '设置 · HolzynActor', domain: 'settings', railSidebar: true },
+        meta: { title: '设置 · HolzynActor', domain: 'settings' },
         children: [
           { path: '', redirect: 'general' },
           { path: 'general', name: 'project-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { title: '通用设置 · HolzynActor', domain: 'settings' } },
@@ -246,7 +245,10 @@ router.beforeEach(async (to) => {
   }
 
   // 世界沙盘 S1：应用启动直达上次所在项目（仅画廊落地页首次导航触发；会话内回画廊不再重定向）
-  if (!startupRedirectHandled && account.isOnboarded && to.path === '/') {
+  // v1.1.0-beta.2：新用户引导 pending 时屏蔽直达——刚完成首次向导的用户必须落在画廊看到引导
+  // （否则「安装完成 → 直接进示例世界」绕过了引导；pending 由 FirstRunGuide 消费后清除）。
+  const guidePending = (() => { try { return localStorage.getItem('holzyn.firstRunGuide.pending.v1') === '1' } catch (_) { return false } })()
+  if (!startupRedirectHandled && account.isOnboarded && to.path === '/' && !guidePending) {
     startupRedirectHandled = true
     const lastId = account.lastProjectId
     if (lastId) {

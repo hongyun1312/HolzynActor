@@ -44,4 +44,11 @@ contextBridge.exposeInMainWorld('holzynDesktop', {
       return () => ipcRenderer.removeListener('holzyn:updater:state', handler);
     },
   },
+  /** 桌面端行为桥：后台运行 / 系统托盘 */
+  desktop: {
+    /** 获取桌面端行为设置（closeToTray：关闭窗口是否最小化到托盘后台运行） */
+    getSettings: () => ipcRenderer.invoke('holzyn:desktop:get-settings'),
+    /** 设置关闭窗口行为：'tray'（最小化到托盘，后台运行）或 'quit'（直接退出）；持久化 */
+    setCloseBehavior: (value) => ipcRenderer.invoke('holzyn:desktop:set-close-behavior', value),
+  },
 });

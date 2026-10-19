@@ -16,8 +16,11 @@
   <!-- 全局更新横幅（桌面端 U1）：发现新版本时窗口顶部轻量提示，不打断任何页面操作 -->
   <UpdateBanner />
   <router-view />
+  <!-- 新用户 7 步交互式引导（全局：画廊 → 示例世界 → 世界内；pending 标记由首次向导置位） -->
+  <FirstRunGuide />
 </template>
 
 <script setup>
 import UpdateBanner from '@/shared/components/UpdateBanner.vue'
+import FirstRunGuide from '@/shared/layout/FirstRunGuide.vue'
 </script>

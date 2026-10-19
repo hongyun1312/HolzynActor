@@ -23,25 +23,9 @@
     :project="project"
     :breadcrumb="breadcrumb"
     :fullbleed="isFullbleed"
-    :show-sidebar="!isRailSidebar"
   >
-    <!-- V2.0（P1 设置收敛）：设置区自带导航轨道——
-         侧栏不再逐个列设置子页（浮生 17→13 项、对谈 9→3 项），改由设置区提供完整子导航，
-         并且两个界面共用同一份子页清单（navModel.SETTINGS_SUB_ITEMS），呈现方式一致。 -->
-    <template v-if="isRailSidebar" #sidebar>
-      <aside class="settings-rail">
-        <SideNav
-          :sections="settingsSections"
-          :active-key="settingsActiveKey"
-          @navigate="goSettings"
-        />
-        <div class="settings-rail-foot">
-          <button type="button" class="settings-back" @click="backToInterface">
-            ← 返回{{ interfaceLabel }}
-          </button>
-        </div>
-      </aside>
-    </template>
+    <!-- 设置区不再替换域侧栏（V2.0 P1 曾用「设置轨道」顶替侧栏，观感上像进了另一套界面）：
+         设置子页与其它项目页一致，仍显示域侧栏；子页间切换由设置页内部的页内导航标签（PageTabs）承担。 -->
     <router-view />
   </AppShell>
 </template>
@@ -68,8 +52,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { fetchProject, fetchWorldSetting, setLastProject } from '@/shared/api'
 import { useTheme } from '@/shared/theme'
 import AppShell from '@/shared/layout/AppShell.vue'
-import SideNav from '@/shared/layout/SideNav.vue'
-import { SETTINGS_SUB_ITEMS } from '@/shared/layout/navModel'
 
 const route = useRoute()
 const router = useRouter()
@@ -88,52 +70,6 @@ const breadcrumb = computed(() => (route.meta?.title || '').replace(' · HolzynA
  * 使新增全屏页（如图谱全屏）无需改外壳代码。</p>
  */
 const isFullbleed = computed(() => route.meta?.fullbleed === true)
-
-// ===================== V2.0（P1）设置区导航轨道 =====================
-
-/** 是否处于「设置区」（路由 meta.railSidebar）：此时隐藏域侧栏，改用设置区自己的轨道 */
-const isRailSidebar = computed(() => route.meta?.railSidebar === true)
-
-/** 当前是否在「对谈」界面的设置子树内（决定前缀与轨道内容） */
-const isDialogueSettings = computed(() => route.path.includes('/dialogue/settings'))
-
-/** 设置子页的路径前缀 */
-const settingsBase = computed(() => isDialogueSettings.value
-  ? `/project/${projectId.value}/dialogue/settings`
-  : `/project/${projectId.value}/settings`)
-
-/**
- * 设置区轨道分组。
- * <p>数据源是 `navModel.SETTINGS_SUB_ITEMS`（唯一事实来源），因此侧栏、轨道、命令面板永远同源。
- * 对谈界面下的设置子树没有 `player-profile` 子路由（它在对谈界面是独立置顶项），故此处过滤，
- * 避免出现点了 404 的死链。</p>
- */
-const settingsSections = computed(() => [{
-  key: 'settings',
-  name: '设置',
-  icon: 'ic_public_settings',
-  items: SETTINGS_SUB_ITEMS
-    .filter(i => !(isDialogueSettings.value && i.rel === 'player-profile'))
-    .map(i => ({ ...i, path: `${settingsBase.value}/${i.rel}` }))
-}])
-
-/** 当前激活子页 key（按路径匹配；未命中回退首项） */
-const settingsActiveKey = computed(() => {
-  const sections = settingsSections.value[0]
-  const hit = sections.items.find(i => route.path === i.path || route.path.startsWith(i.path + '/'))
-  return hit?.key || sections.items[0]?.key || ''
-})
-
-/** 轨道点击 → 跳转（SideNav 只抛事件） */
-function goSettings(item) {
-  if (item?.path && route.path !== item.path) router.push(item.path)
-}
-
-/** 设置区返回当前界面落地页（避免用户进了设置"出不去"） */
-const interfaceLabel = computed(() => (isDialogueSettings.value ? '对谈' : '世界地图'))
-function backToInterface() {
-  router.push(isDialogueSettings.value ? `/project/${projectId.value}/dialogue` : `/project/${projectId.value}/sandbox`)
-}
 
 /** 加载项目详情 + 世界题材（用于主题联动换肤） */
 async function loadProject() {
@@ -161,29 +97,5 @@ onBeforeUnmount(() => themeApi.clearProjectContext())
 </script>
 
 <style scoped>
-/* 设置区导航轨道：与域侧栏同款悬浮岛观感（V1.0 全局设置页已是此形态，此处用于项目内设置区） */
-.settings-rail {
-  width: 232px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  margin: var(--shell-side-margin, 12px) 0 var(--shell-side-margin, 12px) var(--shell-side-margin, 12px);
-  background: var(--bg-nav);
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-lg, 16px);
-  box-shadow: var(--shadow-lv1);
-}
-.settings-rail-foot { padding: 10px 12px; border-top: 1px solid var(--border-l1); }
-.settings-back {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-sm, 8px);
-  background: var(--bg-layer-2);
-  color: var(--text-secondary);
-  font-size: var(--density-font-sm, 0.82rem);
-  cursor: pointer;
-}
-.settings-back:hover { border-color: var(--accent-border); color: var(--accent-text); }
+/* 项目外壳不再承载设置区导航：域侧栏常驻，设置子页导航由设置页内部 PageTabs 承担。 */
 </style>

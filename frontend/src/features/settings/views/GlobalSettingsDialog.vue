@@ -12,10 +12,10 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <el-dialog v-model="visible" title="设置 · 全局（用户级）" width="900px" top="4vh"
-    class="global-settings-dialog" :close-on-click-modal="false" destroy-on-close>
-    <!-- 顶部说明（与其他弹窗一致的 el-alert 形态，见画廊导入/导出弹窗） -->
-    <el-alert type="info" :closable="false" show-icon class="gs-alert"
+  <el-dialog v-model="visible" title="设置 · 全局（用户级）" width="900px" top="6vh"
+    class="h-dialog global-settings-dialog" :close-on-click-modal="false" destroy-on-close>
+    <!-- 顶部说明（与其他弹窗一致的 el-alert 形态，h-dialog 规范统一间距） -->
+    <el-alert type="info" :closable="false" show-icon class="h-dialog-alert"
       title="全局（用户级）设置，所有项目共享"
       description="此处配置用户级 API / Prompt 默认值，并查看全部项目的 AI 用量总览；项目专属设置（基本信息 / 世界时钟 / 导入导出 / 危险区）请进入对应项目空间 → 设置 中配置。" />
 
@@ -76,14 +76,9 @@ defineExpose({ open })
 </script>
 
 <style scoped>
-.gs-alert { margin-bottom: 14px; }
-.gs-tabs { --el-tabs-header-margin-bottom: 14px; }
+/* Tab 头与内容间距统一（与新增项目弹窗 np-tabs 同款令牌） */
+.gs-tabs { --el-tabs-header-margin-bottom: 16px; }
 </style>
 
-<!-- 弹窗体：受限最大高度 + 内部滚动，小屏下避免被截断（对话框 teleport 到 body，需非 scoped 规则）
-     V2.0：改用 80vh 表达「最多占视口八成」，不再用 calc(100vh − 190px) 把标题栏/页脚高度写死。
-     模态框本来就不在外壳内容区里，用视口比例是正确语义。 -->
-<style>
-.global-settings-dialog .el-dialog__body { max-height: 80vh; overflow-y: auto; }
-.global-settings-dialog .el-dialog__body::-webkit-scrollbar { width: 8px; }
-</style>
+<!-- 弹窗体：h-dialog 规范已统一头部/内容内边距/80vh 内部滚动/页脚（global.css 非 scoped 规则）；
+     保留 gs-alert 与滚动声明前的兼容类名不再需要，滚动能力由 .h-dialog 提供 -->

@@ -27,19 +27,27 @@
        不套用通用外壳组件，只落地同一条规则。
   -->
   <div class="hm-topbar">
-    <!-- 组 1：世界时钟（状态区）——历法文本 + 实时连接 + 世界运行状态徽标 + 速率 -->
+    <!-- 组 1：世界时钟（状态区）——历法文本 + 实时连接 + 世界运行状态徽标 + 世界运行开关 + 速率 -->
     <div class="hm-group hm-clock-group">
       <div class="hm-clock">
         <div class="hm-clock-title">
           世界时钟
           <span class="hm-live" :class="{ on: liveConnected }">{{ liveConnected ? '实时' : '重连中' }}</span>
-          <span class="hm-state" :class="clock.paused ? 'is-paused' : 'is-running'" :title="worldStateHint">
+          <span class="hm-state" :class="hmState.cls" :title="worldStateHint">
             <i class="hm-state-dot" aria-hidden="true" />
-            {{ clock.paused ? '已暂停' : '运行中' }}
+            {{ hmState.text }}
           </span>
         </div>
         <div class="hm-clock-text">{{ clockText }}</div>
       </div>
+      <!-- 世界运行开关：直接控制常驻运行（关闭=引擎完全不推进本项目；开启=常驻自转），与状态徽标同组同义 -->
+      <label class="hm-run" :title="worldRunningHint">
+        <span class="hm-run-label">世界运行</span>
+        <el-switch
+          v-model="worldRunningValue" size="small"
+          :loading="clockBusy" :disabled="clockBusy"
+        />
+      </label>
       <el-select
         v-model="rateValue" size="small" class="hm-rate"
         :disabled="clockBusy" title="世界时间流速：每真实小时推进多少游戏小时" @change="onRateChange"
@@ -50,16 +58,17 @@
 
     <span class="hm-sep" />
 
-    <!-- 组 2：时间控制（**唯一入口**）——主按钮（开始推进/暂停）+ 单步（推进一轮）+ 干预 -->
+    <!-- 组 2：时间控制——主按钮（开启世界运行 / 开始推进 / 暂停）+ 单步（推进一轮）+ 干预 -->
     <div class="hm-group hm-group-actions">
       <el-button
         size="small"
-        :type="clock.paused ? 'success' : 'warning'"
+        data-tour="fr-clock"
+        :type="mainBtn.type"
         :loading="clockBusy"
-        :title="clock.paused ? '让角色重新开始自主行动（开启持续运行）' : '停下世界时间：角色立即停止自主推进'"
-        @click="emit('toggle-pause')"
+        :title="mainBtn.title"
+        @click="onMainBtn"
       >
-        {{ clock.paused ? '▶ 开始推进' : '⏸ 暂停' }}
+        {{ mainBtn.text }}
       </el-button>
       <el-button
         size="small" :loading="advancing"
@@ -154,7 +163,8 @@ const props = defineProps({
 })
 const emit = defineEmits([
   'rate-change', 'toggle-pause', 'advance', 'rt-toggle', 'weather-change',
-  'open-intervene', 'open-roleplay', 'toggle-left', 'toggle-right'
+  'open-intervene', 'open-roleplay', 'toggle-left', 'toggle-right',
+  'world-running-change', 'enable-run'
 ])
 
 const WEATHERS = ['晴', '雨', '雪', '阴']
@@ -165,6 +175,53 @@ const rateValue = ref(props.clock?.rate || 4)
 watch(() => props.clock?.rate, (v) => { if (v != null) rateValue.value = v })
 
 function onRateChange(v) { emit('rate-change', v) }
+
+/**
+ * 世界运行开关（常驻运行 worldRunning）。
+ * <p>V2.2：世界地图页直接控制「世界运行」——关闭=引擎完全不推进本项目；开启=常驻自转。
+ * 与顶栏状态徽标 / 主按钮同源（同一权威字段），不再像设置页旧版那样与「暂停」双开关并存歧义。</p>
+ */
+const worldRunningValue = computed({
+  get: () => props.clock?.worldRunning === 1,
+  set: (v) => emit('world-running-change', v)
+})
+
+/** 世界运行开关的说明 */
+const worldRunningHint = computed(() =>
+  props.clock?.worldRunning === 1
+    ? '世界运行已开启：即使不打开页面，世界也会按流速自动推进（关闭页面也在运行）'
+    : '世界运行已关闭：引擎完全不推进本项目（开启后自动恢复推进）'
+)
+
+/**
+ * 世界运行状态徽标（唯一权威状态）：已停止 / 已暂停 / 运行中。
+ * <p>V2.2 收敛：worldRunning=0 → 已停止；运行中且 paused → 已暂停；否则运行中。</p>
+ */
+const hmState = computed(() => {
+  const clock = props.clock || {}
+  if (clock.worldRunning !== 1) return { cls: 'is-stopped', text: '已停止' }
+  if (clock.paused) return { cls: 'is-paused', text: '已暂停' }
+  return { cls: 'is-running', text: '运行中' }
+})
+
+/**
+ * 主按钮（唯一时间控制入口）：世界停止 → 「开启世界运行」；暂停 → 「开始推进」；运行 → 「暂停」。
+ */
+const mainBtn = computed(() => {
+  const clock = props.clock || {}
+  if (clock.worldRunning !== 1) {
+    return { text: '▶ 开启世界运行', title: '世界运行已关闭。点击开启：引擎恢复推进本项目（同时恢复暂停）', type: 'success' }
+  }
+  if (clock.paused) {
+    return { text: '▶ 开始推进', title: '恢复推进：世界时间从冻结处继续（常驻运行已开启）', type: 'success' }
+  }
+  return { text: '⏸ 暂停', title: '暂停世界：世界时间临时冻结，角色停止行动（可随时恢复）', type: 'warning' }
+})
+
+function onMainBtn() {
+  if (props.clock?.worldRunning !== 1) { emit('enable-run'); return }
+  emit('toggle-pause')
+}
 
 /**
  * 「⋯ 更多」命令分发。
@@ -184,13 +241,16 @@ function onMore(cmd) {
 /**
  * 世界运行状态徽标的完整说明。
  *
- * <p>为什么要合并措辞：改造前时钟暂停（`clock.paused`）与实时决策激活（`rtDecision.active`）
- * 各有一个措辞近似的指示器（「已暂停/继续」与「世界运行中/世界静止」），用户无法分辨两者差别。
- * 现在以**时钟暂停**为唯一主状态，实时决策是否激活只作为补充说明出现在 tooltip 里。</p>
+ * <p>V2.2：状态以「世界运行（worldRunning）+ 时钟暂停（paused）」收敛为唯一主状态——
+ * 已停止 / 已暂停 / 运行中三态；实时决策是否激活只作为补充说明出现在 tooltip 里。</p>
  */
 const worldStateHint = computed(() => {
-  const base = props.clock?.paused
-    ? '世界时间已暂停：角色不会自主推进（点「开始推进」恢复持续运行）'
+  const clock = props.clock || {}
+  if (clock.worldRunning !== 1) {
+    return '世界运行已关闭：引擎完全不推进本项目（点「开启世界运行」恢复常驻自转）'
+  }
+  const base = clock.paused
+    ? '世界时间已暂停：角色不会自主推进（点「开始推进」恢复）'
     : '世界正在推进：角色会按自己的日程行动'
   const rt = props.rtDecision?.active ? '实时决策已激活' : '实时决策未激活'
   return `${base}；${rt}`
@@ -257,6 +317,20 @@ const weatherHint = computed(() => {
 }
 .hm-rate { width: 78px; flex-shrink: 0; }
 
+/* V2.2 世界运行开关：直接控制常驻运行（与状态徽标同组、同义） */
+.hm-run {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--hm-border); background: var(--hm-panel);
+  flex-shrink: 0; cursor: pointer;
+}
+.hm-run-label {
+  font-size: 10.5px; font-weight: 700; color: var(--hm-text-dim);
+  white-space: nowrap; user-select: none;
+}
+.hm-run .el-switch { --el-switch-on-color: var(--hm-green, var(--state-success)); }
+.hm-run:hover { border-color: var(--hm-border-strong); }
+
 /* V2.0 世界运行状态徽标：**唯一**的"世界是否在推进"指示器（与时间控制按钮同处一组） */
 .hm-state {
   display: inline-flex; align-items: center; gap: 4px;
@@ -270,6 +344,8 @@ const weatherHint = computed(() => {
 .hm-state.is-running .hm-state-dot { background: var(--hm-green); box-shadow: 0 0 6px var(--hm-green); animation: pulse 1.2s infinite; }
 .hm-state.is-paused { color: var(--hm-amber); border-color: color-mix(in srgb, var(--hm-amber) 45%, transparent); }
 .hm-state.is-paused .hm-state-dot { background: var(--hm-amber); }
+.hm-state.is-stopped { color: var(--hm-text-faint); border-color: var(--hm-border); }
+.hm-state.is-stopped .hm-state-dot { background: var(--hm-text-faint); }
 
 /* 「⋯ 更多」：降权入口（天气 / 对戏·演绎 / 实时决策手动常开） */
 .hm-more-btn {

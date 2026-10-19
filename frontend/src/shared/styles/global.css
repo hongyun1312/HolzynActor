@@ -154,6 +154,132 @@ img { max-width: 100%; display: block; }
 .content-col { width: 100%; max-width: var(--content-max-w, 1440px); margin: 0 auto; }
 
 /* ============================================================
+   设置页统一规范（V2.1 · 飞书式设置页范式）
+   背景：设置 8 个子页此前各自维护 .gs-* / .ap-* / .as-* / .pp-* / .uv-* / .pt-* 一套卡片样式，
+   卡片内边距（18×22 / 16×18 / density-card-pad）、卡片圆角（16 / 14）、标题字号（16 / 0.95rem / 0.9rem）、
+   描述字号与行高（0.82rem / 1.6 vs 1.8）、小字提示（0.72~0.78rem 混杂）各不相同，
+   切换子页时观感跳变。此处把「分组卡片 + 标题 + 描述 + 行控件 + 提示 + 动作区」
+   提升为全局类（与 .page-header / .page-tabs 同思路），设置页只写内容、不再自定卡片样式。
+
+   统一后的设置页排版阶梯（全站唯一口径）：
+     - 页面标题  : 1.3rem / 700      （PageHeader，既有）
+     - 卡片标题  : 0.95rem / 700     （.set-card-title）
+     - 卡片说明  : 0.82rem / 二级   （.set-card-desc，行高 1.7）
+     - 行标签    : 0.82rem / 二级   （.set-row-label，标签列宽统一 140px）
+     - 内联提示  : 0.82rem / 二级   （.set-hint）
+     - 次级小字  : 0.78rem / 三级   （.set-tip）
+     - 纵向节奏  : 16px（--content-gap），卡片之间一律等距
+     - 卡片内边距: 纵向跟随信息密度档（--density-card-pad），横向 24px
+
+   用法：
+     <div class="settings-stack">
+       <PageHeader title="…" desc="…" />
+       <el-alert … />                     <!-- 可选：模式说明，随纵向节奏自动间距 -->
+       <section class="set-card">
+         <h3 class="set-card-title">分组标题</h3>
+         <p class="set-card-desc">分组说明</p>
+         <el-form class="set-form" label-width="140px">…</el-form>
+       </section>
+       <section class="set-card">
+         <div class="set-card-head"><h3 class="set-card-title">标题</h3><span class="set-tip">提示</span></div>
+         <div class="set-row"><span class="set-row-label">标签</span><div class="set-control">…</div><span class="set-hint">提示</span></div>
+         <div class="set-actions"><el-button type="primary">保存</el-button></div>
+       </section>
+     </div>
+   ============================================================ */
+/* 设置子页容器：统一纵向节奏（页头 / 说明 / 卡片之间一律 16px） */
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--content-gap, 16px);
+}
+.settings-stack > .page-header { margin-bottom: 0; }
+
+/* 分组卡片：与 tech-card 同材质（分层底 + 描边 + 圆角），但无悬浮反馈
+   （设置卡片不可点，避免「看起来能点」的误导）；内边距统一 */
+.set-card {
+  background: var(--bg-layer-1);
+  border: 1px solid var(--border-l1);
+  border-radius: var(--radius-lg);
+  padding: var(--density-card-pad, 16px) 24px;
+}
+/* 危险区等语义卡片：仅描边着色 */
+.set-card.is-danger { border-color: var(--state-danger-bg); }
+
+/* 卡片标题：全设置页统一（比页面标题小一级） */
+.set-card-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin: 0 0 6px;
+}
+/* 卡片说明：统一字号 / 行高 / 颜色 */
+.set-card-desc {
+  font-size: var(--density-font-sm, 0.82rem);
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin: 0 0 12px;
+}
+.set-card-desc:last-child { margin-bottom: 0; }
+
+/* 卡片头部（标题 + 右侧标签/提示并排，标题在左、说明在右） */
+.set-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+  margin-bottom: var(--space-2, 8px);
+  flex-wrap: wrap;
+}
+.set-card-head .set-card-title { margin-bottom: 0; }
+
+/* 卡片内表单：限宽到表单档位（720px，与令牌一致），标签列宽由页面 label-width 统一 */
+.set-form { padding-top: 6px; max-width: var(--page-w-form, 720px); }
+
+/* 行式控件（左标签 + 控件 + 提示），如「界面与布局」「更新与版本」中的设置行 */
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  padding: 7px 0;
+  flex-wrap: wrap;
+}
+.set-row-label {
+  width: 140px;
+  flex-shrink: 0;
+  font-size: var(--density-font-sm, 0.82rem);
+  color: var(--text-secondary);
+}
+.set-control { display: flex; align-items: center; gap: var(--space-2, 8px); flex-wrap: wrap; }
+.set-control.wide { flex: 1; max-width: 420px; }
+.set-value { font-size: var(--density-font-sm, 0.82rem); color: var(--text-tertiary); }
+.set-value.is-fill { flex: 1; min-width: 0; }
+
+/* 内联提示（控件右侧小字） */
+.set-hint {
+  margin-left: 10px;
+  font-size: var(--density-font-sm, 0.82rem);
+  color: var(--text-secondary);
+}
+/* 次级提示 / 角标说明（更弱的小字） */
+.set-tip {
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+}
+
+/* 卡片内动作区（保存 / 操作按钮行）：上描边分隔 */
+.set-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  margin-top: 4px;
+  padding-top: var(--space-3, 12px);
+  border-top: 1px solid var(--border-l1);
+}
+
+/* ============================================================
    V2.0 长文阅读列（关键修正）
    审计文档的「60–75 字符/行」是拉丁文口径；WCAG 1.4.8 对 CJK 明确为每行最多 40 字。
    本产品正文为中文，长文段落统一加 .prose-measure，约束到 ≈640px 并放宽行高。
@@ -189,3 +315,372 @@ select:focus-visible,
 /* 拖拽中：全局禁用文本选中并统一光标（面板宽度拖拽 / 并置面板分隔条共用） */
 body.is-resizing { user-select: none; cursor: col-resize; }
 body.is-resizing * { cursor: col-resize !important; }
+
+/* ============================================================
+   云间列车 · 液态玻璃场景（V2.1 · 全站常驻）
+   用法：
+   - AppShell 根元素常驻 `glass-scene`（+ `is-glass`）：把全站的文本/分层背景/
+     Element Plus 控件令牌切换为「液态玻璃」体系，配合 CloudTrainBackground 动态背景。
+   - **浅色主题**：正常深色文字 + 浅色玻璃（白纱压暗 + 背景模糊），天空为「落日云间」；
+   - **深色主题**：浅色文字 + 夜空玻璃（深蓝半透明 + 背景模糊），天空为「夜空」。
+   - Teleport 到 body 的浮层（el-dialog / message-box / message / popper 等）
+     由 `body.holzyn-glass` 承担（AppShell 常驻 useGlassScene → body 恒挂）。
+   - 玻璃面板通用类 `.glass-panel`：磨砂半透明 + backdrop 模糊 + 内顶高光 + 描边。
+   可读性：所有文字令牌与所在玻璃底对比均满足 WCAG 1.4.3（浅色深字 / 深色浅字），
+   且外壳背景有主题自适应压暗层（--glass-scrim），文字不会被动态背景干扰。
+   ============================================================ */
+/* ===== 浅色：白玻璃（保留正常深色文字，不覆盖 --text-*） ===== */
+.glass-scene {
+  /* 玻璃材质参数 */
+  --glass-bg: rgba(255, 255, 255, 0.35);
+  --glass-bg-strong: rgba(255, 255, 255, 0.6);
+  --glass-input: rgba(255, 255, 255, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.65);
+  --glass-scrim: rgba(246, 249, 253, 0.35);       /* 全页可读性压暗层 */
+  --glass-topbar-bg: rgba(255, 255, 255, 0.55);
+  --glass-topbar-border: rgba(15, 17, 21, 0.08);
+  --glass-blur: 18px;
+  --glass-saturate: 1.35;
+
+  /* 分层背景（浅色玻璃） */
+  --bg-layer-1: var(--glass-bg-strong);
+  --bg-layer-2: rgba(255, 255, 255, 0.35);
+  --bg-layer-3: var(--glass-input);
+  --bg-hover: rgba(15, 17, 21, 0.06);
+  --bg-active: rgba(15, 17, 21, 0.12);
+  --bg-mask: rgba(15, 17, 21, 0.4);
+  --bg-scrim: rgba(246, 249, 253, 0.6);
+  --bg-nav: rgba(248, 250, 253, 0.5);
+  --bg-nav-hover: rgba(255, 255, 255, 0.6);
+
+  /* 边框（浅色玻璃） */
+  --border-l1: rgba(15, 17, 21, 0.1);
+  --border-l2: rgba(15, 17, 21, 0.16);
+  --border-l3: rgba(15, 17, 21, 0.26);
+
+  /* 阴影（浅色） */
+  --shadow-lv1: 0 2px 4px 0 rgba(15, 17, 21, 0.05);
+  --shadow-lv2: 0 4px 12px 0 rgba(15, 17, 21, 0.06), 0 2px 8px 0 rgba(15, 17, 21, 0.08);
+  --shadow-lv3: 0 0 1px 0 rgba(15, 17, 21, 0.12), 0 12px 32px 0 rgba(15, 17, 21, 0.1);
+
+  /* 滚动条 */
+  --scrollbar-thumb: rgba(120, 140, 180, 0.35);
+  --scrollbar-thumb-hover: rgba(120, 140, 180, 0.55);
+
+  /* Element Plus 控件（浅色玻璃） */
+  --el-bg-color: var(--glass-bg-strong);
+  --el-bg-color-page: transparent;
+  --el-bg-color-overlay: var(--glass-bg-strong);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-placeholder);
+  --el-border-color: var(--border-l2);
+  --el-border-color-light: var(--border-l1);
+  --el-border-color-lighter: var(--border-l1);
+  --el-fill-color: var(--glass-input);
+  --el-fill-color-light: rgba(255, 255, 255, 0.4);
+  --el-fill-color-lighter: rgba(255, 255, 255, 0.3);
+  --el-fill-color-blank: transparent;
+  --el-fill-color-dark: rgba(15, 17, 21, 0.08);
+  --el-disabled-bg-color: rgba(15, 17, 21, 0.05);
+  --el-mask-color: var(--bg-mask);
+  /* 表格（透明底露出卡片磨砂，表头略白） */
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.28);
+  --el-table-border-color: var(--border-l1);
+  --el-table-row-hover-bg-color: rgba(15, 17, 21, 0.05);
+  /* 折叠面板 / 标签页透明化（让所在卡片磨砂透出） */
+  --el-collapse-header-bg-color: transparent;
+  --el-collapse-content-bg-color: transparent;
+  --el-tabs-header-bg-color: transparent;
+
+  /* 主页世界地图（--hm-*）：底色透明露出云间列车，面板玻璃化 */
+  --hm-page-bg: transparent;
+  --hm-panel: rgba(255, 255, 255, 0.45);
+  --hm-panel-strong: rgba(255, 255, 255, 0.6);
+  --hm-border: rgba(90, 125, 205, 0.2);
+  --hm-border-soft: rgba(90, 125, 205, 0.12);
+}
+
+/* ===== 深色：夜空玻璃（浅色文字 + 深蓝半透明面） ===== */
+[data-theme="dark"] .glass-scene {
+  /* 玻璃材质参数 */
+  --glass-bg: rgba(8, 14, 24, 0.4);
+  --glass-bg-strong: rgba(12, 20, 34, 0.58);
+  --glass-input: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-scrim: rgba(4, 8, 16, 0.4);
+  --glass-topbar-bg: rgba(8, 14, 22, 0.55);
+  --glass-topbar-border: rgba(255, 255, 255, 0.1);
+  --glass-blur: 18px;
+  --glass-saturate: 1.5;
+
+  /* 文本（夜空下浅色文字） */
+  --text-primary: #f2f6fc;
+  --text-regular: #dbe4f0;
+  --text-secondary: #b7c5d9;
+  --text-tertiary: #90a1ba;
+  --text-placeholder: #6c7d97;
+  --text-caption: #90a1ba;
+  --accent-text: #9db9ff;
+  --accent-contrast: #fff;
+  --brand-primary: #8ab0ff;
+
+  /* 分层背景（夜空玻璃） */
+  --bg-layer-1: var(--glass-bg-strong);
+  --bg-layer-2: rgba(255, 255, 255, 0.05);
+  --bg-layer-3: var(--glass-input);
+  --bg-hover: rgba(255, 255, 255, 0.1);
+  --bg-active: rgba(255, 255, 255, 0.16);
+  --bg-mask: rgba(0, 0, 0, 0.55);
+  --bg-scrim: rgba(4, 8, 16, 0.65);
+  --bg-nav: rgba(10, 17, 29, 0.55);
+  --bg-nav-hover: rgba(255, 255, 255, 0.08);
+
+  /* 边框 */
+  --border-l1: rgba(255, 255, 255, 0.1);
+  --border-l2: rgba(255, 255, 255, 0.16);
+  --border-l3: rgba(255, 255, 255, 0.26);
+
+  /* 阴影 */
+  --shadow-lv1: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-lv2: 0 6px 20px rgba(0, 0, 0, 0.38), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lv3: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 18px 48px rgba(0, 0, 0, 0.5);
+
+  /* 滚动条 */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.24);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.38);
+
+  /* Element Plus 控件（夜空玻璃） */
+  --el-bg-color: var(--glass-bg-strong);
+  --el-bg-color-page: transparent;
+  --el-bg-color-overlay: var(--glass-bg-strong);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-placeholder);
+  --el-border-color: rgba(255, 255, 255, 0.2);
+  --el-border-color-light: rgba(255, 255, 255, 0.12);
+  --el-border-color-lighter: rgba(255, 255, 255, 0.1);
+  --el-fill-color: rgba(255, 255, 255, 0.1);
+  --el-fill-color-light: rgba(255, 255, 255, 0.08);
+  --el-fill-color-lighter: rgba(255, 255, 255, 0.06);
+  --el-fill-color-blank: transparent;
+  --el-fill-color-dark: rgba(255, 255, 255, 0.16);
+  --el-disabled-bg-color: rgba(255, 255, 255, 0.05);
+  --el-mask-color: var(--bg-mask);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.09);
+  --el-table-border-color: rgba(255, 255, 255, 0.1);
+  --el-table-row-hover-bg-color: rgba(255, 255, 255, 0.06);
+  --el-collapse-header-bg-color: transparent;
+  --el-collapse-content-bg-color: transparent;
+  --el-tabs-header-bg-color: transparent;
+  /* 语义色浅底改深底（标签/提醒卡片在夜空玻璃上不再发白） */
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 22%, rgba(10, 16, 26, 0.9));
+  --el-color-primary-light-9: color-mix(in srgb, var(--accent) 14%, rgba(10, 16, 26, 0.9));
+  --el-color-success-light-8: color-mix(in srgb, var(--state-success) 18%, rgba(10, 16, 26, 0.9));
+  --el-color-success-light-9: color-mix(in srgb, var(--state-success) 12%, rgba(10, 16, 26, 0.9));
+  --el-color-warning-light-8: color-mix(in srgb, var(--state-warn) 20%, rgba(10, 16, 26, 0.9));
+  --el-color-warning-light-9: color-mix(in srgb, var(--state-warn) 12%, rgba(10, 16, 26, 0.9));
+  --el-color-danger-light-8: color-mix(in srgb, var(--state-error) 20%, rgba(10, 16, 26, 0.9));
+  --el-color-danger-light-9: color-mix(in srgb, var(--state-error) 12%, rgba(10, 16, 26, 0.9));
+  --el-color-info-light-8: color-mix(in srgb, var(--el-color-info) 20%, rgba(10, 16, 26, 0.9));
+  --el-color-info-light-9: color-mix(in srgb, var(--el-color-info) 12%, rgba(10, 16, 26, 0.9));
+
+  /* 主页世界地图（夜空玻璃） */
+  --hm-page-bg: transparent;
+  --hm-panel: rgba(13, 20, 36, 0.5);
+  --hm-panel-strong: rgba(13, 20, 36, 0.62);
+  --hm-border: rgba(120, 160, 255, 0.2);
+  --hm-border-soft: rgba(120, 160, 255, 0.14);
+}
+
+/* ===== 液态玻璃材质：全站主要面统一为「半透明 + 背景模糊」 =====
+   ⚠️ 声明顺序：-webkit-backdrop-filter 必须在 backdrop-filter 之前，
+   lightningcss 才会同时保留两者（标准属性在前会被前缀合并吞掉，实测 Chrome 已不支持 -webkit- 别名）。 */
+.glass-scene .tech-card,
+.glass-scene .set-card,
+.glass-scene .el-card,
+.glass-scene .domain-sidebar {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(var(--glass-saturate, 1.35));
+  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(var(--glass-saturate, 1.35));
+}
+/* 科技卡悬浮态恢复主色描边（不被上方玻璃规则吞掉） */
+.glass-scene .tech-card:hover { border-color: var(--accent-border); }
+
+/* 玻璃面板通用类：磨砂半透明 + 背景模糊 + 内顶高光 + 微描边（颜色随主题取 --glass-*） */
+.glass-panel {
+  background: var(--glass-bg, rgba(14, 22, 34, 0.55));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 22px)) saturate(var(--glass-saturate, 1.5));
+  backdrop-filter: blur(var(--glass-blur, 22px)) saturate(var(--glass-saturate, 1.5));
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.14));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+/* ===== body.holzyn-glass：Teleport 到 body 的浮层（el-dialog / message-box / message / popper / 引导气泡）=====
+   浅色：白玻璃浮层 + 正常深色文字；深色：夜空玻璃浮层 + 浅色文字。 */
+body.holzyn-glass {
+  /* 浮层玻璃参数（浅色） */
+  --glass-overlay-bg: rgba(255, 255, 255, 0.86);
+  --glass-overlay-border: rgba(15, 17, 21, 0.12);
+  --glass-overlay-shadow: 0 24px 64px rgba(15, 17, 21, 0.28);
+
+  --bg-layer-1: rgba(255, 255, 255, 0.85);
+  --bg-layer-2: rgba(255, 255, 255, 0.6);
+  --bg-layer-3: rgba(255, 255, 255, 0.7);
+  --bg-hover: rgba(15, 17, 21, 0.06);
+  --bg-active: rgba(15, 17, 21, 0.12);
+  --bg-mask: rgba(15, 17, 21, 0.4);
+  --bg-scrim: rgba(246, 249, 253, 0.6);
+  --border-l1: rgba(15, 17, 21, 0.1);
+  --border-l2: rgba(15, 17, 21, 0.16);
+  --shadow-lv3: 0 0 1px 0 rgba(15, 17, 21, 0.12), 0 12px 32px 0 rgba(15, 17, 21, 0.1);
+  --accent-text: var(--accent);
+
+  --el-bg-color: rgba(255, 255, 255, 0.85);
+  --el-bg-color-overlay: rgba(255, 255, 255, 0.9);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-placeholder);
+  --el-border-color: rgba(15, 17, 21, 0.14);
+  --el-border-color-light: rgba(15, 17, 21, 0.1);
+  --el-border-color-lighter: rgba(15, 17, 21, 0.08);
+  --el-fill-color: rgba(255, 255, 255, 0.7);
+  --el-fill-color-light: rgba(255, 255, 255, 0.6);
+  --el-fill-color-lighter: rgba(255, 255, 255, 0.55);
+  --el-fill-color-blank: rgba(255, 255, 255, 0.85);
+  --el-fill-color-dark: rgba(15, 17, 21, 0.1);
+  --el-disabled-bg-color: rgba(15, 17, 21, 0.05);
+  --el-mask-color: var(--bg-mask);
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.6);
+  --el-table-border-color: rgba(15, 17, 21, 0.1);
+  --el-table-row-hover-bg-color: rgba(15, 17, 21, 0.06);
+}
+html[data-theme="dark"] body.holzyn-glass {
+  --glass-overlay-bg: rgba(13, 21, 33, 0.86);
+  --glass-overlay-border: rgba(255, 255, 255, 0.14);
+  --glass-overlay-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+
+  --text-primary: #f2f6fc;
+  --text-regular: #dbe4f0;
+  --text-secondary: #b7c5d9;
+  --text-tertiary: #90a1ba;
+  --text-placeholder: #6c7d97;
+  --bg-layer-1: rgba(18, 27, 41, 0.88);
+  --bg-layer-2: rgba(255, 255, 255, 0.06);
+  --bg-layer-3: rgba(255, 255, 255, 0.1);
+  --bg-hover: rgba(255, 255, 255, 0.1);
+  --bg-active: rgba(255, 255, 255, 0.16);
+  --bg-mask: rgba(3, 8, 14, 0.55);
+  --bg-scrim: rgba(5, 9, 14, 0.65);
+  --border-l1: rgba(255, 255, 255, 0.12);
+  --border-l2: rgba(255, 255, 255, 0.2);
+  --shadow-lv3: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 18px 48px rgba(0, 0, 0, 0.5);
+  --accent-text: #9db9ff;
+
+  --el-bg-color: rgba(255, 255, 255, 0.06);
+  --el-bg-color-overlay: rgba(16, 24, 36, 0.92);
+  --el-text-color-primary: #f2f6fc;
+  --el-text-color-regular: #dbe4f0;
+  --el-text-color-secondary: #b7c5d9;
+  --el-text-color-placeholder: #6c7d97;
+  --el-border-color: rgba(255, 255, 255, 0.22);
+  --el-border-color-light: rgba(255, 255, 255, 0.14);
+  --el-border-color-lighter: rgba(255, 255, 255, 0.1);
+  --el-fill-color: rgba(255, 255, 255, 0.12);
+  --el-fill-color-light: rgba(255, 255, 255, 0.08);
+  --el-fill-color-lighter: rgba(255, 255, 255, 0.06);
+  --el-fill-color-blank: rgba(255, 255, 255, 0.07);
+  --el-fill-color-dark: rgba(255, 255, 255, 0.16);
+  --el-disabled-bg-color: rgba(255, 255, 255, 0.05);
+  --el-mask-color: rgba(3, 8, 14, 0.6);
+  --el-table-bg-color: rgba(255, 255, 255, 0.04);
+  --el-table-tr-bg-color: rgba(255, 255, 255, 0.04);
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.09);
+  --el-table-border-color: rgba(255, 255, 255, 0.12);
+  --el-table-row-hover-bg-color: rgba(255, 255, 255, 0.08);
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 22%, rgba(10, 16, 26, 0.9));
+  --el-color-primary-light-9: color-mix(in srgb, var(--accent) 14%, rgba(10, 16, 26, 0.9));
+}
+
+/* 对话框 / 消息框 / 消息通知 / popper：液态玻璃浮层（颜色随主题取 --glass-overlay-*） */
+body.holzyn-glass .el-dialog {
+  background: var(--glass-overlay-bg, rgba(255, 255, 255, 0.86));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.4);
+  border: 1px solid var(--glass-overlay-border, rgba(15, 17, 21, 0.12));
+  box-shadow: var(--glass-overlay-shadow, 0 24px 64px rgba(15, 17, 21, 0.28));
+}
+body.holzyn-glass .el-message-box {
+  background: var(--glass-overlay-bg, rgba(255, 255, 255, 0.86));
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--glass-overlay-border, rgba(15, 17, 21, 0.12));
+}
+body.holzyn-glass .el-message {
+  background: var(--glass-overlay-bg, rgba(255, 255, 255, 0.86));
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid var(--glass-overlay-border, rgba(15, 17, 21, 0.12));
+}
+body.holzyn-glass .el-popper {
+  background: var(--glass-overlay-bg, rgba(255, 255, 255, 0.92));
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid var(--glass-overlay-border, rgba(15, 17, 21, 0.12));
+}
+body.holzyn-glass .el-popper .el-popper__arrow::before {
+  background: var(--glass-overlay-bg, rgba(255, 255, 255, 0.92));
+  border: 1px solid var(--glass-overlay-border, rgba(15, 17, 21, 0.12));
+}
+
+/* ===== 统一弹窗规范（.h-dialog）=====
+   项目画廊三个入口弹窗（导入项目 / 新增项目 / 设置）共用，收口「头部 → 说明 → 内容 → 页脚」
+   的尺寸与节奏；材质（玻璃背景/边框/阴影）由上方 body.holzyn-glass .el-dialog 统一提供。
+   宽度分档（协调而非同宽，随内容量取档）：
+     · 导入项目 = 560px（小档：单表单 + 上传）
+     · 新增项目 = 760px（中档：Tab 组织 4 种创建方式）
+     · 设置     = 900px（大档：4 个复杂子页）
+   弹窗 teleport 到 body，故这些规则必须非 scoped。 */
+.h-dialog .el-dialog__header {
+  padding: 18px 24px 0;
+  margin-right: 0;
+}
+.h-dialog .el-dialog__title {
+  font-size: 1.06rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+  line-height: 1.5;
+}
+.h-dialog .el-dialog__headerbtn { top: 14px; right: 18px; }
+.h-dialog .el-dialog__body {
+  padding: 16px 24px 10px;
+  /* 内容超出时在弹窗内滚动，小屏/多内容不被截断（80vh 表达「最多占视口八成」） */
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.h-dialog .el-dialog__body::-webkit-scrollbar { width: 8px; }
+.h-dialog .el-dialog__footer {
+  padding: 14px 24px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border-l1, rgba(15, 17, 21, 0.1));
+}
+/* 顶部说明（el-alert）：统一间距与标题字重，让三个弹窗的「说明段」观感一致 */
+.h-dialog .h-dialog-alert { margin-bottom: 16px; }
+.h-dialog .h-dialog-alert .el-alert__title { font-weight: 600; }
+.h-dialog .h-dialog-alert .el-alert__description { line-height: 1.7; }

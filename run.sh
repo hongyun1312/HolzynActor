@@ -10,7 +10,7 @@ export HOLOZYN_ACTOR_DATA_DIR="$ROOT/data"
 export HOLOZYN_ACTOR_UPLOAD_DIR="$ROOT/uploads"
 # 服务端口（长期固定 18080；已有环境变量则以环境变量为准）
 export HOLOZYN_ACTOR_SERVER_PORT="${HOLOZYN_ACTOR_SERVER_PORT:-18080}"
-JAR="$ROOT/backend/target/holzyn-actor-1.1.0-beta.1.jar"
+JAR="$ROOT/backend/target/holzyn-actor-1.1.0-beta.2.jar"
 
 if [ ! -f "$JAR" ]; then
   echo "[run] jar not found - building first (needs JDK21 + Maven + Node) ..."

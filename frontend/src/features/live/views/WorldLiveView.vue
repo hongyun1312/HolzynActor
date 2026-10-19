@@ -41,7 +41,7 @@
         :status-label="runStatusLabel"
         :time-text="clockText"
         :time-tooltip="clockTooltip"
-        :primary-text="runStatus === 'paused' ? '开始推进' : '开始推进'"
+        :primary-text="runStatus === 'stopped' ? '开启世界运行' : '开始推进'"
         pause-text="暂停"
         advance-text="推进一轮"
         :busy="clockBusy"
@@ -206,14 +206,16 @@ const ACTOR_LIMIT = 10
 // ==================== 派生状态 ====================
 
 /**
- * 运行状态：`paused === null` 表示「还没有拿到时钟事件」，此时如实显示未知。
- * <p>刻意不把「未知」渲染成「运行中」——本页存在的意义就是让用户相信屏幕上的世界是真的。</p>
+ * 运行状态（V2.2 收敛「持续运行/模拟状态」重叠）：
+ * `paused === null` → 未知（还没拿到时钟事件，如实显示，不假装运行中）；
+ * worldRunning=0 → 已停止；运行中且暂停 → 已暂停；否则运行中。
  */
 const runStatus = computed(() => {
   if (clock.paused === null || clock.paused === undefined) return 'idle'
+  if (clock.worldRunning !== 1) return 'stopped'
   return clock.paused ? 'paused' : 'running'
 })
-const runStatusLabel = computed(() => (runStatus.value === 'idle' ? '连接中' : ''))
+const runStatusLabel = computed(() => (runStatus.value === 'idle' ? '连接中' : runStatus.value === 'stopped' ? '已停止' : ''))
 
 /** 世界时间文本（沙盘页同款格式：青禾村历 0420年05月15日 06时00分） */
 const clockText = computed(() => {
@@ -436,14 +438,25 @@ function nameOf(ref) {
 
 // ==================== 时间控制（唯一两处，语义已在按钮 tooltip 说明） ====================
 
-/** 主按钮：当前暂停 → 开始持续推进；当前运行 → 暂停 */
+/**
+ * 主按钮（V2.2 统一语义，与设置页「世界时钟」/ 世界地图顶栏同源）：
+ * 已停止 → 开启世界运行（worldRunning=1 且恢复暂停）；已暂停 → 开始推进（恢复）；运行中 → 暂停。
+ */
 async function toggleRun() {
   if (runStatus.value === 'idle') { ElMessage.info('正在连接世界实时流，稍后再试'); return }
   clockBusy.value = true
   try {
-    await sandboxInterveneClock(projectId, { worldRunning: clock.paused ? 1 : 0 })
+    if (runStatus.value === 'stopped') {
+      await sandboxInterveneClock(projectId, { worldRunning: 1, paused: false })
+      ElMessage.success('世界运行已开启：世界开始推进')
+    } else if (runStatus.value === 'paused') {
+      await sandboxInterveneClock(projectId, { paused: false })
+      ElMessage.success('世界已恢复推进')
+    } else {
+      await sandboxInterveneClock(projectId, { paused: true })
+      ElMessage.success('世界已暂停（时间冻结）')
+    }
     await refreshClock()
-    ElMessage.success(clock.paused ? '世界已开始推进' : '世界已暂停')
   } catch (e) {
     ElMessage.error(`时间控制失败：${e?.message || '未知错误'}`)
   } finally { clockBusy.value = false }

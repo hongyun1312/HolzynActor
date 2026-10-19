@@ -41,45 +41,68 @@
       </a>
     </div>
 
-    <!-- 分组（域）导航：点击折叠/展开；当前页所在分组默认展开 -->
+    <!-- 分组（域）导航：点击折叠/展开；当前页所在分组默认展开。
+         单条目分组（如「设置」）扁平化为一个可直接点击的直达项——
+         避免「分组头 + 组内同名子项」渲染出两个「设置」的观感（浮生/对谈两界面均适用）。 -->
     <div
       v-for="section in sections"
       :key="section.key"
       class="side-section"
       :class="{ open: isOpen(section.key) }"
     >
-      <button
-        type="button"
-        class="side-head"
-        :title="collapsed ? section.name : ''"
-        @click="toggle(section.key)"
-      >
-        <el-icon class="side-icon"><HIcon :name="section.icon" /></el-icon>
-        <span v-if="!collapsed" class="side-text">{{ section.name }}</span>
-        <!-- 折叠箭头用 CSS 绘制：ic_public_drawer 在鸿蒙图标集中是「抽屉」而非雪佛龙，
-             直接映射 ArrowDown 会渲染成三条横线（≡），语义与观感都不对 -->
-        <span v-if="!collapsed" class="side-caret" aria-hidden="true"></span>
-      </button>
-
-      <!-- 子项：图标栏形态下也保留（悬浮/展开时可见），保证收起后仍可直达 -->
-      <div v-show="isOpen(section.key) || collapsed" class="side-children">
+      <template v-if="section.items.length === 1">
         <a
-          v-for="child in section.items"
-          :key="child.key"
-          class="side-item child"
-          :class="{ active: child.key === activeKey }"
-          :title="collapsed ? `${child.name}${child.desc ? ' · ' + child.desc : ''}` : (child.desc || child.name)"
+          class="side-item"
+          :class="{ active: section.items[0].key === activeKey }"
+          :title="collapsed
+            ? `${section.items[0].name}${section.items[0].desc ? ' · ' + section.items[0].desc : ''}`
+            : (section.items[0].desc || section.items[0].name)"
           href="#"
-          @click.prevent="$emit('navigate', child)"
-          @contextmenu.prevent="$emit('context', $event, child)"
+          @click.prevent="$emit('navigate', section.items[0])"
+          @contextmenu.prevent="$emit('context', $event, section.items[0])"
         >
-          <el-icon class="side-icon"><HIcon :name="child.icon" /></el-icon>
+          <el-icon class="side-icon"><HIcon :name="section.items[0].icon || section.icon" /></el-icon>
           <span v-if="!collapsed" class="side-text">
-            {{ child.name }}
-            <em v-if="child.sub" class="side-sub">{{ child.sub }}</em>
+            {{ section.items[0].name }}
+            <em v-if="section.items[0].sub" class="side-sub">{{ section.items[0].sub }}</em>
           </span>
         </a>
-      </div>
+      </template>
+
+      <template v-else>
+        <button
+          type="button"
+          class="side-head"
+          :title="collapsed ? section.name : ''"
+          @click="toggle(section.key)"
+        >
+          <el-icon class="side-icon"><HIcon :name="section.icon" /></el-icon>
+          <span v-if="!collapsed" class="side-text">{{ section.name }}</span>
+          <!-- 折叠箭头用 CSS 绘制：ic_public_drawer 在鸿蒙图标集中是「抽屉」而非雪佛龙，
+               直接映射 ArrowDown 会渲染成三条横线（≡），语义与观感都不对 -->
+          <span v-if="!collapsed" class="side-caret" aria-hidden="true"></span>
+        </button>
+
+        <!-- 子项：图标栏形态下也保留（悬浮/展开时可见），保证收起后仍可直达 -->
+        <div v-show="isOpen(section.key) || collapsed" class="side-children">
+          <a
+            v-for="child in section.items"
+            :key="child.key"
+            class="side-item child"
+            :class="{ active: child.key === activeKey }"
+            :title="collapsed ? `${child.name}${child.desc ? ' · ' + child.desc : ''}` : (child.desc || child.name)"
+            href="#"
+            @click.prevent="$emit('navigate', child)"
+            @contextmenu.prevent="$emit('context', $event, child)"
+          >
+            <el-icon class="side-icon"><HIcon :name="child.icon" /></el-icon>
+            <span v-if="!collapsed" class="side-text">
+              {{ child.name }}
+              <em v-if="child.sub" class="side-sub">{{ child.sub }}</em>
+            </span>
+          </a>
+        </div>
+      </template>
     </div>
 
     <!-- 底部插槽：项目状态小卡 / 版本号等由宿主注入 -->

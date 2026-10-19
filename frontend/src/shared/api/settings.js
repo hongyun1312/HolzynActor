@@ -40,6 +40,8 @@ export const testSavedModelApi = (id, projectId) => http.post(`/api/model-apis/$
 // ==================== Prompt 模板 ====================
 // 有效列表（项目覆盖 ∪ 用户覆盖 ∪ 内置；projectId 传=项目级覆盖）
 export const fetchPromptTemplates = (projectId) => http.get(`/api/prompt-templates`, { params: { projectId: projectId || undefined } })
+// 模板功能分类（有序，含各分类模板数；设置页横向 Tab 分组展示用）
+export const fetchPromptTemplateCategories = (projectId) => http.get(`/api/prompt-templates/categories`, { params: { projectId: projectId || undefined } })
 // 保存覆盖模板（projectId 传=项目级覆盖，不传=用户级覆盖）
 export const savePromptTemplate = (code, data, projectId) => http.put(`/api/prompt-templates/${code}`, data, { params: { projectId: projectId || undefined } })
 // 重置为内置（删除覆盖，回退低一级）

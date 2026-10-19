@@ -31,4 +31,4 @@ if %errorlevel%==0 (
 if errorlevel 1 exit /b 1
 
 rem ---- 4. ?????? JDK ?? JAR ----
-"%JAVA_HOME%\bin\java.exe" -jar "%~dp0target\holzyn-actor-1.1.0-beta.1.jar" > "%~dp0jar-run.log" 2>&1
+"%JAVA_HOME%\bin\java.exe" -jar "%~dp0target\holzyn-actor-1.1.0-beta.2.jar" > "%~dp0jar-run.log" 2>&1

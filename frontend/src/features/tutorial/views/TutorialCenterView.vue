@@ -39,6 +39,9 @@
           <el-button size="small" @click="replayTour">
             <el-icon><HIcon name="ic_public_highlight" /></el-icon>&nbsp;重看界面导览
           </el-button>
+          <el-button size="small" @click="replayFirstRunGuide">
+            <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;重看新手引导
+          </el-button>
           <el-button size="small" :disabled="!doneCount" @click="resetProgress">重置进度</el-button>
         </template>
       </PageHeader>
@@ -305,6 +308,18 @@ function go(target) {
 function replayTour() {
   layout.resetTour()
   layout.startTour()
+}
+
+/**
+ * 重看新用户 7 步引导：置 pending、清 done，回到画廊由 FirstRunGuide 接续。
+ * （键名与 FirstRunSetup / FirstRunGuide 共用，避免两处各写一套导致不同步。）
+ */
+function replayFirstRunGuide() {
+  try {
+    localStorage.setItem('holzyn.firstRunGuide.pending.v1', '1')
+    localStorage.setItem('holzyn.firstRunGuide.done.v1', '')
+  } catch (_) { /* 隐私模式静默 */ }
+  router.push('/')
 }
 </script>
 

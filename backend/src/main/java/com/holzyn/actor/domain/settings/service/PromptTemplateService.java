@@ -455,6 +455,180 @@ public class PromptTemplateService implements ApplicationRunner {
      */
     public static final String CODE_DIALOGUE_CONSOLIDATION = "dialogue_consolidation";
 
+    /**
+     * 玩家 persona 六维 AI 补充生成（player_profile_gen，SCHEMA_JSON）——
+     * 新用户引导「我的形象」页：用户写一段自我介绍 → AI 生成六维
+     * （identity/background/personality/voice/goals/ability）回填预览。
+     * 运行时由 PlayerProfileGenService 组装（自我介绍为 {{self_intro}} 占位），
+     * 本模板为版本留痕与「设置-提示词模板」可见（对齐 dialogue_* 先例）。
+     */
+    public static final String CODE_PLAYER_PROFILE_GEN = "player_profile_gen";
+
+    /* ============================================================
+       模板功能分类（V3：设置页「Prompt 模板」按功能横向 Tab 分组展示）
+       key = 分类键（落库 actor_prompt_template.category）；label = 页面 Tab 文案。
+       CODE_CATEGORY 以编码 -> 分类键建立全量映射（91 个内置模板逐一归类），
+       seed 与覆盖创建时回填；未知编码归入 "other"（前端归到「其他」Tab）。
+       说明：分类是模板编码的稳定属性（按 prompt 所属功能划分），
+       与 PromptSpecRegistry 的场景注册表无关，仅用于设置页浏览分组。
+       ============================================================ */
+    /** 全部分类（键 -> Tab 文案），顺序即设置页横向 Tab 顺序 */
+    public static final java.util.LinkedHashMap<String, String> CATEGORIES = new java.util.LinkedHashMap<>() {{
+        put("dialogue", "对话交流");
+        put("character", "角色档案");
+        put("relation", "关系与成长");
+        put("worldgen", "世界观生成");
+        put("world", "世界事件与演化");
+        put("action", "行动与计划");
+        put("memory", "记忆与知识");
+        put("crowd", "人群与调度");
+        put("import", "导入与解析");
+        put("judge", "自省与评估");
+        put("other", "其他");
+    }};
+
+    /** 模板编码 -> 功能分类键（全量内置模板归类；缺失回退 "other"） */
+    static final java.util.Map<String, String> CODE_CATEGORY = Map.ofEntries(
+            // 导入与解析
+            Map.entry(CODE_PROJECT_IMPORT, "import"),
+            Map.entry(CODE_PROJECT_IMPORT_CHARACTERS, "import"),
+            Map.entry(CODE_PROJECT_IMPORT_FIELD, "import"),
+            Map.entry(CODE_WORLD_SEGMENT, "import"),
+            Map.entry(CODE_WORLD_SEGMENT_CHARACTERS, "import"),
+            // 角色档案
+            Map.entry(CODE_CARD_GEN, "character"),
+            Map.entry(CODE_PERSONA_FILL_A, "character"),
+            Map.entry(CODE_PERSONA_FILL_B, "character"),
+            Map.entry(CODE_NPC_EMOTION_EVAL, "character"),
+            Map.entry(CODE_PLAYER_PROFILE_GEN, "character"),
+            // 关系与成长
+            Map.entry(CODE_RELATION_GEN, "relation"),
+            Map.entry(CODE_RELATION_REFINE, "relation"),
+            Map.entry(CODE_ROMANCE_DECISION, "relation"),
+            Map.entry(CODE_PROPOSAL_DECISION, "relation"),
+            Map.entry(CODE_FERTILITY_DECISION, "relation"),
+            Map.entry(CODE_WEDDING_NARRATIVE, "relation"),
+            Map.entry(CODE_NEWBORN_PERSONA, "relation"),
+            Map.entry(CODE_PERSONA_SHIFT_EVAL, "relation"),
+            Map.entry(CODE_SPACE_GENERATE, "relation"),
+            Map.entry(CODE_STAGE_TRANSITION_NARRATIVE, "relation"),
+            Map.entry(CODE_DEATH_CHRONICLE, "relation"),
+            Map.entry(CODE_STAGE_BEHAVIOR, "relation"),
+            // 世界观生成
+            Map.entry(CODE_WORLDGEN_CORELAWS, "worldgen"),
+            Map.entry(CODE_WORLDGEN_SPACETIME, "worldgen"),
+            Map.entry(CODE_WORLDGEN_SOCIETY, "worldgen"),
+            Map.entry(CODE_WORLDGEN_HISTORYCULTURE, "worldgen"),
+            Map.entry(CODE_WORLDGEN_EXISTENCE, "worldgen"),
+            Map.entry(CODE_WORLDGEN_INFORMATION, "worldgen"),
+            Map.entry(CODE_WORLDGEN_CHARACTER_ROSTER, "worldgen"),
+            Map.entry(CODE_WORLDGEN_CHARACTER_DEPTH, "worldgen"),
+            Map.entry(CODE_WORLDGEN_STORY_PLAN, "worldgen"),
+            Map.entry(CODE_WORLDGEN_STYLE_PROFILE, "worldgen"),
+            Map.entry(CODE_WORLD_MAP_GENERATE, "worldgen"),
+            Map.entry(CODE_SCENE_GENERATE, "worldgen"),
+            // 世界事件与演化
+            Map.entry(CODE_WORLD_EVENT, "world"),
+            Map.entry(CODE_WORLD_EVENT_POLISH, "world"),
+            Map.entry(CODE_EVOLUTION, "world"),
+            Map.entry(CODE_EVOLUTION_SCHEDULE, "world"),
+            Map.entry(CODE_WORLD_FRAME_DAILY, "world"),
+            Map.entry(CODE_INFO_DISTORTION, "world"),
+            Map.entry(CODE_ENVIRONMENT_DESC, "world"),
+            Map.entry(CODE_MACRO_EVENT, "world"),
+            Map.entry(CODE_MACRO_IMPACT, "world"),
+            Map.entry(CODE_MESO_DIRECTIVE, "world"),
+            Map.entry(CODE_MACRO_EMERGENCE, "world"),
+            Map.entry(CODE_WORLD_COMMON_KNOWLEDGE, "world"),
+            Map.entry(CODE_WORLD_OUTLOOK, "world"),
+            Map.entry(CODE_WORLD_TIME_INFER, "world"),
+            // 行动与计划
+            Map.entry(CODE_ACTION, "action"),
+            Map.entry(CODE_GOAL_GEN, "action"),
+            Map.entry(CODE_PLAN_DAY, "action"),
+            Map.entry(CODE_PLAN_REPLAN, "action"),
+            Map.entry(CODE_INTERRUPT_RESUME, "action"),
+            Map.entry(CODE_INTERRUPT_PROBE, "action"),
+            Map.entry(CODE_NEGOTIATE, "action"),
+            Map.entry(CODE_MOVE_ENCOUNTER, "action"),
+            // 记忆与知识
+            Map.entry(CODE_MEMORY_EXTRACT, "memory"),
+            Map.entry(CODE_MEMORY_SUMMARIZE, "memory"),
+            Map.entry(CODE_MEMORY_EXTRACT_REVIEW, "memory"),
+            Map.entry(CODE_CHRONICLE_DISTILL, "memory"),
+            Map.entry(CODE_ENTITY_STATE_UPDATE, "memory"),
+            Map.entry(CODE_CORE_MEMORY_UPDATE, "memory"),
+            Map.entry(CODE_MEMORY_FUZZ, "memory"),
+            Map.entry(CODE_MEMORY_SLEEP_MERGE, "memory"),
+            Map.entry(CODE_MEMORY_DISTILL, "memory"),
+            Map.entry(CODE_MEMORY_TIER, "memory"),
+            Map.entry(CODE_KNOWLEDGE_BRIDGE, "memory"),
+            Map.entry(CODE_PROACTIVE_RETRIEVAL, "memory"),
+            // 人群与调度
+            Map.entry(CODE_CROWD, "crowd"),
+            Map.entry(CODE_CROWD_CATEGORY, "crowd"),
+            Map.entry(CODE_CROWD_NPC_GEN, "crowd"),
+            Map.entry(CODE_CROWD_SCHEDULE_PROJECT, "crowd"),
+            Map.entry(CODE_CROWD_SCHEDULE_AFFILIATION, "crowd"),
+            Map.entry(CODE_NPC_CROWD_DECISION, "crowd"),
+            // 自省与评估
+            Map.entry(CODE_REFLECTION, "judge"),
+            Map.entry(CODE_SELF_CHECK, "judge"),
+            Map.entry(CODE_SELF_EFFICACY_UPDATE, "judge"),
+            Map.entry(CODE_MUSE_STRATEGY_CHECK, "judge"),
+            Map.entry(CODE_BEHAVIOR_JUDGE, "judge"),
+            Map.entry(CODE_NANOJEV_AB_JUDGE, "judge"),
+            // 对话交流
+            Map.entry(CODE_DIALOG, "dialogue"),
+            Map.entry(CODE_GROUP_REPLY, "dialogue"),
+            Map.entry(CODE_GROUP, "dialogue"),
+            Map.entry(CODE_AUTONOMOUS_CHAT_BEAT, "dialogue"),
+            Map.entry(CODE_DIALOGUE_REPLY, "dialogue"),
+            Map.entry(CODE_DIALOGUE_GREETING, "dialogue"),
+            Map.entry(CODE_DIALOGUE_SUMMARY, "dialogue"),
+            Map.entry(CODE_DIALOGUE_GROUP_REPLY, "dialogue"),
+            Map.entry(CODE_DIALOGUE_CONSOLIDATION, "dialogue"),
+            Map.entry(CODE_ASSISTANT_TOOL, "dialogue"),
+            Map.entry(CODE_ASSISTANT_CHAT, "dialogue")
+    );
+
+    /** 模板编码 -> 功能分类键（未知回退 "other"） */
+    public static String categoryOf(String code) {
+        return CODE_CATEGORY.getOrDefault(code, "other");
+    }
+
+    /** 分类键 -> Tab 文案（未知回退「其他」） */
+    public static String categoryLabel(String category) {
+        return CATEGORIES.getOrDefault(category == null ? "other" : category, "其他");
+    }
+
+    /**
+     * 全部分类（有序，供设置页横向 Tab 渲染）：{key, label, count}。
+     * count = 当前有效列表（含覆盖合并后）各分类的模板数，供 Tab 角标。
+     *
+     * @param userId 归属用户 ID
+     *
+     * @param projectId 项目 ID（NULL=仅用户覆盖/内置）
+     *
+     * @return 有序分类列表（含空分类，前端始终展示全部 Tab）
+     */
+    public List<java.util.Map<String, Object>> categories(Long userId, Long projectId) {
+        List<ActorPromptTemplate> list = effectiveList(userId, projectId);
+        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+        for (ActorPromptTemplate t : list) {
+            counts.merge(categoryOf(t.getCode()), 1, Integer::sum);
+        }
+        List<java.util.Map<String, Object>> out = new ArrayList<>();
+        CATEGORIES.forEach((key, label) -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("key", key);
+            m.put("label", label);
+            m.put("count", counts.getOrDefault(key, 0));
+            out.add(m);
+        });
+        return out;
+    }
+
     /** 内置模板归属用户标记 */
     private static final long BUILTIN_USER_ID = 0L;
 
@@ -493,6 +667,7 @@ public class PromptTemplateService implements ApplicationRunner {
                 t.setName(def.name());
                 t.setTemplate(def.template());
                 t.setSystemMessage(def.systemMessage());
+                t.setCategory(categoryOf(code));
                 repository.save(t);
                 log.info("初始化内置 Prompt 模板: {} - {}", code, def.name());
             } else if (!def.name().equals(existing.getName())
@@ -502,9 +677,15 @@ public class PromptTemplateService implements ApplicationRunner {
                 existing.setName(def.name());
                 existing.setTemplate(def.template());
                 existing.setSystemMessage(def.systemMessage());
+                existing.setCategory(categoryOf(code));
                 existing.setVersion(existing.getVersion() == null ? 1 : existing.getVersion() + 1);
                 repository.save(existing);
                 log.info("同步内置 Prompt 模板内容: {} - {}", code, def.name());
+            } else if (!java.util.Objects.equals(categoryOf(code), existing.getCategory())) {
+                // 仅分类缺失/不一致：回填分类（V3 迁移后旧库内置行无分类，启动时补齐；不触发版本号）
+                existing.setCategory(categoryOf(code));
+                repository.save(existing);
+                log.info("回填内置 Prompt 模板分类: {} - {}", code, categoryOf(code));
             }
         });
     }
@@ -672,8 +853,13 @@ public class PromptTemplateService implements ApplicationRunner {
             nt.setUserId(userId);
             nt.setProjectId(projectId);
             nt.setCode(code);
+            nt.setCategory(categoryOf(code));
             return nt;
         });
+        // 覆盖行分类：新行已按编码回填；旧行（V3 前无分类）也按编码补齐，保证设置页分组稳定
+        if (t.getCategory() == null || t.getCategory().isBlank()) {
+            t.setCategory(categoryOf(code));
+        }
         if (name != null && !name.isBlank()) t.setName(name);
         t.setTemplate(template);
         if (systemMessage != null) t.setSystemMessage(systemMessage.isBlank() ? null : systemMessage);
@@ -3689,6 +3875,17 @@ public class PromptTemplateService implements ApplicationRunner {
                 请以{{character_name}}的口吻说一句开场白（第一人称，不超过 80 字，自然亲切，像真人见面打招呼），
                 不要输出任何 JSON 外壳、不要标注角色名。
                 """, "你是对谈中的角色：对来到身边的玩家说一句自然亲切的开场白（第一人称，≤80 字）。"));
+        // player_profile_gen：玩家 persona 六维 AI 补充生成（新用户引导「我的形象」页）——
+        // 用户写一段自我介绍 → 生成六维 JSON（identity/background/personality/voice/goals/ability），
+        // 各维 1-2 句「可感知的细节」，回填表单预览后由用户确认保存（版本留痕 + 设置页可见）。
+        map.put(CODE_PLAYER_PROFILE_GEN, new BuiltinDef("玩家档案-AI 补充生成",
+                """
+                你是「角色设定师」：根据用户写下的一段自我介绍，帮他/她补全一份真实、有质感的玩家 persona。
+                【自我介绍】{{self_intro}}
+                请只输出一个 JSON 对象，键严格为 identity / background / personality / voice / goals / ability
+                （各自为一段中文文本，1~2 句，具体到可感知的细节，不要泛泛而谈；不要输出 JSON 以外的任何内容）：
+                {"identity":"身份（如：云游四方的旅行编辑）","background":"背景经历（一两句）","personality":"性格（如：温和慢热，重承诺）","voice":"说话风格（如：慢条斯理，爱引经据典）","goals":"目标（如：收集九州民间故事）","ability":"能力（如：善写、善辨音）"}
+                """, "你是角色设定师：把一段自我介绍扩写为玩家 persona 六维 JSON（identity/background/personality/voice/goals/ability）。"));
         // dialogue_summary（M4 长对话滚动窗口自动摘要）：超窗前段折叠为 AI 摘要——
         // 忠实浓缩前情（关键事实/约定/承诺/情绪），与既有摘要合并；本模板为版本留痕与
         // 「设置-提示词模板」可见（对齐 dialogue_reply/greeting 先例），运行时由

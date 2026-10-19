@@ -12,11 +12,11 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="model-api-view" :class="{ embedded }">
-    <!-- 页面标题与新增入口。嵌入设置弹窗时标题区隐藏（由弹窗标题 + Tab 标签承担），
-         但仍保留右侧「新增 API」操作区（不能随标题一起消失）。 -->
+  <div class="model-api-view" :class="{ embedded, compact }">
+    <!-- 页面标题与新增入口。嵌入设置弹窗（embedded）或作为子页内容（compact）时标题区隐藏
+         （由弹窗标题 / 页面页头 + Tab 标签承担），但仍保留右侧「新增 API」操作区。 -->
     <PageHeader
-      :class="{ 'is-embedded-ops': embedded }"
+      :class="{ 'is-embedded-ops': embedded || compact }"
       title="模型 API 设置"
       :desc="embedded ? '' : pageDesc"
     >
@@ -158,9 +158,11 @@ import PageHeader from '@/shared/layout/PageHeader.vue'
 
 // 归属项目：传入=项目级配置（项目空间，合并展示用户级）；不传=用户级默认（全局设置）
 // embedded：内嵌到设置弹窗（GlobalSettingsDialog）中使用，隐藏页面级描述、紧凑头部，与其它弹窗 UI 一致
+// compact：作为「API 配置」设置子页内容使用（父页自带 PageHeader 与模式说明），隐藏组件内标题、保留操作区
 const props = defineProps({
   projectId: { type: [String, Number], default: null },
-  embedded: { type: Boolean, default: false }
+  embedded: { type: Boolean, default: false },
+  compact: { type: Boolean, default: false }
 })
 
 /** 是否项目空间模式（projectId 非空）：合并展示项目级 + 用户级 */
@@ -381,23 +383,27 @@ onMounted(loadList)
 </script>
 
 <style scoped>
-/* V2.0：页面级限宽改走令牌 --page-w-content（1200），不再内联魔法数字；
-   本组件有 embedded 形态（嵌在设置弹窗里），故保留自身容器而不走 PageShell。 */
+/* V2.1：页面级限宽改走令牌 --page-w-content（1200）；卡片材质统一为全局 .set-card 同款。
+   本组件有 embedded（设置弹窗）/ compact（API 配置子页）两种形态，故保留自身容器而不走 PageShell。 */
 .model-api-view { max-width: var(--page-w-content, 1200px); margin: 0 auto; }
-/* 内嵌到设置弹窗：去掉页面级最大宽度限制、压缩头部与表格卡片内边距 */
+/* 内嵌到设置弹窗：去掉页面级最大宽度限制 */
 .model-api-view.embedded { max-width: none; }
-/* 嵌入设置弹窗时的紧凑页头（页头基础样式由全局类/PageHeader 提供） */
-.model-api-view.embedded .page-header { margin-bottom: 12px; }
-.model-api-view.embedded .page-title { font-size: 1.05rem; }
-/* 内嵌模式：只保留操作区（新增 API），标题/说明由弹窗标题与 Tab 标签承担 */
-.model-api-view.embedded .page-header.is-embedded-ops :deep(.ph-main) { display: none; }
-.model-api-view.embedded .page-header.is-embedded-ops { justify-content: flex-end; }
+/* 紧凑子页形态：标题由父页页头承担，此处只留右对齐的「新增 API」操作区 */
+.model-api-view.compact { max-width: none; }
+.model-api-view.embedded .page-header,
+.model-api-view.compact .page-header { margin-bottom: 0; }
+/* 嵌入/紧凑：只保留操作区（新增 API），标题/说明由页头或弹窗标题承担 */
+.model-api-view.embedded .page-header.is-embedded-ops :deep(.ph-main),
+.model-api-view.compact .page-header.is-embedded-ops :deep(.ph-main) { display: none; }
+.model-api-view.embedded .page-header.is-embedded-ops,
+.model-api-view.compact .page-header.is-embedded-ops { justify-content: flex-end; }
 .model-api-view.embedded .table-card { padding: 4px; }
-.table-card { background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-light); padding: 8px; }
+/* 表格卡片：与设置页统一卡片同材质，内边距收紧以便容纳表格 */
+.table-card { background: var(--bg-layer-1); border-radius: var(--radius-lg); border: 1px solid var(--border-l1); padding: 12px; }
 .api-name { font-weight: 600; color: var(--text-primary); }
 .default-tag { margin-left: 6px; }
-.muted { color: var(--text-placeholder); font-size: 0.78rem; }
+.muted { color: var(--text-placeholder); font-size: var(--density-font-sm, 0.82rem); }
 .form-hint { margin-left: 10px; }
-.emb-model { font-size: 0.82rem; color: var(--text-primary); }
-.purpose-hint { margin-top: 4px; line-height: 1.5; }
+.emb-model { font-size: var(--density-font-sm, 0.82rem); color: var(--text-primary); }
+.purpose-hint { margin-top: 4px; line-height: 1.7; }
 </style>

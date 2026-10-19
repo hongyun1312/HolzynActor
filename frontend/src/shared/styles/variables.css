@@ -29,6 +29,10 @@
   --dsw-font-family-code: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
     "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
   --dsw-ease: cubic-bezier(.4, 0, .2, 1);
+  /* Element Plus 控件（按钮/输入框/表格/标签/表单等）默认字体栈是 Helvetica Neue 系，
+     与全站 HarmonyOS 正文不一致 → 设置等表单密集页尤其明显（按钮、输入框全变 Helvetica）。
+     这里把 --el-font-family 指到全站字体，EP 控件与页面正文统一。 */
+  --el-font-family: var(--dsw-font-family);
 
   /* ===== 主色（accent，可换肤）===== */
   --accent: #4176e6;                                  /* 默认：DeepSeek 蓝 */
@@ -285,7 +289,6 @@
      这些数字把「顶栏高度 + 外壳内边距 + 当前密度档」硬编码进去了 —— 改顶栏或切密度就会失配
      （本项目已因此出现过内容被截断/留白过大）。这里只表达意图，不再耦合外壳几何。 */
   --panel-scroll-max: min(46vh, 520px);   /* 面板内长文/列表的滚动上限 */
-  --canvas-h-embedded: min(52vh, 620px);  /* 嵌在标签页里的画布高度（无确定高度父级时使用） */
 
   /* ===== 页内双栏（4 个自带左栏的页面统一取这两个令牌）=====
      背景：角色页 300px / 对话页 260px / 演化页 260px / 行动时间线 230px 各自硬编码，观感不齐。

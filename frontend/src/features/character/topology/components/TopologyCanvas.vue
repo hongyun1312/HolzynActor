@@ -105,7 +105,16 @@ const props = defineProps({
     default: () => ({ top: 100, left: 24, right: 24, bottom: 44 })
   },
   /** 变体：page=整页工作台 / tab=角色页内嵌 */
-  variant: { type: String, default: 'page' }
+  variant: { type: String, default: 'page' },
+  /**
+   * 自适应视野的最小缩放下限（0=不限）。
+   *
+   * <p>默认视图（fitView）把全部内容塞进安全区，节点多时 zoom 会掉到 0.2 以下，
+   * 整张图缩成一小团看不清（角色页内嵌 464px 宽画布 + 26 节点实测 zoom≈0.19）。
+   * 设下限后默认视图至少放大到该倍数（超出视野的内容靠平移/滚轮查看），
+   * 而「自适应视野（回到全图）」走 fitAll()，显式忽略下限真正看全。</p>
+   */
+  minFitZoom: { type: Number, default: 0 }
 })
 
 const emit = defineEmits([
@@ -231,6 +240,21 @@ function basePlugins() {
     type: 'tooltip',
     key: 'tip',
     trigger: 'hover',
+    // ⚠ 覆盖 @antv/component 硬编码的 tooltip 浅色样式（背景 rgba(255,255,255,0.96)、
+    // 深色文字 rgba(0,0,0,0.65)、Roboto 字体），它们不随深浅主题变化 → 深色模式下卡片仍是浅色。
+    // 改用主题令牌 + CSS 变量：内联样式的 var() 会在主题切换时实时重新求值，深浅自动适配。
+    // 注意属性名必须是 kebab-case：applyStyleSheet 用 cssText 拼接，camelCase 会被浏览器忽略。
+    style: {
+      '.tooltip': {
+        'background': 'var(--bg-layer-1)',
+        'color': 'var(--text-primary)',
+        'box-shadow': 'var(--shadow-lv2)',
+        'border': '1px solid var(--border-light)',
+        'border-radius': 'var(--radius-md)',
+        'padding': '10px 12px',
+        'font-family': 'inherit'
+      }
+    },
     getContent: (ev) => {
       const id = String(ev?.target?.id || '')
       const datum = id ? graph?.getElementData(id) : null
@@ -657,6 +681,9 @@ async function fitExtent(bb, opts = {}) {
   const spanY = Math.max(1, bb.maxY - bb.minY)
   let target = Math.min(availW / spanX, availH / spanY)
   if (opts.maxZoom) target = Math.min(target, opts.maxZoom)
+  // 最小缩放下限：opts.minZoom 显式给出（fitAll 传 0 表示不限制）时优先，否则用 prop
+  const minZ = opts.minZoom != null ? opts.minZoom : props.minFitZoom
+  if (minZ) target = Math.max(target, minZ)
   const scale = Math.min(range[1], Math.max(range[0], target))
   const timing = opts.animate ? { duration: 260 } : false
   await graph.zoomTo(scale, timing)
@@ -672,10 +699,27 @@ async function fitExtent(bb, opts = {}) {
  *
  * @param {boolean} [animate] 是否带动画
  *
+ * @param {object} [opts] 附加选项（透传给 fitExtent：minZoom/maxZoom 等）
+ *
  * @returns {Promise<void>} 完成
  */
-async function fitView(animate = true) {
-  await fitExtent(contentExtent(), { animate })
+async function fitView(animate = true, opts = {}) {
+  await fitExtent(contentExtent(), { animate, ...opts })
+}
+
+/**
+ * 自适应视野——「回到全图」：显式忽略最小缩放下限，把全部内容装进安全区。
+ *
+ * <p>与 fitView 的区别：fitView 在 minFitZoom 配置下会至少放大到该倍数（默认视图更清晰），
+ * 但用户点了「自适应视野（回到全图）」（工具栏按钮 / 键盘 f）时语义是「看全」，
+ * 此时不能再受下限约束，否则永远看不到全图。</p>
+ *
+ * @param {boolean} [animate] 是否带动画
+ *
+ * @returns {Promise<void>} 完成
+ */
+async function fitAll(animate = true) {
+  await fitExtent(contentExtent(), { animate, minZoom: 0 })
 }
 
 /**
@@ -880,7 +924,7 @@ onBeforeUnmount(() => {
 })
 
 defineExpose({
-  fitView, zoomTo, zoomBy, getZoom, focusNode, flashEdges, exportPNG, applyStates, recenterToSafeArea
+  fitView, fitAll, zoomTo, zoomBy, getZoom, focusNode, flashEdges, exportPNG, applyStates, recenterToSafeArea
 })</script>
 
 <style scoped>
@@ -902,7 +946,7 @@ defineExpose({
   border-radius: var(--radius-md);
 }
 .topo-canvas__stage { width: 100%; height: 100%; }
-.topo-canvas.tab .topo-canvas__stage { height: var(--canvas-h-embedded, min(52vh, 620px)); min-height: 380px; }
+.topo-canvas.tab .topo-canvas__stage { height: 100%; min-height: 380px; }
 
 /* 小地图：右下角浮动（避开左侧图例与底部状态条）。
    外层壳负责定位与外观，内层只负责装插件画布（插件会覆盖内层的 position）。 */

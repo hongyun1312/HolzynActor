@@ -56,7 +56,8 @@ class PromptTemplateServiceTest {
         // 对谈 M4（2026-10-12 第 57 次）：新增 dialogue_summary 超窗自动摘要模板 → 87 → 88
         // 对谈 M5（2026-10-13 第 58 次）：新增 dialogue_group_reply 群聊逐角色回复模板 → 88 → 89
         // 对谈 M6（2026-10-13 第 59 次）：新增 dialogue_consolidation 沉淀（关系 delta + 记忆要点）模板 → 89 → 90
-        assertEquals(90, builtins.size());
+        // 首次引导·我的形象（第 72 次）：新增 player_profile_gen 玩家 persona 六维补充生成模板 → 90 → 91
+        assertEquals(91, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_CARD_GEN));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOG));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_GROUP));
@@ -165,8 +166,9 @@ class PromptTemplateServiceTest {
         // 对谈 M4（2026-10-12 第 57 次）：新增 dialogue_summary 超窗自动摘要模板 → 87 → 88，
         // 对谈 M5（2026-10-13 第 58 次）：新增 dialogue_group_reply 群聊逐角色回复模板 → 88 → 89，
         // 对谈 M6（2026-10-13 第 59 次）：新增 dialogue_consolidation 沉淀模板 → 89 → 90，
+        // 新用户引导（2026-10-16 第 71 次第二批）：新增 player_profile_gen 玩家档案 AI 补充生成模板 → 90 → 91，
         // 此处的逐段计数断言与最终断言保持一致，避免历史注释计数误导。
-        assertEquals(90, builtins.size());
+        assertEquals(91, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_A));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_B));
         // 世界常识摘要（2026-10-08）：world_common_knowledge 模板含世界观占位符 + 300-500 字要求
@@ -212,6 +214,15 @@ class PromptTemplateServiceTest {
                 .contains("\"relations\""));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION).template()
                 .contains("memory_points"));
+        // 新用户引导（2026-10-16 第 71 次第二批）：player_profile_gen 玩家档案 AI 补充生成模板
+        // 含自我介绍占位符 + persona 六维 JSON 契约
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_PLAYER_PROFILE_GEN));
+        assertTrue(builtins.get(PromptTemplateService.CODE_PLAYER_PROFILE_GEN).template()
+                .contains("{{self_intro}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_PLAYER_PROFILE_GEN).template()
+                .contains("identity"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_PLAYER_PROFILE_GEN).template()
+                .contains("ability"));
         // 自省-行为一致性校验（2026-10-02）：self_check 模板含判定输入占位符 + 输出契约
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_SELF_CHECK));
         assertTrue(builtins.get(PromptTemplateService.CODE_SELF_CHECK).template().contains("{{recent_insights}}"));

@@ -67,6 +67,19 @@ public class PromptTemplateController {
     }
 
     /**
+     * 模板分类列表（有序，含各分类模板数）——设置页横向 Tab 分组展示用。
+     *
+     * @param projectId 项目 ID（可空=仅用户覆盖/内置）
+     *
+     * @return 有序分类列表 [{key,label,count}]
+     */
+    @GetMapping("/prompt-templates/categories")
+    public R<List<Map<String, Object>>> categories(@RequestParam(name = "projectId", required = false) Long projectId) {
+        Long userId = currentUserProvider.currentUserId();
+        return R.ok(templateService.categories(userId, projectId));
+    }
+
+    /**
      * 保存覆盖模板（不存在则新建）。projectId 非空=项目级覆盖，空=用户级覆盖。
      *
      * @param projectId 项目 ID（可空）
@@ -126,6 +139,10 @@ public class PromptTemplateController {
         m.put("isOverride", t.getUserId() != null && userId.equals(t.getUserId()) && t.getUserId() > 0);
         m.put("projectScope", t.getProjectId() != null);
         m.put("userId", t.getUserId());
+        // 功能分类（V3：设置页横向 Tab 分组；实体分类可能为空（旧数据），按编码兜底）
+        String category = PromptTemplateService.categoryOf(t.getCode());
+        m.put("category", category);
+        m.put("categoryLabel", PromptTemplateService.categoryLabel(category));
         return m;
     }
 

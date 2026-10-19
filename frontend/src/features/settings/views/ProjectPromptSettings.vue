@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="project-prompt-settings">
+  <div class="settings-stack">
     <!-- 统一页头（内嵌设置弹窗时由弹窗标题与 Tab 标签承担） -->
     <PageHeader
       v-if="!embedded"
@@ -22,15 +22,35 @@
         : '用户级模板覆盖（全局）：所有项目在无项目覆盖时回退使用此处保存的覆盖。'"
     />
     <!-- 项目级/用户级 Prompt 模板说明（双模式；内嵌设置弹窗时由弹窗顶部说明承担） -->
-    <el-alert v-if="!embedded && projectId" type="success" :closable="false" show-icon class="pt-alert"
+    <el-alert v-if="!embedded && projectId" type="success" :closable="false" show-icon
       title="Prompt 模板为项目级独立（随 .holzyn 包导入导出）。"
       description="解析规则：项目覆盖 > 用户覆盖 > 内置；「恢复默认」删除项目覆盖回退低一级。可编辑角色卡生成/对话系统/群聊编排/世界事件/行动生成等模板。" />
-    <el-alert v-else-if="!embedded" type="success" :closable="false" show-icon class="pt-alert"
+    <el-alert v-else-if="!embedded" type="success" :closable="false" show-icon
       title="Prompt 模板为「用户级覆盖」（全局，首页/未进入项目时配置）。"
       description="解析规则：项目覆盖 > 用户覆盖 > 内置；此处保存/恢复的是用户级覆盖，所有项目回退使用。项目级覆盖在对应项目空间 → 设置 → Prompt 模板 中配置。" />
 
-    <div class="pt-table tech-card">
-      <el-table :data="templates" border size="small" style="width: 100%">
+    <div class="set-card">
+      <!-- 横向功能分类 Tab：按 prompt 所属功能分组浏览（V3） -->
+      <div class="tpl-tabs" role="tablist" aria-label="模板功能分类">
+        <button
+          v-for="c in categories"
+          :key="c.key"
+          class="tpl-tab"
+          :class="{ active: activeCategory === c.key }"
+          role="tab"
+          :aria-selected="activeCategory === c.key"
+          @click="activeCategory = c.key"
+        >
+          {{ c.label }}<span v-if="c.count" class="tpl-tab-count">{{ c.count }}</span>
+        </button>
+      </div>
+
+      <el-table :data="filteredTemplates" border size="small" style="width: 100%" :key="activeCategory">
+        <el-table-column prop="categoryLabel" label="分类" width="110">
+          <template #default="{ row }">
+            <span class="tpl-cat">{{ row.categoryLabel }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="name" label="模板名称" min-width="130" />
         <el-table-column prop="code" label="编码" min-width="150" />
         <el-table-column prop="version" label="版本" width="70" />
@@ -47,6 +67,9 @@
             <el-button v-if="row.isOverride || row.projectScope" size="small" type="danger" text @click="doResetTemplate(row)">恢复默认</el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <div class="set-tip">该分类下暂无模板。</div>
+        </template>
       </el-table>
     </div>
 
@@ -67,8 +90,8 @@
           <div class="tpl-placeholders">
             <el-tag v-for="p in placeholders" :key="p" size="small" effect="plain" class="ph-tag">{{ p }}</el-tag>
           </div>
-          <div class="tpl-tip" v-if="projectId">保存后将生成该模板的「项目覆盖」并立即生效（本项目优先）；「恢复默认」回退用户覆盖或内置。</div>
-          <div class="tpl-tip" v-else>保存后将生成该模板的「用户级覆盖」并立即生效（所有项目回退使用）；「恢复默认」回退内置。</div>
+          <div class="set-tip" v-if="projectId">保存后将生成该模板的「项目覆盖」并立即生效（本项目优先）；「恢复默认」回退用户覆盖或内置。</div>
+          <div class="set-tip" v-else>保存后将生成该模板的「用户级覆盖」并立即生效（所有项目回退使用）；「恢复默认」回退内置。</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -81,17 +104,19 @@
 
 <script setup>
 /**
- * 设置-Prompt 模板。
- * <p>职责：项目/全局双模式 Prompt 模板管理——模板列表（编码/名称/版本/来源[项目覆盖/用户覆盖/内置]）+
- * 编辑视图（大文本域 + 占位符说明面板）+ 恢复默认（删除覆盖回退低一级）。
- * 项目模式：查询/保存/重置均带 projectId（项目级覆盖，随 .holzyn 包导入导出）；
+ * 设置-Prompt 模板（V3：按功能分类横向 Tab 分组展示）。
+ * <p>职责：项目/全局双模式 Prompt 模板管理——先按模板所属功能（对话交流/角色档案/世界观生成/…）
+ * 分类成横向 Tab，选中某分类只展示该分类模板（编码/名称/版本/来源[项目覆盖/用户覆盖/内置]）+
+ * 编辑视图（大文本域 + 占位符说明面板）+ 恢复默认（删除覆盖回退低一级）。</p>
+ * <p>项目模式：查询/保存/重置均带 projectId（项目级覆盖，随 .holzyn 包导入导出）；
  * 全局模式（首页顶栏「设置」→ Prompt 模板）：projectId=null，即「用户级覆盖」（所有项目回退使用）。</p>
- * <p>数据来源：/api/prompt-templates?projectId=xxx 系列接口（不传=用户级）。</p>
+ * <p>数据来源：/api/prompt-templates?projectId=xxx 系列接口（不传=用户级）；分类来自
+ * /api/prompt-templates/categories（与后端 CODE_CATEGORY 全量归类一致）。</p>
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchPromptTemplates, savePromptTemplate, resetPromptTemplate } from '@/shared/api'
+import { fetchPromptTemplates, fetchPromptTemplateCategories, savePromptTemplate, resetPromptTemplate } from '@/shared/api'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const route = useRoute()
@@ -102,7 +127,18 @@ const projectId = computed(() => (route.params.id ? Number(route.params.id) : nu
 defineProps({ embedded: { type: Boolean, default: false } })
 
 const templates = ref([])
+/** 功能分类（有序：{key,label,count}；来自后端，与模板归类一致） */
+const categories = ref([])
+/** 当前选中的分类 Tab（null=全部） */
+const activeCategory = ref(null)
 const tplDialog = reactive({ visible: false, loading: false, code: '', name: '', template: '', systemMessage: '' })
+
+/** 当前分类下的模板（null=全部） */
+const filteredTemplates = computed(() =>
+  activeCategory.value == null
+    ? templates.value
+    : templates.value.filter(t => (t.category || 'other') === activeCategory.value)
+)
 
 /** 常用占位符说明（与后端 PromptTemplateService 对齐） */
 const placeholders = [
@@ -111,9 +147,26 @@ const placeholders = [
   '{{crowd_snapshot}}', '{{environment_summary}}', '{{memory}}', '{{knowledge}}'
 ]
 
-/** 加载模板列表（项目级） */
+/** 加载模板列表 + 功能分类（项目级） */
 async function loadTemplates() {
   try { templates.value = await fetchPromptTemplates(projectId.value) } catch (e) { ElMessage.error(e.message || '模板加载失败') }
+  try {
+    const cats = await fetchPromptTemplateCategories(projectId.value)
+    categories.value = (cats || []).filter(c => c.count > 0)
+  } catch (_) {
+    // 分类接口不可用时回退为从模板行聚合（按 categoryLabel 分组）
+    const seen = new Map()
+    for (const t of templates.value) {
+      const key = t.category || 'other'
+      if (!seen.has(key)) seen.set(key, { key, label: t.categoryLabel || '其他', count: 0 })
+      seen.get(key).count++
+    }
+    categories.value = [...seen.values()]
+  }
+  // 默认选中第一个有模板的分类（分类化展示，而非整体列表）
+  if (activeCategory.value == null && categories.value.length) {
+    activeCategory.value = categories.value[0].key
+  }
 }
 
 /** 打开模板编辑 */
@@ -156,10 +209,50 @@ onMounted(loadTemplates)
 </script>
 
 <style scoped>
-.project-prompt-settings { }
-.pt-alert { margin-bottom: 14px; }
-.pt-table { padding: 8px; }
+/* V2.1：卡片/说明/提示走全局设置页规范（.settings-stack/.set-card/.set-tip） */
 .tpl-placeholders { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .ph-tag { margin: 0; font-family: var(--font-mono, monospace); }
-.tpl-tip { font-size: 0.78rem; color: var(--text-secondary); }
+
+/* ===== 横向功能分类 Tab（V3） ===== */
+.tpl-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-l1);
+}
+.tpl-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-l1);
+  border-radius: 999px;
+  background: var(--bg-layer-2);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: color .15s var(--dsw-ease), background .15s var(--dsw-ease), border-color .15s var(--dsw-ease);
+}
+.tpl-tab:hover { color: var(--text-primary); border-color: var(--border-l2); }
+.tpl-tab.active {
+  color: var(--accent-text, var(--accent));
+  background: var(--accent-soft);
+  border-color: var(--accent-border, var(--accent));
+  font-weight: 600;
+}
+.tpl-tab-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-layer-3);
+  color: var(--text-tertiary);
+  font-size: 0.68rem;
+  line-height: 16px;
+  text-align: center;
+}
+.tpl-tab.active .tpl-tab-count { background: var(--accent); color: #fff; }
+.tpl-cat { font-size: 0.78rem; color: var(--text-tertiary); }
 </style>

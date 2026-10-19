@@ -12,16 +12,23 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="project-api-settings">
+  <div class="settings-stack">
+    <!-- 统一页头（项目/全局两态说明不同） -->
+    <PageHeader
+      title="API 配置"
+      :desc="projectId
+        ? '配置你自己的 AI 模型接口（OpenAI 兼容协议）。本项目空间展示两套：项目级 API（仅本项目使用，优先）与用户级默认 API（全局回退）。'
+        : '配置用户级默认 API（OpenAI 兼容协议），所有项目共享回退。'"
+    />
     <!-- 项目级/用户级 API 配置说明（双模式） -->
-    <el-alert v-if="projectId" type="success" :closable="false" show-icon class="api-alert"
+    <el-alert v-if="projectId" type="success" :closable="false" show-icon
       title="API 配置为项目级独立（随 .holzyn 包导入导出，导出可选携带敏感数据）。"
       description="本页同时展示用户级默认 API（来源列标记「用户级」）：运行时「项目级优先、用户级回退」——未配置项目级时自动使用用户级默认 API。项目级行可新增/设为默认；用户级行可编辑/测试/删除（影响所有项目），其默认由全局设置管理。API Key 加密存储，列表仅显示脱敏尾 4 位。" />
-    <el-alert v-else type="success" :closable="false" show-icon class="api-alert"
+    <el-alert v-else type="success" :closable="false" show-icon
       title="API 配置为「用户级默认」（全局，首页/未进入项目时配置）。"
       description="此处配置的 API 是所有项目的用户级回退默认（新建/解析文件建项目、对话等都需要可用 API），所有项目共享；项目级 API 在对应项目空间 → 设置 → API 配置 中单独配置（项目级优先）。API Key 加密存储，列表仅显示脱敏尾 4 位。" />
-    <!-- 复用现有模型 API 配置组件（传 projectId=null 即用户级） -->
-    <ModelApiSettings :project-id="projectId" />
+    <!-- 复用现有模型 API 配置组件（compact：本页自带页头与说明，隐藏组件内标题） -->
+    <ModelApiSettings :project-id="projectId" compact />
   </div>
 </template>
 
@@ -35,6 +42,7 @@
  */
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 import ModelApiSettings from '@/features/settings/views/ModelApiSettings.vue'
 
 const route = useRoute()
@@ -43,6 +51,5 @@ const projectId = computed(() => (route.params.id ? Number(route.params.id) : nu
 </script>
 
 <style scoped>
-.project-api-settings { }
-.api-alert { margin-bottom: 14px; }
+/* V2.1：布局节奏由全局 .settings-stack 承载，此处无需额外样式 */
 </style>

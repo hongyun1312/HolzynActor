@@ -20,13 +20,14 @@
  *   数据：%LOCALAPPDATA%\HolzynActor\{data,uploads,logs,backups,updater}
  */
 
-const { app, BrowserWindow, dialog, shell, ipcMain, clipboard } = require('electron');
+const { app, BrowserWindow, dialog, shell, ipcMain, clipboard, Tray, Menu, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
 
 const APP_NAME = 'HolzynActor';
+const APP_ID = 'com.holzyn.actor'; // 与 desktop/package.json build.appId 一致（AUMID/托盘/通知）
 const JAR_FILE = 'holzyn-actor.jar';
 const BOOT_TIMEOUT_MS = 120_000; // 首次启动含示例世界注入，放宽到 120s
 const BACKUP_KEEP = 3;            // 更新前备份滚动保留份数
@@ -115,6 +116,24 @@ function main() {
       path.join(dataRoot, 'updater', 'settings.json'),
       JSON.stringify({ autoCheck: updaterState.autoCheck, channel: updaterState.channel }, null, 2)
     );
+  }
+
+  // ==================== 桌面端行为设置（后台运行 / 系统托盘） ====================
+  const desktopSettingsFile = () => path.join(dataRoot, 'desktop-settings.json');
+  let closeToTray = true; // 关闭窗口 → 最小化到系统托盘（后台运行），世界继续；默认开启
+
+  function loadDesktopSettings() {
+    try {
+      const s = JSON.parse(fs.readFileSync(desktopSettingsFile(), 'utf8'));
+      if (typeof s.closeToTray === 'boolean') closeToTray = s.closeToTray;
+    } catch (_) { /* 首次运行/损坏：使用默认值 */ }
+  }
+
+  function saveDesktopSettings() {
+    try {
+      fs.mkdirSync(dataRoot, { recursive: true });
+      fs.writeFileSync(desktopSettingsFile(), JSON.stringify({ closeToTray }, null, 2));
+    } catch (_) { /* 忽略写入失败 */ }
   }
 
   function configureUpdater() {
@@ -410,7 +429,7 @@ function main() {
   function resolveBackend() {
     if (isDev) {
       // 开发模式：直接用仓库构建产物 + 本机 JDK（免打包快速联调）
-      const jar = path.resolve(__dirname, '..', 'backend', 'target', 'holzyn-actor-1.1.0-beta.1.jar');
+      const jar = path.resolve(__dirname, '..', 'backend', 'target', 'holzyn-actor-1.1.0-beta.2.jar');
       const java = process.env.JAVA_HOME
         ? path.join(process.env.JAVA_HOME, 'bin', 'java.exe')
         : 'java';
@@ -604,10 +623,79 @@ function main() {
       return { action: 'deny' };
     });
     win.loadURL(url);
+    // 关闭窗口：默认最小化到系统托盘（后台运行），世界继续推进；真正退出由托盘菜单/设置决定
+    win.on('close', (e) => {
+      if (!quitting && closeToTray) {
+        e.preventDefault();
+        hideToTray();
+      }
+    });
     win.on('closed', () => {
       win = null;
+    });
+  }
+
+  // ==================== 系统托盘（后台运行） ====================
+  let tray = null;
+  let trayBalloonShown = false; // 首次隐藏到托盘时气泡提示一次
+
+  function trayIconPath() {
+    return app.isPackaged
+      ? path.join(process.resourcesPath, 'tray', 'tray-icon.png')
+      : path.join(__dirname, 'tray', 'tray-icon.png');
+  }
+
+  /** 从托盘恢复/聚焦主界面（窗口隐藏时重新显示） */
+  function showMainWindow() {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  }
+
+  /** 关闭窗口 → 隐藏到托盘（后台运行），首次给一次气泡提示 */
+  function hideToTray() {
+    if (!win) return;
+    win.hide();
+    if (tray && !trayBalloonShown) {
+      trayBalloonShown = true;
+      try {
+        tray.displayBalloon({
+          iconType: 'info',
+          title: `${APP_NAME} · 后台运行`,
+          content: '窗口已最小化到系统托盘，世界仍在后台运行。点击托盘图标可回到主界面。',
+        });
+      } catch (_) { /* 个别环境不支持气泡提示，忽略 */ }
+    }
+  }
+
+  /** 真正退出：先优雅停后端（H2 干净落盘），再退出应用 */
+  function quitApp() {
+    if (quitting) return;
+    quitting = true;
+    intentionalBackendStop = true;
+    stopBackendGracefully().finally(() => {
+      intentionalBackendStop = false;
       app.quit();
     });
+  }
+
+  function createTray() {
+    if (tray) return;
+    let icon = nativeImage.createFromPath(trayIconPath());
+    if (icon.isEmpty()) icon = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png'));
+    tray = new Tray(icon);
+    tray.setToolTip(`${APP_NAME} · 世界正在后台运行`);
+    const menu = Menu.buildFromTemplate([
+      { label: '打开主界面', click: () => showMainWindow() },
+      { type: 'separator' },
+      { label: `退出 ${APP_NAME}`, click: () => quitApp() },
+    ]);
+    // Windows：左键单击恢复窗口，右键弹出菜单（避免 setContextMenu 吞掉左键事件）
+    tray.on('click', () => showMainWindow());
+    tray.on('double-click', () => showMainWindow());
+    tray.on('right-click', () => tray.popUpContextMenu(menu));
   }
 
   // ==================== 更新确认安装（玩家确认后） ====================
@@ -749,6 +837,14 @@ function main() {
       } catch (_) { return null; }
     });
     ipcMain.handle('holzyn:app-version', () => app.getVersion());
+    // 桌面端行为（后台运行 / 系统托盘）
+    ipcMain.handle('holzyn:desktop:get-settings', () => ({ closeToTray, trayAvailable: !!tray }));
+    ipcMain.handle('holzyn:desktop:set-close-behavior', (_e, value) => {
+      // 'tray'（关闭→最小化到托盘，后台运行）或 'quit'（关闭→直接退出）
+      closeToTray = value !== 'quit';
+      saveDesktopSettings();
+      return { closeToTray };
+    });
   }
 
   // ==================== 启动 ====================
@@ -764,16 +860,23 @@ function main() {
   }
 
   app.whenReady().then(async () => {
+    app.setAppUserModelId(APP_ID);
     loadUpdaterSettings();
+    loadDesktopSettings();
     configureUpdater();
     registerIpc();
     const port = await startBackend();
     if (!port) return;
     createWindow(`http://127.0.0.1:${port}`);
+    createTray();
     scheduleStartupCheck();
   });
 
-  app.on('window-all-closed', () => app.quit());
+  app.on('window-all-closed', () => {
+    // 后台运行模式下窗口是「隐藏」而非关闭，不会走到这里；
+    // 仅在「关闭窗口=退出程序」模式下兜底退出。
+    if (!closeToTray) app.quit();
+  });
   app.on('before-quit', () => {
     quitting = true;
     killBackendTree();
@@ -781,6 +884,7 @@ function main() {
   app.on('second-instance', () => {
     if (win) {
       if (win.isMinimized()) win.restore();
+      win.show();
       win.focus();
     }
   });

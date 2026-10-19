@@ -93,10 +93,9 @@ export const DIALOGUE_ITEMS = [
  * <p>V2.0（P1 设置收敛）背景：改造前设置被复制成三份——`/settings/*`(8) +
  * `/project/:id/settings/*`(8) + `/project/:id/dialogue/settings/*`(7)，共 23 条路由指向同一批组件；
  * 且「对谈」界面侧栏 9 项里有 6 项是设置子页（占比 67%），侧栏被设置淹没。
- * 现在：设置子页清单只在本处声明一次，供三处复用——
- * ① 设置区自身的导航轨道（`SettingsRail`，项目/全局模式共用）；
- * ② 域侧栏的「设置」域（浮生界面）；
- * ③ 命令面板与全局搜索的导航条目。</p>
+ * 现在：设置子页清单只在本处声明一次，供设置页内部的页内导航标签（PageTabs）与命令面板复用——
+ * 侧栏只保留「设置」一个入口，进入设置后由设置页自己的标签切换子页
+ * （域侧栏常驻，不再用「设置轨道」顶替侧栏，观感与其它项目页一致）。
  *
  * <p>{@code rel} 为相对 `settings/` 的路径段，绝对路径由使用方按界面前缀拼接
  * （`/project/:id/settings/<rel>` 或 `/project/:id/dialogue/settings/<rel>`）。</p>
@@ -115,12 +114,13 @@ export const SETTINGS_SUB_ITEMS = [
 /**
  * 「对谈」界面的「设置」分组。
  *
- * <p>V2.0（P1）：**由 6 个子项收敛为 1 个入口**——点击进入设置区后，设置区自身渲染完整的
- * 子页导航轨道（见 {@link SETTINGS_SUB_ITEMS} 与 `SettingsRail`），因此功能一个不少，
- * 但侧栏不再被设置淹没（对谈侧栏 9 项 → 3 项）。</p>
+ * <p>V2.0（P1）：**由 6 个子项收敛为 1 个入口**——点击进入设置区后，设置区内部用
+ * 页内导航标签（PageTabs，见 {@link SETTINGS_SUB_ITEMS} 与 SettingsView）切换子页，
+ * 因此功能一个不少，但侧栏不再被设置淹没（对谈侧栏 9 项 → 3 项）。</p>
  *
  * <p>路径仍走 `/dialogue/settings/*` 子树：这样 {@link interfaceOfPath} 判定当前界面仍是「对谈」，
- * 用户从对谈进设置不会突然被切到「浮生」的侧栏（界面语境不跳变）。</p>
+ * 用户从对谈进设置不会突然被切到「浮生」的侧栏（界面语境不跳变）。
+ * `aliases` 让设置子页（apis/prompts/usage/appearance/assistant/update）在侧栏仍高亮本入口。</p>
  */
 export const DIALOGUE_SETTINGS_ITEMS = [
   {
@@ -128,6 +128,7 @@ export const DIALOGUE_SETTINGS_ITEMS = [
     name: '设置',
     icon: 'ic_public_settings',
     path: 'dialogue/settings/general',
+    aliases: ['dialogue/settings/apis', 'dialogue/settings/prompts', 'dialogue/settings/usage', 'dialogue/settings/appearance', 'dialogue/settings/assistant', 'dialogue/settings/update'],
     desc: '通用 / API / Prompt / 用量 / 界面 / 助手 / 玩家档案 / 更新'
   }
 ]
@@ -177,9 +178,9 @@ export const NAV_ITEMS = [
 
   // ===== 域⑤ 设置 =====
   // V2.0（P1 设置收敛）：设置**不再作为一个"域"铺 5 个同级子项**，而是收敛为 1 个入口；
-  // 进入设置区后由设置区自身的导航轨道（SettingsRail，源自 SETTINGS_SUB_ITEMS 的 8 个子页）承载子导航。
+  // 进入设置区后由设置页内部的页内导航标签（PageTabs，源自 SETTINGS_SUB_ITEMS 的 8 个子页）承载子导航。
   // 收益：① 侧栏不再被设置项占据（浮生 17→13 项）；② 「更新与版本」这类此前只能靠 URL 到达的
-  // 页面终于有了正式入口；③ 浮生/对谈两个界面的设置呈现方式一致（都由设置区自己负责）。
+  // 页面终于有了正式入口；③ 浮生/对谈两个界面的设置呈现方式一致（都由设置页自己负责）。
   // aliases 让设置区内的子页仍能高亮「设置」这一项（findItemByPath 走路径前缀/别名匹配）。
   { key: 'settings-entry', domain: 'settings', name: '设置', icon: 'ic_public_settings', path: 'settings/general', aliases: ['settings/apis', 'settings/prompts', 'settings/appearance', 'settings/assistant', 'settings/update', 'settings/player-profile'], desc: '通用 / API / Prompt / 用量 / 界面 / 助手 / 玩家档案 / 更新' }
 ]

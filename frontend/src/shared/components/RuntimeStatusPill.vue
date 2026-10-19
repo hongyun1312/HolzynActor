@@ -46,14 +46,14 @@
     <el-button
       v-if="primaryText"
       class="rsp-primary"
-      :type="status === 'paused' ? 'success' : 'default'"
+      :type="status === 'paused' || status === 'stopped' ? 'success' : 'default'"
       size="small"
       :loading="busy"
-      :title="status === 'paused' ? '让角色重新开始自主行动（开启持续运行）' : '停下世界时间：角色立即停止自主推进'"
+      :title="primaryTitle"
       @click="emit('primary')"
     >
-      <span aria-hidden="true">{{ status === 'paused' ? '▶' : '⏸' }}</span>
-      <span class="rsp-btn-label">{{ status === 'paused' ? primaryText : (pauseText || '暂停') }}</span>
+      <span aria-hidden="true">{{ status === 'paused' || status === 'stopped' ? '▶' : '⏸' }}</span>
+      <span class="rsp-btn-label">{{ status === 'paused' || status === 'stopped' ? primaryText : (pauseText || '暂停') }}</span>
     </el-button>
 
     <el-button
@@ -76,7 +76,7 @@
 import { computed } from 'vue'
 
 const props = defineProps({
-  /** running | paused | blocked | idle */
+  /** running | paused | stopped | blocked | idle */
   status: { type: String, default: 'running' },
   /** 状态文案覆盖（默认按 status 取词） */
   statusLabel: { type: String, default: '' },
@@ -84,7 +84,7 @@ const props = defineProps({
   timeText: { type: String, default: '' },
   /** 时间的完整口径说明（tooltip） */
   timeTooltip: { type: String, default: '' },
-  /** 已暂停时的主按钮文案（默认「开始推进」） */
+  /** 已暂停/已停止时的主按钮文案（默认「开始推进」；停止态父级应传「开启世界运行」） */
   primaryText: { type: String, default: '开始推进' },
   /** 运行中时的主按钮文案（默认「暂停」） */
   pauseText: { type: String, default: '暂停' },
@@ -95,12 +95,18 @@ const props = defineProps({
 })
 const emit = defineEmits(['primary', 'advance'])
 
-const DEFAULT_LABEL = { running: '运行中', paused: '已暂停', blocked: '未就绪', idle: '未开始' }
+const DEFAULT_LABEL = { running: '运行中', paused: '已暂停', stopped: '已停止', blocked: '未就绪', idle: '未开始' }
 const statusText = computed(() => props.statusLabel || DEFAULT_LABEL[props.status] || props.status)
 const badgeTitle = computed(() => {
   if (props.status === 'paused') return '世界时间已暂停：角色不会自主推进'
   if (props.status === 'running') return '世界正在推进：角色会按自己的日程行动'
+  if (props.status === 'stopped') return '世界运行已关闭：引擎完全不推进本项目'
   return statusText.value
+})
+const primaryTitle = computed(() => {
+  if (props.status === 'stopped') return '世界运行已关闭：点击开启世界运行（引擎恢复推进本项目）'
+  if (props.status === 'paused') return '让角色重新开始自主行动（恢复推进）'
+  return '停下世界时间：角色立即停止自主推进'
 })
 </script>
 
@@ -120,6 +126,8 @@ const badgeTitle = computed(() => {
 .is-running .rsp-dot { background: var(--state-success, #22c55e); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-success, #22c55e) 18%, transparent); }
 .is-paused .rsp-badge { color: var(--state-warn, #f59e0b); border-color: color-mix(in srgb, var(--state-warn, #f59e0b) 40%, transparent); }
 .is-paused .rsp-dot { background: var(--state-warn, #f59e0b); }
+.is-stopped .rsp-badge { color: var(--text-tertiary); border-color: var(--border-l1); }
+.is-stopped .rsp-dot { background: var(--text-tertiary); }
 .is-blocked .rsp-badge { color: var(--state-error, #ef4444); border-color: color-mix(in srgb, var(--state-error, #ef4444) 40%, transparent); }
 .is-blocked .rsp-dot { background: var(--state-error, #ef4444); }
 

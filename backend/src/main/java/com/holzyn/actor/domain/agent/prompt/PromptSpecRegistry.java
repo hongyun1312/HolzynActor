@@ -166,6 +166,12 @@ public class PromptSpecRegistry {
         register("persona_bootstrap_fill_a", 1, PromptContractType.SCHEMA_JSON, 1800, 0.4);
         register("persona_bootstrap_fill_b", 1, PromptContractType.SCHEMA_JSON, 1800, 0.5);
 
+        // 玩家 persona 六维 AI 补充生成（player_profile_gen，新用户引导「我的形象」页）：
+        // 输入=一段自我介绍，输出={identity,background,personality,voice,goals,ability} 六维 JSON
+        // （SCHEMA_JSON）。0.4 / 1200：形象生成是「从锚点发散补全」的创作任务——温度取中低温防跑偏、
+        // 输出上限 1200 足够六维各一句可感知细节（对齐 persona_bootstrap 各段 ≤1800 的收敛口径）。
+        register("player_profile_gen", 1, PromptContractType.SCHEMA_JSON, 1200, 0.4);
+
         // 角色卡生成（character_card_gen）： 起模板已从"旧角色卡 Schema"迁到"11 维 v2 档案契约"
         // 。
         // 输出上限 16384 对齐原调用点（用户可输入 2 万字详情，输出必须"只可多不可少"地完整承载）。
