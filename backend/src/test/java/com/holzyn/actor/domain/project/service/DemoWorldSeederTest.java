@@ -88,9 +88,9 @@ class DemoWorldSeederTest {
     void freshDatabase_injectsBundledWorld() {
         when(projectRepository.count()).thenReturn(0L);
         Map<String, Object> result = Map.of(
-                "name", "青禾村", "projectId", 1L, "characterCount", 12, "conversationCount", 9);
+                "name", "浮生小镇 · 青屿镇", "projectId", 1L, "characterCount", 12, "conversationCount", 9);
         when(importService.importPackage(any(byte[].class), isNull())).thenReturn(result);
-        // 成功态用测试 classpath 资源（真实打包资源 demo-world/qinghe-village.holzyn 由打包流程生成）
+        // 成功态用测试 classpath 资源（真实打包资源 demo-world/qingyu-town.holzyn 由打包流程生成）
         ReflectionTestUtils.setField(seeder, "resourcePath", "demo-world/test-sample.holzyn");
         seeder.run(null);
         verify(projectRepository).count();

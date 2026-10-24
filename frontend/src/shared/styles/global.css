@@ -684,3 +684,42 @@ body.holzyn-glass .el-popper .el-popper__arrow::before {
 .h-dialog .h-dialog-alert { margin-bottom: 16px; }
 .h-dialog .h-dialog-alert .el-alert__title { font-weight: 600; }
 .h-dialog .h-dialog-alert .el-alert__description { line-height: 1.7; }
+
+/* ===== 固定视口弹窗（.h-dialog-fit）=====
+   场景：内容很长的编辑弹窗（如设置页「编辑本地账户」，表单 1200px+）。
+   问题（实测）：只给 body 加 max-height 时，弹窗整体仍会长到 1368px，在 720 高的桌面窗口里被顶出屏幕，
+   标题和底部按钮都要靠滚动整个遮罩层才看得到，观感是「弹窗在动」而不是「内容在滚」。
+   做法：弹窗自身改成纵向 flex + 高度钳在视口内，头/脚 flex-shrink:0 常驻，只有正文 overflow-y:auto；
+   配合 <el-dialog align-center>（Element Plus 会给遮罩层加 display:flex，弹窗 margin:auto）实现垂直居中。
+   用法：<el-dialog align-center class="h-dialog-fit">
+   为什么必须非 scoped：`.el-dialog` 根节点由 ElDialog 渲染，宿主页面的 scoped 规则命中不稳定
+   （且将来若改 append-to-body，scoped 规则会整体失效）。 */
+.h-dialog-fit {
+  display: flex;
+  flex-direction: column;
+  /* 视口内上下各留 20px：1600×900 与基准 1280×720 下都不顶边、不出整窗滚动条 */
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+}
+.h-dialog-fit .el-dialog__header,
+.h-dialog-fit .el-dialog__footer { flex: 0 0 auto; }
+.h-dialog-fit .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 与 .shell-content 同因：正文滚动条出现/消失不再改变正文宽度（避免弹窗内左右抖动） */
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+.h-dialog-fit .el-dialog__body::-webkit-scrollbar { width: 8px; }
+.h-dialog-fit .el-dialog__body::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, #cdd5e2);
+  border-radius: 4px;
+}
+/* 底部按钮区与正文之间加分隔线，滚动时视觉上明确「正文到此为止」 */
+.h-dialog-fit .el-dialog__footer {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-l1, rgba(15, 17, 21, 0.1));
+}

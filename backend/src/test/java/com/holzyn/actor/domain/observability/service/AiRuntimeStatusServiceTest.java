@@ -84,8 +84,9 @@ class AiRuntimeStatusServiceTest {
         assertEquals(135L, vo.tokenOut());
         assertEquals(480L, vo.tokenTotal());
         assertEquals(4L, vo.cacheHit());
-        assertEquals(6L, vo.cacheMiss());
-        assertEquals(0.4d, vo.cacheHitRate(), 1e-9);
+        // row4（tokenIn=30, hit=1, miss=0）= 网关省略 miss 的自愈样本 → miss 推算 29
+        assertEquals(35L, vo.cacheMiss(), "row4 省略 miss 按 prompt=hit+miss 推算 29，合计 1+4+1+29+0");
+        assertEquals(4.0 / 39.0, vo.cacheHitRate(), 1e-9);
         assertEquals(400L, vo.avgDurationMs(), "平均 (100+200+900+300+500)/5");
         assertEquals(900L, vo.maxDurationMs());
         assertEquals(900L, vo.p95DurationMs(), "5 样本 → ceil(4.75)-1=4 → 排序第 5 个（最大）= 900");

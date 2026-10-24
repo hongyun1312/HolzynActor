@@ -94,7 +94,7 @@
             style="width: 260px"
             @change="onCloudTrainResolution"
           />
-          <span class="set-hint">{{ Math.round(cloudTrainResolution * 100) }}%（调低可降低 GPU 负担）</span>
+          <span class="set-hint">{{ Math.round(cloudTrainResolution * 100) }}%（调低可降低 GPU 负担；GPU 吃力时渲染器还会自动降低噪点细节）</span>
         </el-form-item>
       </el-form>
     </div>
@@ -225,13 +225,17 @@
       <el-button type="danger" plain @click="doDeleteProject"><el-icon><HIcon name="Delete" /></el-icon>&nbsp;删除项目</el-button>
     </div>
 
-    <!-- 本地账户填写弹窗（独立弹窗，避免内嵌表单挤占设置页版式；字段与首次引导「我的形象」页一致） -->
+    <!-- 本地账户填写弹窗（独立弹窗，避免内嵌表单挤占设置页版式；字段与首次引导「我的形象」页一致）
+         固定视口形态（.h-dialog-fit + align-center）：表单很长，之前弹窗整体长到 1368px（720 高窗口里被顶出屏幕，
+         标题与底部按钮都要靠滚动整窗才能看到）。现在弹窗高度钳在视口内、垂直居中，
+         头（标题/关闭）与脚（取消）常驻，只有正文在弹窗内部上下滚动。 -->
     <el-dialog
       v-model="accountDialog"
       title="编辑本地账户"
       width="720px"
+      align-center
       :close-on-click-modal="false"
-      class="account-editor-dialog"
+      class="h-dialog-fit account-editor-dialog"
       destroy-on-close
     >
       <div class="ac-dialog-desc">与首次引导「我的形象」页填写一致：基本信息 + NPC 眼中的你 + 玩家 persona 六维 + AI 补充生成。保存后即时生效。</div>
@@ -352,7 +356,7 @@ function onResetProjectOverride() {
 
 // ===== 云间列车液态玻璃背景（全站偏好：是否渲染 + 渲染分辨率） =====
 const cloudTrainEnabled = ref(theme.value.cloudTrain?.enabled !== false)
-const cloudTrainResolution = ref(theme.value.cloudTrain?.resolution ?? 0.75)
+const cloudTrainResolution = ref(theme.value.cloudTrain?.resolution ?? 0.25)
 
 /** 开关云间列车背景（关闭后玻璃材质保留、背景为纯色） */
 function onCloudTrainToggle() {

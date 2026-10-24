@@ -172,8 +172,15 @@ public class AiRuntimeStatusService {
             int dur = nz(r.durationMs());
             tokenIn += tin;
             tokenOut += tout;
-            cacheHit += nz(r.cacheHit());
-            cacheMiss += nz(r.cacheMiss());
+            int hit = nz(r.cacheHit());
+            int miss = nz(r.cacheMiss());
+            // 兼容网关只回传命中不回传未命中（miss 缺失记 0）时按「prompt = hit + miss」推算，
+            // 避免命中率恒为 100%（与 UsageService.effectiveMiss 同口径）
+            if (miss == 0 && hit > 0 && tin > hit) {
+                miss = tin - hit;
+            }
+            cacheHit += hit;
+            cacheMiss += miss;
             durationSum += dur;
             maxDuration = Math.max(maxDuration, dur);
             durations.add((long) dur);

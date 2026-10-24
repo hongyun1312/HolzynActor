@@ -5,7 +5,7 @@
  * 提取内容：CLOUD_TRAIN_DEFAULTS / 着色器源码 / startCloudTrain 渲染器（与参考网页逻辑一致，无控制面板）。
  */
 'use strict';
-const CLOUD_TRAIN_DEFAULTS = {speed:.4,resolution:.75,feedback:.3,vignette:1,zoom:.8,offset:0,amplitude:.6,detail:8,exposure:1,saturation:1,hue:0,temperature:0,skyTint:"#94b3ff",smokeTint:"#ffffff",trainTint:"#7a3033",introEnabled:true,introDuration:1.2,introFeather:.15,paused:false};
+const CLOUD_TRAIN_DEFAULTS = {speed:.4,resolution:.25,feedback:.3,vignette:1,zoom:.8,offset:0,amplitude:.6,detail:8,exposure:1,saturation:1,hue:0,temperature:0,skyTint:"#94b3ff",smokeTint:"#ffffff",trainTint:"#7a3033",introEnabled:true,introDuration:1.2,introFeather:.15,paused:false};
 const CLOUD_TRAIN_CONTROLS = [
 ["introDuration","开场时长（秒）",.5,10,.1],
 ["introFeather","开场羽化宽度",.02,.6,.01],
@@ -154,7 +154,16 @@ function startCloudTrain(canvas, state, wakeRef, hooks) {
       fbos.push(gl.createFramebuffer());
     }
     const media = matchMedia('(prefers-reduced-motion: reduce)');
-    function request() { if (!dead && !raf && !document.hidden) raf = requestAnimationFrame(draw); }
+    // 自适应画质：GPU 吃力时自动降低噪声细节，空闲后自动回升；窗口隐藏/失焦时完全停绘。
+    // （不做帧率上限——动画保持全速渲染；只在 GPU 扛不住时降噪点细节来换流畅度）
+    const DROP_FRAME_MS = 42, RESTORE_FRAME_MS = 24, MIN_DETAIL = 4, MAX_PIXELS = 1500000;
+    let currentDetail = Math.round(state.current.detail);
+    let emaMs = 0, stable = 0;
+    function request() {
+      // 窗口隐藏（最小化/切后台标签）或失焦（被其他窗口遮挡、切到别的程序）→ 不再调度 → GPU 占用归零
+      if (dead || raf || document.hidden || !document.hasFocus()) return;
+      raf = requestAnimationFrame(draw);
+    }
     const uniformCache = new Map();
     function scalar(location, value) {
       if (location && uniformCache.get(location) !== value) { gl.uniform1f(location, value); uniformCache.set(location, value); }
@@ -168,8 +177,15 @@ function startCloudTrain(canvas, state, wakeRef, hooks) {
     const maxViewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
     function updatePixelSize() {
       const d = Math.min(devicePixelRatio || 1, 1.5) * scale;
-      pixelWidth = Math.max(1, Math.min(maxViewport[0], Math.round(cssWidth * d)));
-      pixelHeight = Math.max(1, Math.min(maxViewport[1], Math.round(cssHeight * d)));
+      let pw = Math.max(1, Math.min(maxViewport[0], Math.round(cssWidth * d)));
+      let ph = Math.max(1, Math.min(maxViewport[1], Math.round(cssHeight * d)));
+      // 像素预算上限（≈150 万像素 ≈ 1080p）：高分屏把分辨率拉满也不会无限翻倍，保护显存带宽
+      if (pw * ph > MAX_PIXELS) {
+        const k = Math.sqrt(MAX_PIXELS / (pw * ph));
+        pw = Math.max(1, Math.round(pw * k));
+        ph = Math.max(1, Math.round(ph * k));
+      }
+      pixelWidth = pw; pixelHeight = ph;
     }
     updatePixelSize();
     // 每张纹理独占一个纹理单元；缩放上传与渲染共享此缓存
@@ -186,10 +202,20 @@ function startCloudTrain(canvas, state, wakeRef, hooks) {
     gl.useProgram(post); gl.uniform1i(b.scene, 2);
     function draw(now) {
       raf = 0; const s = state.current;
+      const sinceDraw = now - (last || now);
+      // 自适应细节：以真实帧间隔（含 GPU 耗时）判断负荷，持续吃力就降一档，空闲就回升
+      if (last) {
+        emaMs = emaMs === 0 ? sinceDraw : emaMs * 0.85 + sinceDraw * 0.15;
+        if (emaMs > DROP_FRAME_MS) stable = Math.max(-8, stable - 1);
+        else if (emaMs <= RESTORE_FRAME_MS) stable = Math.min(16, stable + 1);
+        else stable = 0;
+        if (stable <= -3 && currentDetail > MIN_DETAIL) { currentDetail--; stable = 0; }
+        else if (stable >= 10 && currentDetail < Math.round(s.detail)) { currentDetail++; stable = 0; }
+      }
       if (!s.introEnabled || media.matches) introProgress = 1;
-      else if (!s.paused) introProgress = Math.min(1, introProgress + Math.min((now - (last || now)) / 1000, .05) / s.introDuration);
+      else if (!s.paused) introProgress = Math.min(1, introProgress + Math.min(sinceDraw / 1000, .05) / s.introDuration);
       if (introProgress >= 1 && hooks.onIntroDone) { const cb = hooks.onIntroDone; hooks.onIntroDone = null; cb(); }
-      if (!s.paused && !media.matches) time += Math.min((now - (last || now)) / 1000, .05) * s.speed;
+      if (!s.paused && !media.matches) time += Math.min(sinceDraw / 1000, .05) * s.speed;
       last = now;
       const nw = pixelWidth, nh = pixelHeight;
       if (w !== nw || h !== nh) {
@@ -209,7 +235,7 @@ function startCloudTrain(canvas, state, wakeRef, hooks) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[write] ?? null); gl.useProgram(scene);
       gl.uniform1i(a.iChannel1, read + 1);
       for (const key of tintKeys) tint(a[key], s[key]);
-      scalar(a.zoom, s.zoom); scalar(a.offset, s.offset); scalar(a.amplitude, s.amplitude); scalar(a.uDetail, s.detail);
+      scalar(a.zoom, s.zoom); scalar(a.offset, s.offset); scalar(a.amplitude, s.amplitude); scalar(a.uDetail, currentDetail); // 自适应细节
       scalar(a.intro, introProgress); scalar(a.introFeather, s.introFeather); scalar(a.iTime, time);
       scalar(a.uFeedback, history && introProgress >= 1 ? s.feedback : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -225,6 +251,8 @@ function startCloudTrain(canvas, state, wakeRef, hooks) {
     const reset = () => {
       cancelAnimationFrame(raf); raf = 0; last = 0; history = false;
       if (scale !== state.current.resolution) { scale = state.current.resolution; updatePixelSize(); }
+      // 用户通过 overrides 调整 detail 时，把自适应值钳回其区间
+      currentDetail = Math.max(MIN_DETAIL, Math.min(currentDetail, Math.round(state.current.detail)));
       request();
     };
     wakeRef.current = reset;
@@ -244,12 +272,17 @@ function startCloudTrain(canvas, state, wakeRef, hooks) {
     resize.observe(el);
     document.addEventListener('visibilitychange', reset);
     media.addEventListener('change', reset);
+    // 窗口失焦（被遮挡 / 切到别的程序）→ 停绘归零 GPU；重新聚焦 → 恢复
+    window.addEventListener('focus', reset);
+    window.addEventListener('blur', reset);
     request();
     return () => {
       resize.disconnect();
       if (dprQuery) dprQuery.removeEventListener('change', dprChanged);
       document.removeEventListener('visibilitychange', reset);
       media.removeEventListener('change', reset);
+      window.removeEventListener('focus', reset);
+      window.removeEventListener('blur', reset);
       wakeRef.current = () => {};
       clean();
     };

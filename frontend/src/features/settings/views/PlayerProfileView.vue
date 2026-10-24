@@ -26,7 +26,7 @@
       <div class="set-card-desc">
         每角色的「与我的关系」设定（过往/身份关系/他对你的态度）与好感/信任/阶段基线按角色配置，
         需在<b>项目内</b>编辑（进入任意项目 → 对谈 → 玩家档案）。已有
-        <b>{{ Object.keys(relationSettings).length }}</b> 个角色的设定将按现状注入对谈上下文。
+        <b>{{ relationRefCount }}</b> 个角色的设定将按现状注入对谈上下文。
       </div>
     </div>
 
@@ -175,6 +175,14 @@ const form = reactive({ name: '', persona: { identity: '', background: '', perso
 const relSettingsMap = reactive({})
 /** 每角色关系行（Map：characterRef → {affinity, trust, stage, note, stateSummary}） */
 const relRowsMap = reactive({})
+
+/**
+ * 已有关系设定的角色数（全局提示「已有 N 个角色的设定」用）。
+ * 2026-10-23 修复：模板此前直接引用未定义的 `relationSettings`，渲染时 `Object.keys(undefined)`
+ * 抛 `TypeError: Cannot convert undefined or null to object`，导致整个设置页内容区渲染中断
+ * （只剩二层标签栏、没有 .settings-stack）——数据源本就是 relSettingsMap，改用它派生计数。
+ */
+const relationRefCount = computed(() => Object.keys(relSettingsMap).length)
 
 /** 兜底初始化某角色的设定/行对象（保证 v-model 不炸） */
 function ensureRel(c) {

@@ -1,6 +1,6 @@
 {
   "name": "holzyn-actor-frontend",
-  "version": "1.1.0-beta.2",
+  "version": "1.1.1-beta.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
     "highlight.js": "^11.12.0",
     "markdown-it": "^15.0.0",
     "pinia": "^4.0.2",
+    "pixi.js": "^8.22.0",
     "vue": "^3.5.41",
     "vue-router": "^5.2.0"
   },

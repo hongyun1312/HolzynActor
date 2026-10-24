@@ -88,3 +88,6 @@ packaging/runtime/
 
 # ---- 本地恢复临时目录（不入库）----
 .restore_tmp/
+
+# 2026-10-21 mapgen runtime artifacts (terrain/composite PNG per map id, regenerable, not in repo)
+data/worldmap/

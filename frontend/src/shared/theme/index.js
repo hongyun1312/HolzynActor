@@ -82,7 +82,7 @@ function defaults() {
     // 云间列车液态玻璃背景偏好（全站常驻背景）
     cloudTrain: {
       enabled: true,         // 是否渲染云间列车动态背景（关闭后为纯色背景，玻璃材质保留）
-      resolution: 0.75       // 渲染分辨率（0.25~1，调低更省性能）
+      resolution: 0.25       // 渲染分辨率（0.25~1；默认取最低档，对新用户/低端 GPU 更友好，可在设置页调高）
     }
   }
 }
@@ -166,7 +166,7 @@ export function useTheme() {
   /** 设置云间列车渲染分辨率（0.25~1；调低更省性能） */
   function setCloudTrainResolution(v) {
     const n = Number(v)
-    theme.value.cloudTrain = { ...(theme.value.cloudTrain || {}), resolution: Number.isFinite(n) ? Math.min(1, Math.max(0.25, n)) : 0.75 }
+    theme.value.cloudTrain = { ...(theme.value.cloudTrain || {}), resolution: Number.isFinite(n) ? Math.min(1, Math.max(0.25, n)) : 0.25 }
   }
 
   /** 进入项目：记录项目 id 与题材（触发题材联动） */

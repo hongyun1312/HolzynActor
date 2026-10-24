@@ -34,9 +34,9 @@ import java.util.Map;
 /**
  * 示例世界自动注入器（首次建库开箱即用）。
  * <p>职责：应用启动后，若项目表为空（全新数据库）且开关开启，则把内置示例世界
- * （classpath:{@code demo-world/qinghe-village.holzyn}，青禾村成品 .holzyn 包）经既有
+ * （classpath:{@code demo-world/qingyu-town.holzyn}，浮生小镇·青屿镇成品 .holzyn 包）经既有
  * {@link HolzynImportService#importPackage} 注入数据库——用户首次运行即看到一个
- * 有角色、有地图、有记忆的活村庄，无需手动配置模型造世界。</p>
+ * 有角色、有真实感世界地图、有记忆的活小镇，无需手动配置模型造世界。</p>
  * <p><b>幂等</b>：项目表非空 → 跳过（数据库非首次建库）；导入服务自身另按 projectUid 防重。
  * 用户删掉示例世界后再次空库启动会重新注入（「回到初始示例」语义）。</p>
  * <p><b>失败语义</b>：任何失败仅 WARN 不阻断启动（用户可稍后手动导入同名 .holzyn 包）。</p>
@@ -51,7 +51,7 @@ import java.util.Map;
 public class DemoWorldSeeder implements ApplicationRunner {
 
     /** 内置示例世界默认资源路径（classpath） */
-    public static final String DEFAULT_RESOURCE = "demo-world/qinghe-village.holzyn";
+    public static final String DEFAULT_RESOURCE = "demo-world/qingyu-town.holzyn";
 
     private final HolzynImportService importService;
     private final ActorProjectRepository projectRepository;

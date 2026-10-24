@@ -1,7 +1,7 @@
 @echo off
 rem ============================================================
 rem  HolzynActor full build: frontend -> static -> backend jar
-rem  Run from repo root. Produces backend\target\holzyn-actor-1.1.0-beta.2.jar
+rem  Run from repo root. Produces backend\target\holzyn-actor-1.1.1-beta.1.jar
 rem  (run it with run.bat, or java -jar directly)
 rem
 rem  Requires: JDK 21 + Maven + Node.js (npm)
@@ -67,7 +67,7 @@ echo [build] mvn clean package ...
 if errorlevel 1 goto :fail
 
 echo.
-echo [build] OK: backend\target\holzyn-actor-1.1.0-beta.2.jar
+echo [build] OK: backend\target\holzyn-actor-1.1.1-beta.1.jar
 echo [build] Tip: run it with run.bat (auto-builds the jar if missing).
 pause
 exit /b 0

@@ -509,11 +509,12 @@ holzyn:
       # LLM-as-Judge：独立云端模型（与生成模型不同家族，规避 self-preference 偏见）
       judge:
         base-url: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_BASE_URL:https://ark.cn-beijing.volces.com/api/coding/v3}
-        # ⚠️ key 含在配置中为开发便利；judge 是离线批跑（长跑热路径不调用），换 key 不影响世界推进
+        # ⚠️ 不内置默认 key：请通过环境变量 HOLOZYN_ACTOR_EVALUATION_JUDGE_API_KEY 提供；
+        # judge 仅离线批跑（长跑热路径不调用），未配置时评测接口不可用、不影响世界推进
         api-key: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_API_KEY:}
         model: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_MODEL:deepseek-v4-flash}
         provider-label: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_PROVIDER_LABEL:ark-coding-v3}
-        # 超时（秒，与 AI 层同口径；随 AI 层调大——自托管网关重活生成可达 200s+）
+        # 超时（秒，与 AI 层同口径；2026-10-02 随 AI 层调大——同一自托管网关重活生成可达 200s+）
         timeout-read-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_READ_SECONDS:300}
         timeout-connect-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_CONNECT_SECONDS:30}
         timeout-request-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_REQUEST_SECONDS:320}
@@ -693,11 +694,11 @@ holzyn:
     # ---- 示例世界（首次建库自动注入，开箱即用）----
     demo-world:
       # 自动注入开关（默认开）：应用启动时若项目表为空（全新数据库），把内置示例世界
-      # （classpath:demo-world/qinghe-village.holzyn，青禾村成品 .holzyn 包）经既有导入服务
+      # （classpath:demo-world/qingyu-town.holzyn，浮生小镇·青屿镇成品 .holzyn 包）经既有导入服务
       # 注入数据库。项目表非空=非首次建库，跳过（幂等）；关闭后用户需手动导入或自行造世界。
       seed-enabled: ${HOLOZYN_ACTOR_DEMO_WORLD_SEED_ENABLED:true}
       # 内置示例世界资源路径（classpath，可覆盖）
-      resource: ${HOLOZYN_ACTOR_DEMO_WORLD_RESOURCE:demo-world/qinghe-village.holzyn}
+      resource: ${HOLOZYN_ACTOR_DEMO_WORLD_RESOURCE:demo-world/qingyu-town.holzyn}
     # ---- 位置移动与地图生成系统（世界地图生成 / 住所 / 连续移动 / 途中交互）----
     world-map:
       # 地图生成/查询总开关（false=生成走机制兜底、查询照常；零 AI）
@@ -722,6 +723,34 @@ holzyn:
       home-min-distance: ${HOLOZYN_ACTOR_WORLD_MAP_HOME_MIN_DISTANCE:12}
       # 区域重叠最小间距余量（格=米）
       region-gap: ${HOLOZYN_ACTOR_WORLD_MAP_REGION_GAP:4}
+    # ---- 世界地图生成管线 V1.1（S0 档案 → S1 地形 → S2 资产 → S3 路网 → S4 落位 → S5 合成）----
+    # 与上面的 world-map（旧 domain/worldmap 生成段）并存：新管线稳定后再摘掉旧段。
+    # 尺度只有一个来源（size × meters-per-cell）：算法层不许再出现 1024 这类魔法数字，
+    # 改尺度只改这里；库里存的是「米」，所以改尺度不需要迁移数据。
+    mapgen:
+      # 管线总开关（false=拒绝生成，查询照常）
+      enabled: ${HOLOZYN_ACTOR_MAPGEN_ENABLED:true}
+      # AI 开关（false=S0/S2/S3 全走确定性兜底：内置海岛档案 + 内置资产库 + 程序化拓扑，
+      # 管线仍能出图——离线/单测/AI 挂掉都不至于白屏）
+      ai-enabled: ${HOLOZYN_ACTOR_MAPGEN_AI_ENABLED:true}
+      # 管线版本（落库到 actor_world_map.version，便于识别旧数据）
+      pipeline-version: ${HOLOZYN_ACTOR_MAPGEN_PIPELINE_VERSION:4}
+      # 地图边长（格）与每格米数（1 格 = 1 米；坐标一律按米存库）
+      size: ${HOLOZYN_ACTOR_MAPGEN_SIZE:1024}
+      meters-per-cell: ${HOLOZYN_ACTOR_MAPGEN_METERS_PER_CELL:1.0}
+      # 产物根目录（空=数据目录下 worldmap/）
+      output-dir: ${HOLOZYN_ACTOR_MAPGEN_OUTPUT_DIR:}
+      # 单次生成的 AI 重试次数（不含首次；失败仍会回落确定性兜底，不无限重试）
+      ai-retries: ${HOLOZYN_ACTOR_MAPGEN_AI_RETRIES:1}
+      # AI 温度（S0/S2）与 S3 拓扑温度（结构化输出，低一点更稳）
+      temperature: ${HOLOZYN_ACTOR_MAPGEN_TEMPERATURE:0.5}
+      road-temperature: ${HOLOZYN_ACTOR_MAPGEN_ROAD_TEMPERATURE:0.4}
+      # 各阶段输出上限（tokens）
+      profile-max-tokens: ${HOLOZYN_ACTOR_MAPGEN_PROFILE_MAX_TOKENS:2048}
+      asset-max-tokens: ${HOLOZYN_ACTOR_MAPGEN_ASSET_MAX_TOKENS:8192}
+      road-max-tokens: ${HOLOZYN_ACTOR_MAPGEN_ROAD_MAX_TOKENS:4096}
+      # 单次生成的超时上限（毫秒）
+      run-timeout-ms: ${HOLOZYN_ACTOR_MAPGEN_RUN_TIMEOUT_MS:600000}
     # ---- 学习系统（动态关系 / 反思）----
     learning:
       # 动态关系/好感（互动实时增减好感/信任并发布 relation 事件；启发式为主 + 可选 AI 精修）

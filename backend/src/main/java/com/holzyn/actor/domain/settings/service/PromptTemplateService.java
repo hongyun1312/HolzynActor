@@ -354,6 +354,35 @@ public class PromptTemplateService implements ApplicationRunner {
     public static final String CODE_WORLD_MAP_GENERATE = "world_map_generate";
 
     /**
+     * 世界地图 · S0 世界档案（world_map_profile）：把世界观地理设定翻成一组「可解释的地理量」
+     * （岛多狭长、山脊朝哪、平原多大、河几条…），<b>不含任何坐标</b>；地形栅格由算法确定性推导。
+     * SCHEMA_JSON；scene=world_map_profile；温度 0.5 / 上限 2048。
+     */
+    public static final String CODE_WORLD_MAP_PROFILE = "world_map_profile";
+
+    /**
+     * 世界地图 · S2 建筑资产（world_map_assets）：依据世界观与禁忌清单产出「这一带该有什么房子」
+     * 的类型库（尺寸/层数/墙色/屋顶形制/权重），<b>不含坐标</b>；落位由 S4 按语义求。
+     * SCHEMA_JSON；scene=world_map_assets；温度 0.5 / 上限 8192。
+     */
+    public static final String CODE_WORLD_MAP_ASSETS = "world_map_assets";
+
+    /**
+     * 世界地图 · S3 路网拓扑（world_map_roads）：只给「谁连谁 + 路性格」（主干/巷道/桥），
+     * 坐标由最小代价 A* 在真实地形上求；<b>不含坐标</b>。
+     * SCHEMA_JSON；scene=world_map_roads；温度 0.4 / 上限 4096。
+     */
+    public static final String CODE_WORLD_MAP_ROADS = "world_map_roads";
+
+    /**
+     * 世界地图 · S0b 世界→地图契约（world_map_brief）：把世界观/地点/住所翻成
+     * 「区域方位 + 公共设施清单 + 聚落约束」；<b>只给语义与方位，绝不给坐标</b>。
+     * 人口（户数/户均）由程序从住所表推导，不交给 AI。
+     * SCHEMA_JSON；scene=world_map_brief；温度 0.5 / 上限 2048。
+     */
+    public static final String CODE_WORLD_MAP_BRIEF = "world_map_brief";
+
+    /**
      * 途中轻量交互（move_encounter）：移动者途中迎面遇到他角色时，AI 决定是否停下搭话
      * （SCHEMA_JSON：{greet:"一句话", stop:bool}；scene=move_encounter；温度 0.5 / 上限 200；
      * 位置移动与地图生成系统 M3 §4.6）
@@ -526,6 +555,10 @@ public class PromptTemplateService implements ApplicationRunner {
             Map.entry(CODE_WORLDGEN_STORY_PLAN, "worldgen"),
             Map.entry(CODE_WORLDGEN_STYLE_PROFILE, "worldgen"),
             Map.entry(CODE_WORLD_MAP_GENERATE, "worldgen"),
+            Map.entry(CODE_WORLD_MAP_PROFILE, "worldgen"),
+            Map.entry(CODE_WORLD_MAP_BRIEF, "worldgen"),
+            Map.entry(CODE_WORLD_MAP_ASSETS, "worldgen"),
+            Map.entry(CODE_WORLD_MAP_ROADS, "worldgen"),
             Map.entry(CODE_SCENE_GENERATE, "worldgen"),
             // 世界事件与演化
             Map.entry(CODE_WORLD_EVENT, "world"),
@@ -3588,6 +3621,264 @@ public class PromptTemplateService implements ApplicationRunner {
                 铁律：坐标必须合法；同居共宅；每角色恰一住所成员。
                 DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON.（不要用 Markdown 代码块包裹）
                 """, "你是精通聚落营造的村镇规划师：只输出严格 JSON 对象，不输出任何其他文字。DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON."));
+
+        // ==================== 轨道：世界地图生成管线 V1.1 ====================
+        // S0 世界档案（world_map_profile）：世界观地理设定 → 一组「可解释的地理量」。
+        // 关键设计（用户决策 #2/#27）：AI 只描述地理性格，**绝不输出坐标**——坐标由
+        // TerrainGenerator 确定性推导，同一个 seed 永远得到同一张岛。这样 AI 写错数字
+        // 也只会让岛「风格不同」，不会让地图「结构崩坏」（这是上一版 AI 直接画图失败的根因）。
+        map.put(CODE_WORLD_MAP_PROFILE, new BuiltinDef("世界地图 · 世界档案（地理参数）",
+                """
+                你是地理学家兼世界构建师。请阅读下面的世界观与地理设定，把这片土地的<b>地理性格</b>
+                翻译成一组参数，供程序据此生成真实地形（高度场、水系、海岸、生物群系）。
+
+                —— 世界观 ——
+                {{world_setting}}
+
+                —— 已设定的地点（地名与位置描述，若与地貌冲突以地貌为先） ——
+                {{locations}}
+
+                —— 题材提示 ——
+                {{genre_hint}}
+
+                —— 地图尺度 ——
+                地图边长 {{size_meters}} 米，1 格 = 1 米。请按「步行可达的小镇/村落」来考虑尺度：
+                一个镇子的核心区通常 300~600 米见方，走完一条街只要几分钟。
+
+                —— 参数含义与合法范围（越界会被夹到边界，但请尽量准确） ——
+                genreProfile: island（海岛）/ river_valley_village（河谷村）/ coastal_town（海滨镇）/
+                              mountain_hamlet（山村）/ plain_city（平原城）
+                reliefHeight: 0.12~0.62  陆地相对海平面的最大抬升（归一化）。海岛小镇 0.22~0.34；
+                              山地 0.45~0.60。这个值直接决定「有多平坦」。
+                elevationMeters: 30~900 最高点真实海拔（米）。海岛上 60~150 米就够；雪山才需要 600+。
+                islandRadiusRatio: 0.18~1.05 陆地半径 / 地图半径。0.34 → 岛直径约地图的 68%。
+                elongation: 0.7~2.0 狭长度（>1 沿主轴拉长）。
+                rotationDeg: 0~360 主轴旋转角。
+                coastRoughness: 0~1 海岸破碎度（0 浑圆，1 犬牙交错）。治愈系海岛 0.4~0.65。
+                bays: 0~5 海湾/岬角数量。
+                coastShelf: 10~120 近岸浅海棚架宽度（格=米）。越大越像「浅滩缓坡入海」。
+                reliefStrength: 0.2~1.4 起伏强度（山多不多）。
+                peakCount: 0~5 山峰数量。
+                peakHeight: 0.05~0.55 山峰高度。
+                ridgeBearingDeg: 0~360 山脊走向（度，0=南北向）。
+                plainFraction: 0~0.9 平原占比——<b>这是「适合活动的地方有多少」的总开关</b>。
+                              田园小镇请给 0.5~0.75；山地给 0.15~0.3。
+                plainRadius: 0.10~0.60 平原半径（相对地图边长）。
+                plainCenterX / plainCenterZ: 0~1 平原中心（归一化）。聚落通常就在平原上。
+                settlementRadius: 0.08~0.6 聚落影响半径（决定农田/伐木痕迹的范围）。
+                riverCount: 0~4 期望河流条数。
+                lakeCount: 0~3 湖泊数量。
+                temperature: 0~1（0 寒 1 热）。moisture: 0~1（0 干 1 湿）。
+                forestBias: 0.3~1.4 森林倾向（>1 更密）。
+                beachWidth: 1~12 沙滩宽度（米）。
+                erosionStrength: 0~0.5 水力侵蚀强度（越大河谷越深、地形越细碎）。
+                landmarks: 地貌级地标（灯塔、岬角、老树、渡口、泉眼…），只给「在地貌的什么位置」，
+                           <b>不要给坐标</b>；sit 用空间语义描述（岬角最东端的高处 / 河口西岸 / 山脊南坡）。
+                forbidden: 这个世界观里<b>不该出现</b>的建筑类型（禁忌清单），供后续过滤用。
+                allowedCategories: 允许的建筑大类，从 民居/商铺/工坊/公共/生产/水工/军事/宗教 中选。
+
+                —— 判定原则 ——
+                1. 忠于世界观：设定里写「低矮石屋」就不要给高楼；写「多雾多风」就让湿度和海岸破碎度偏高。
+                2. 宜居优先：这是一个有人长期生活的地方，必须留出足够平地——不要把整座岛做成山地。
+                   只有世界观明确写「高山/雪岭/险峻」时才允许 elevationMeters ≥ 600 与高峰。
+                3. 水系合理：有河就必有谷；岛上的河都不长（1~3 公里），riverCount 别超过 3。
+                4. 缺口自己补：设定没写的地理细节（海湾数量、林密度…）由你按题材补全，但要自洽。
+
+                输出严格 JSON 对象（键名严格照抄，禁止输出任何其他文字）：
+                {
+                  "mapName": "地图名（如 青屿镇）",
+                  "genreProfile": "island",
+                  "climate": "气候的一句话描述",
+                  "narrative": "整体地貌的 2~3 句叙述（给策划看，不进渲染）",
+                  "reliefHeight": 0.30, "elevationMeters": 110,
+                  "islandRadiusRatio": 0.36, "elongation": 1.14, "rotationDeg": 18,
+                  "coastRoughness": 0.58, "bays": 3, "coastShelf": 52,
+                  "reliefStrength": 0.58, "peakCount": 2, "peakHeight": 0.30, "ridgeBearingDeg": 148,
+                  "plainFraction": 0.55, "plainRadius": 0.34,
+                  "plainCenterX": 0.52, "plainCenterZ": 0.62,
+                  "settlementRadius": 0.34,
+                  "riverCount": 2, "lakeCount": 1,
+                  "temperature": 0.68, "moisture": 0.60, "forestBias": 0.85, "beachWidth": 3,
+                  "erosionStrength": 0.18,
+                  "landmarks": [
+                    { "name": "老灯塔", "kind": "lighthouse", "sit": "岬角最东端的高处",
+                      "note": "青屿镇的精神性地标，灯长年不灭" }
+                  ],
+                  "forbidden": ["现代设施", "武器铺", "监牢", "赌坊"],
+                  "allowedCategories": ["民居", "商铺", "工坊", "公共", "生产", "水工"]
+                }
+                铁律：不输出任何坐标；数值必须在合法范围内；landmarks 的 sit 必须是空间语义。
+                DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON.（不要用 Markdown 代码块包裹）
+                """, "你是地理学家：只输出严格 JSON 对象，不输出任何其他文字。DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON."));
+
+        // S0b 世界→地图契约（world_map_brief）：区域方位 + 设施清单 + 聚落约束。
+        // 用户决策：AI 给布局，程序只做约束修正；人口由住所表推导，AI 不许猜数量。
+        map.put(CODE_WORLD_MAP_BRIEF, new BuiltinDef("世界地图 · 世界→地图契约（区域与设施）",
+                """
+                你是聚落规划师。下面是一个世界观、它已经设定好的地点、以及已经存在的住所清单。
+                请把它们翻译成「地图生成用的契约」：这块地分成哪几个区域、各在什么方位、
+                有哪些**人造设施**必须出现在地图上、聚落该有多大。
+
+                —— 世界观 ——
+                {{world_setting}}
+
+                —— 已设定的地点（地名 + 类型 + 简介；这是地图必须对上的东西） ——
+                {{locations}}
+
+                —— 已有的住所（户数是硬事实，不要增删） ——
+                {{homes}}
+
+                —— 判定原则 ——
+                1. 只描述「方位、区域、设施、尺度」，**绝对不要给任何坐标**。坐标由程序在地形上求。
+                2. 区域按地貌与功能区划分（丘陵/林地/滩涂/海湾/岬角/聚落/溪流/山脊/农田…），
+                   方位角 0=正北、顺时针，必须覆盖岛的各个方向，不要全挤在一个方向。
+                3. 设施只从「人造场所」里出：灯塔、渡口/码头、市集/广场、议事堂、学堂、药铺、
+                   铁匠铺、杂货铺、茶馆、仓廪、磨坊、水井、船屋、晒场、祠庙（若世界观允许）…
+                   自然地名（山、河、海、大陆、岛屿本身）**不要**生成建筑。
+                4. 每个地点最多对应一个设施；anchorLocation 必须照抄地点清单里的原名，写不出原名就留空。
+                5. 规模感：住所清单里只有十几户，就是一个「小村落/小岛镇」，设施总量应等于
+                   「人造地点数 + 3~6 个必要公共设施」，不要凭空发明几十个设施。
+                6. 尺寸用真实米制：民居开间 6~12 米、铺面 5~10 米、灯塔基座 5~8 米、
+                   渡口平台 8~16 米、广场单边 15~30 米。层数 1~2 层为主（灯塔可 2~3 层）。
+                7. 若世界观没写某个区域，按题材补全，但要与已有地点自洽。
+
+                输出严格 JSON 对象（键名严格照抄，禁止输出任何其他文字）：
+                {
+                  "terrainFamily": "ISLAND",
+                  "regions": [
+                    { "code": "hills_north", "name": "北面丘陵", "kind": "HILLS",
+                      "bearingDeg": 350, "radialFrom": 0.15, "radialTo": 0.85,
+                      "elevationBias": 0.5, "treeDensity": 0.7, "moistureBias": 0.1 }
+                  ],
+                  "settlement": { "centerBearingDeg": 170, "radiusM": 160, "slopeMax": 0.18 },
+                  "facilities": [
+                    { "code": "lighthouse", "name": "长明灯塔", "kind": "lighthouse",
+                      "anchorLocation": "长明灯塔", "role": "公共",
+                      "frontageM": 7, "depthM": 7, "floors": 2 }
+                  ],
+                  "householdSize": 3,
+                  "forbidden": ["现代设施", "武器铺", "监牢", "赌坊", "神殿", "摩天楼"],
+                  "allowedCategories": ["民居", "商铺", "工坊", "公共", "生产", "水工"]
+                }
+
+                kind 取值：HILLS / FOREST / MUDFLAT / BAY / CAPE / SETTLEMENT / CREEK / RIDGE / FIELD / BEACH。
+                role 取值：公共 / 商铺 / 工坊 / 生产 / 水工。
+                bearingDeg: 0~360；radialFrom/radialTo: 0~1（相对地图半边长）；elevationBias/moistureBias: -1~1。
+                铁律：不输出坐标；不虚构地点；设施数量与住所规模匹配；householdSize 默认 3。
+                DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON.（不要用 Markdown 代码块包裹）
+                """, "你是聚落规划师：只输出严格 JSON 对象，不输出任何其他文字。DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON."));
+
+        // S2 建筑资产（world_map_assets）：这一带该有什么房子——**只有类型，没有坐标**。
+        // 用户决策 #19/#20：固定通用大类（跨时代可用）+ 自由命名；禁忌清单三层拦截。
+        map.put(CODE_WORLD_MAP_ASSETS, new BuiltinDef("世界地图 · 建筑资产类型库",
+                """
+                你是聚落营造师。请依据世界观，为这片土地设计一整套<b>建筑资产类型</b>——
+                回答「这里该有什么房子」，<b>不要指定它们在哪里</b>（位置由后续规则在地形上求得）。
+
+                —— 世界观 ——
+                {{world_setting}}
+
+                —— 地理档案摘要 ——
+                {{profile_summary}}
+
+                —— 禁忌（这个世界不该出现的建筑，绝对不能产出） ——
+                {{forbidden}}
+
+                —— 设计要求 ——
+                1. 数量：12~22 个类型，覆盖「民居 / 商铺 / 工坊 / 公共 / 生产 / 水工」六个大类，
+                   民居占 40% 左右（小镇以住为主），公共 15%，其余各 10~15%。
+                2. 尺寸要真实（米）：民居开间 6~12、进深 5~9；店铺面宽 5~9；工坊 8~16；
+                   公共建筑（议事厅/学堂/祠）12~24；仓库 8~14。层数：小镇 1~2 层，不要 4 层以上。
+                3. 形制要符合世界观与技术代差：没有现代材料就不要玻璃幕墙/钢筋；没有宗教就不要神殿。
+                4. 配色取自当地材料：木/石/夯土/茅草/瓦——给出 hex 颜色，同一聚落内要协调
+                   （墙色偏暖灰或土黄，屋顶偏深褐、青灰、苔绿）。
+                5. roofShape 只能取 flat / gable / hip / shed / dome / spire / thatch。
+                6. code 用英文小写下划线，全局唯一；name 用世界观里的叫法（「渔家小院」「晒盐棚」）。
+                7. weight 是出现权重（1~20）：民居类高（10~16），地标类低（1~3）。
+                8. description 一句话说清「谁在用、用来干什么」，不超过 40 字。
+
+                —— 大类定义（必须严格使用这些 category） ——
+                民居：住人的（农舍/渔家院/长屋/吊脚楼）
+                商铺：做买卖的（杂货铺/茶摊/酒肆/粮行/布庄）
+                工坊：做东西的（铁匠铺/木工房/染坊/磨坊/窑）
+                公共：大家共用的（议事厅/学堂/祠庙/井亭/钟楼/医馆）
+                生产：种与养的（谷仓/畜棚/晒场/渔获棚/盐田）
+                水工：与水相关的（码头/渡口/水车/洗衣埠/防波堤）
+
+                输出严格 JSON 对象（键名严格照抄，禁止输出任何其他文字）：
+                {
+                  "assetTypes": [
+                    { "code": "house_fisher", "name": "渔家小院", "category": "民居",
+                      "kind": "building", "baseW": 9.0, "baseD": 7.5, "floorsMin": 1, "floorsMax": 2,
+                      "wallColor": "#d9c9a8", "roofColor": "#8a5a3c", "roofShape": "gable",
+                      "material": "wood", "styleTags": ["坡屋顶", "木构", "晾网架"], "weight": 14,
+                      "description": "渔民一家三代同住，院里晒网、檐下挂鱼干" }
+                  ],
+                  "districts": [
+                    { "code": "old_street", "name": "老街", "character": "石板路两侧是铺面，早市最热闹" }
+                  ]
+                }
+                铁律：只给类型不给坐标；不得出现禁忌清单里的东西；配色必须协调。
+                DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON.（不要用 Markdown 代码块包裹）
+                """, "你是聚落营造师：只输出严格 JSON 对象，不输出任何其他文字。DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON."));
+
+        // S3 路网拓扑（world_map_roads）：只给「谁连谁 + 路性格」，坐标由最小代价 A* 求。
+        // 用户决策 #6：AI 定拓扑，A* 在真实地形/水系上寻路（坡度、过河、绕建筑都是代价）。
+        map.put(CODE_WORLD_MAP_ROADS, new BuiltinDef("世界地图 · 路网拓扑（只给连接关系）",
+                """
+                你是村镇道路规划师。请依据地理与聚落性格，设计这片土地的<b>道路拓扑</b>——
+                只说明「哪些地方必须连通、这条路是什么性格」，<b>不要给坐标</b>：
+                具体走线会由最小代价寻路在真实地形上求出（会自动绕陡坡、跨河架桥、避开房屋）。
+
+                —— 世界观 ——
+                {{world_setting}}
+
+                —— 地理与聚落摘要 ——
+                {{profile_summary}}
+
+                —— 已备好的建筑类型 ——
+                {{asset_summary}}
+
+                —— 地貌级地标（可作为路的端点） ——
+                {{landmarks}}
+
+                —— 规划原则（现实聚落规律，必须遵守） ——
+                1. 一个核心：镇中心（广场/井台/大树下）是全图的枢纽，至少 3 条路在此交汇。
+                2. 门与水的连接：通往码头/渡口/村口的「门户路」必须是主干（level=major，宽 4~6 米）。
+                3. 主街贯穿：一条主街从门户串到核心区，商铺沿它两侧分布。
+                4. 支路成网：民居群用巷道（level=minor，宽 2~3 米）连主街，不要每户单独接主干
+                   （那会在图上形成梳齿状的假路网）。
+                5. 生产性道路：通往农田/林地/盐田的路是土路（surface=dirt），宽度 2~3 米，
+                   数量少而长，从聚落边缘放射出去。
+                6. 跨水必须成桥：若路要过河，kind 给 bridge（后续会自动在该处生成桥）。
+                7. 不要生成「环岛」「立交」「宽阔大道」这类超出技术代差的东西。
+                8. 路的总条数 8~18 条：主干 2~3 条，巷道 5~12 条，生产路 2~4 条。
+
+                —— 节点角色 role ——
+                core（中心枢纽）/ gate（对外门户/码头/渡口）/ waterfront（临水）/ residential（民居群）/
+                workshop（工坊区）/ farm（生产区）/ landmark（地标）
+                —— prefer（放置偏好，给寻路器定位用） ——
+                settlement-center / coast / river / settlement-edge / high-ground / farmland / forest
+
+                输出严格 JSON 对象（键名严格照抄，禁止输出任何其他文字）：
+                {
+                  "nodes": [
+                    { "code": "plaza_center", "name": "镇中心小广场", "role": "core",
+                      "prefer": "settlement-center", "note": "一口老井，镇上人都在这里碰面" },
+                    { "code": "harbor_gate", "name": "码头口", "role": "gate",
+                      "prefer": "coast", "note": "渔船靠岸、货物上岸的地方" }
+                  ],
+                  "roads": [
+                    { "code": "main_street", "name": "正街", "kind": "street", "level": "major",
+                      "width": 5.0, "surface": "stone", "from": "harbor_gate", "to": "plaza_center",
+                      "bend": 0.2, "priority": 10 }
+                  ]
+                }
+                kind 只能取 street / lane / path / bridge / stairs / pier；surface 取 stone / dirt / wood / gravel。
+                bend 是「弯曲倾向」0~1（0 笔直，1 随地形大绕）。priority 1~10（越大越优先保证走通）。
+                铁律：不给坐标；from/to 必须是已定义节点；node code 全局唯一。
+                DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON.（不要用 Markdown 代码块包裹）
+                """, "你是村镇道路规划师：只输出严格 JSON 对象，不输出任何其他文字。DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON."));
 
         // ==================== 轨道：位置移动与地图生成系统（M3 途中轻量交互） ====================
         // 途中轻量交互（move_encounter）：SCHEMA_JSON 0.5/200（PromptSpecRegistry 登记）。

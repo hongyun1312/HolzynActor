@@ -26,6 +26,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 /**
  * 本地个人账户服务（本地单用户模式）。
  * <p>职责：本地账户的读取/首次创建/更新/完成向导标记；对外提供 VO 转换与
@@ -50,6 +52,23 @@ public class LocalAccountService {
     @Transactional
     public LocalAccount getOrCreate() {
         return localAccountRepository.findByUserId(LOCAL_USER_ID)
+                .orElseGet(() -> {
+                    LocalAccount account = new LocalAccount();
+                    account.setUserId(LOCAL_USER_ID);
+                    return localAccountRepository.save(account);
+                });
+    }
+
+    /**
+     * 获取本地账户（加行锁；不存在时惰性创建）。
+     * <p>用于「引导完成 / 导览已看过」这类会并发写同一行的标记：整行读改写必须串行，
+     * 否则后提交者用旧值覆盖前者（实测两列互相冲掉）。</p>
+     *
+     * @return 本地账户实体（已持有行锁）
+     */
+    @Transactional
+    public LocalAccount getOrCreateForUpdate() {
+        return localAccountRepository.findByUserIdForUpdate(LOCAL_USER_ID)
                 .orElseGet(() -> {
                     LocalAccount account = new LocalAccount();
                     account.setUserId(LOCAL_USER_ID);
@@ -88,6 +107,7 @@ public class LocalAccountService {
         if (vo.getProfileText() != null) account.setProfileText(vo.getProfileText());
         if (vo.getOnboarded() != null) account.setOnboarded(vo.getOnboarded());
         // lastProjectId 不随通用保存覆盖（专用端点 setLastProject 维护，避免设置页误清空）
+        // guideCompleted / layoutTourSeen 同理：只由专用端点维护，通用保存不得覆盖
         return toVO(localAccountRepository.save(account));
     }
 
@@ -128,6 +148,71 @@ public class LocalAccountService {
     public boolean isOnboarded() {
         LocalAccount account = find();
         return account != null && Integer.valueOf(1).equals(account.getOnboarded());
+    }
+
+    /**
+     * 标记新用户 7 步引导已完成（「完成」与「跳过」同义：都不再自动出现）。
+     * <p>唯一写入口：前端 FirstRunGuide 在完成/跳过时调用；完成后跨重启、跨窗口端口都保持。
+     *
+     * @return 更新后的 VO
+     */
+    @Transactional
+    public LocalAccountVO markGuideCompleted() {
+        LocalAccount account = getOrCreateForUpdate();
+        account.setGuideCompleted(1);
+        account.setGuideCompletedAt(LocalDateTime.now());
+        return toVO(localAccountRepository.save(account));
+    }
+
+    /**
+     * 重置新用户引导完成标记（教程中心「重看新手引导」）。
+     * <p>唯一写入口：重置后前端置位「待启动」标记并回画廊，引导重新开始。
+     *
+     * @return 更新后的 VO
+     */
+    @Transactional
+    public LocalAccountVO resetGuide() {
+        LocalAccount account = getOrCreateForUpdate();
+        account.setGuideCompleted(0);
+        account.setGuideCompletedAt(null);
+        return toVO(localAccountRepository.save(account));
+    }
+
+    /**
+     * 是否已完成新用户引导（跨重启持久化的权威判断）。
+     *
+     * @return true 表示已完成或已跳过
+     */
+    @Transactional(readOnly = true)
+    public boolean isGuideCompleted() {
+        LocalAccount account = find();
+        return account != null && Integer.valueOf(1).equals(account.getGuideCompleted());
+    }
+
+    /**
+     * 标记「界面导览」（GuidedTour）已看过。
+     * <p>为什么落后端：桌面端窗口 origin 每次启动可能不同，localStorage 里的 `tourSeen` 会丢，
+     * 结果每次启动都自动再播一遍导览（与新用户引导叠加时还会互相遮挡）。
+     *
+     * @return 更新后的 VO
+     */
+    @Transactional
+    public LocalAccountVO markLayoutTourSeen() {
+        LocalAccount account = getOrCreateForUpdate();
+        account.setLayoutTourSeen(1);
+        return toVO(localAccountRepository.save(account));
+    }
+
+    /**
+     * 重置「界面导览已看过」标记（设置页/教程中心重看导览时可显式重置；当前重看只影响本机）。
+     *
+     * @return 更新后的 VO
+     */
+    @Transactional
+    public LocalAccountVO resetLayoutTourSeen() {
+        LocalAccount account = getOrCreateForUpdate();
+        account.setLayoutTourSeen(0);
+        return toVO(localAccountRepository.save(account));
     }
 
     /**
@@ -173,6 +258,9 @@ public class LocalAccountService {
         vo.setProfileText(account.getProfileText());
         vo.setOnboarded(account.getOnboarded());
         vo.setLastProjectId(account.getLastProjectId());
+        vo.setGuideCompleted(account.getGuideCompleted());
+        vo.setGuideCompletedAt(account.getGuideCompletedAt());
+        vo.setLayoutTourSeen(account.getLayoutTourSeen());
         vo.setCreatedAt(account.getCreatedAt());
         vo.setUpdatedAt(account.getUpdatedAt());
         return vo;

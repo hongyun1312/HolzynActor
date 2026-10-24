@@ -70,6 +70,9 @@ import com.holzyn.actor.domain.worldmap.entity.ActorNpcHome;
 import com.holzyn.actor.domain.worldmap.entity.ActorHomeMember;
 import com.holzyn.actor.domain.worldmap.repository.ActorNpcHomeRepository;
 import com.holzyn.actor.domain.worldmap.repository.ActorHomeMemberRepository;
+// 角色社会关系（actor/relations.json；本次新增段——历史 .holzyn 包不含人际关系，缺装配=跳过，零阻断）
+import com.holzyn.actor.domain.npc.relation.entity.ActorCharacterRelation;
+import com.holzyn.actor.domain.npc.relation.repository.ActorCharacterRelationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -146,6 +149,8 @@ public class ProjectExportService {
     private final ActorUsageLogRepository usageLogRepository;
     private final ActorSceneRepository sceneRepository;
     private final WorldLocationRepository worldLocationRepository;
+    /** 角色社会关系（actor_relation；随包导出，导入侧按角色 id 重链还原） */
+    private final ActorCharacterRelationRepository relationRepository;
     private final CurrentUserProvider currentUserProvider;
     private final HolzynCrypto holzynCrypto;
     private final ObjectMapper objectMapper;
@@ -233,6 +238,9 @@ public class ProjectExportService {
             List<ActorCharacter> chars = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0);
             writeJson(zos, "actor/characters.json", chars.stream().map(this::characterVO).toList());
             writeJson(zos, "actor/character_cards.json", buildCharacterCards(chars));
+            // 角色社会关系（actor/relations.json；本次新增段——随包导出全部人际关系边）
+            writeJson(zos, "actor/relations.json", relationRepository.findByProjectId(projectId)
+                    .stream().map(this::relationVO).toList());
 
             List<ActorConversation> convs = conversationRepository
                     .findByProjectIdAndUserIdOrderByUpdatedAtDesc(projectId, userId);
@@ -383,6 +391,29 @@ public class ProjectExportService {
         m.put("importance", c.getImportance());
         m.put("status", c.getStatus());
         m.put("detail", c.getDetail());
+        return m;
+    }
+
+    /**
+     * 角色社会关系视图（actor/relations.json）。
+     * <p>端点双带：from/to 的 characterId（旧 id）与 fromRef/toRef（npc:{旧id}），
+     * 导入侧优先按 ref 重链（remapRef），characterId 兜底；幽灵端点（id=0 仅名称）原样保留。</p>
+     */
+    private Map<String, Object> relationVO(ActorCharacterRelation r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", r.getId());
+        m.put("fromCharacterId", r.getFromCharacterId());
+        m.put("toCharacterId", r.getToCharacterId());
+        m.put("fromRef", r.getFromRef());
+        m.put("toRef", r.getToRef());
+        m.put("fromName", r.getFromName());
+        m.put("toName", r.getToName());
+        m.put("relationType", r.getRelationType());
+        m.put("description", r.getDescription());
+        m.put("affinity", r.getAffinity());
+        m.put("trust", r.getTrust());
+        m.put("relationState", r.getRelationState());
+        m.put("lastInteractionAt", r.getLastInteractionAt());
         return m;
     }
 
@@ -595,6 +626,9 @@ public class ProjectExportService {
         // 与 AI 提示词时间感同源于该列）。
         m.put("lastGameSecond", c.getLastGameSecond());
         m.put("paused", c.getPaused());
+        // 世界持续运行常驻开关（world_running 0/1）：随包导出——否则导入后 @PrePersist 默认 1
+        // （世界自动开跑），导出时冻结的档回导后就不再静止（违背"世界保持静止"的语义）。
+        m.put("worldRunning", c.getWorldRunning());
         m.put("lastSummary", c.getLastSummary());
         return m;
     }
@@ -834,6 +868,7 @@ public class ProjectExportService {
         m.put("schemaVersion", SCHEMA_VERSION);
         m.put("stats", Map.of(
                 "characters", chars.size(),
+                "relations", relationRepository.findByProjectId(projectId).size(),
                 "conversations", convs.size(),
                 "messages", convs.stream()
                         .mapToInt(c -> messageRepository.findByConversationIdOrderByIdAsc(c.getId()).size()).sum(),
@@ -843,7 +878,7 @@ public class ProjectExportService {
                         .filter(l -> projectId.equals(l.getProjectId())).count()));
         m.put("files", List.of(
                 "settings/project.json", "settings/apis.json", "settings/prompts.json", "settings/chat.json",
-                "world.json", "locations.json", "characters.json", "character_cards.json",
+                "world.json", "locations.json", "characters.json", "character_cards.json", "relations.json",
                 "ordinary_npcs.json", "npc_field_dict.json", "crowd_runtime.json",
                 "conversations.json", "conversation_members.json",
                 "events.jsonl", "actions.jsonl", "memory.json", "knowledge.json", "world_clock.json",

@@ -118,6 +118,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTheme } from '@/shared/theme'
 import { useLayoutStore } from '@/shared/store/layout'
+import { useAccountStore } from '@/shared/store'
+import { firstRunGuideActive } from '@/shared/onboarding/firstRunGuide'
 import ShellTopbar from './ShellTopbar.vue'
 import DomainSidebar from './DomainSidebar.vue'
 import DrawerPanel from './DrawerPanel.vue'
@@ -173,6 +175,7 @@ const route = useRoute()
 const router = useRouter()
 const themeApi = useTheme()
 const layout = useLayoutStore()
+const accountStore = useAccountStore()
 const ctx = useContextDrawer()
 const { effectiveSidebarWidth, sidebarIsIconOnly, toggleSidebar, afterNavigate, shellMode } = useShellLayout()
 
@@ -192,6 +195,9 @@ const aiRuntime = useAiRuntime(() => props.projectId)
 
 /** 当前所处界面（浮生 / 对谈）：由路由路径判定，切换界面即切换侧边栏 */
 const interfaceKey = computed(() => interfaceOfPath(route.path, props.projectId))
+
+/** 「界面导览已看过」的账户权威值（跨重启/跨端口；本机 localStorage 只是缓存） */
+const layoutTourSeenRemote = computed(() => Number(accountStore.account?.layoutTourSeen) === 1)
 
 /**
  * 切换界面（浮生 ⇄ 对谈）：跳转到另一界面的落地页。
@@ -372,13 +378,29 @@ onMounted(() => {
   } else {
     window.addEventListener('resize', measureSidebar)
   }
+  // 界面导览「已看过」以账户为准：先回填本机缓存，避免换端口/清缓存后又自动重播（桌面端实测问题）
+  if (layoutTourSeenRemote.value && !layout.tourSeen) {
+    layout.tourSeen = true
+    layout.persist()
+  }
   // 首次进入新布局：自动播放一次导览（用户可在设置页重看）
-  if (!layout.tourSeen && props.mode === 'project') setTimeout(() => layout.startTour(), 600)
+  // 新用户 7 步引导优先：它已经在讲「侧栏/界面切换/命令面板」，两套聚光灯同时弹会互相遮挡
+  // （实测两个 teleport 都挂 body、z-index 同为 --z-tour，用户看到的是两个重叠气泡，还点不到下面那个）。
+  if (!layout.tourSeen && !layoutTourSeenRemote.value && props.mode === 'project' && !firstRunGuideActive.value) {
+    setTimeout(() => {
+      if (!layout.tourSeen && !layoutTourSeenRemote.value && !firstRunGuideActive.value) layout.startTour()
+    }, 600)
+  }
 })
 
 // 侧栏显隐/插槽内容变化后重新实测（等一帧，确保 DOM 已布局）
 watch([() => props.showSidebar, () => props.mode], () => {
   requestAnimationFrame(() => measureSidebar())
+})
+
+// 界面导览看完 → 写后端权威标记（跨重启/跨端口生效；本机 localStorage 只作缓存）
+watch(() => layout.tourSeen, (seen) => {
+  if (seen && !layoutTourSeenRemote.value) accountStore.markLayoutTourSeen()
 })
 
 watch(() => props.projectId, () => {
@@ -441,18 +463,27 @@ onBeforeUnmount(() => {
 
 /* 内容区：唯一滚动容器 + 统一内边距（令牌驱动，随密度档变化）
    margin 由固定面板注入（--pinned-*-inset）：这就是「固定面板挤压内容区」的实现，
-   与酒馆「固定面板仍覆盖内容」是有意分歧（见设计规格 §12.4）。 */
+   与酒馆「固定面板仍覆盖内容」是有意分歧（见设计规格 §12.4）。
+
+   scrollbar-gutter: stable —— 修复「切页左右抖动」的根因。
+   桌面端（Windows/Electron）滚动条占 8px 实宽：切到内容更高的子页时滚动条出现、内容区变窄 8px，
+   切回矮页滚动条消失、又变宽 8px，居中列因此左右各跳 4px，看起来就是整页在左右抖动
+   （实测设置页子页切换：`.ps-body` left 在 36 / 40 之间跳、clientWidth 在 1272 / 1280 之间跳）。
+   预留稳定槽位后，滚动条出现与否都不再改变内容区宽度，切换零位移。
+   注意：这是「页面级」滚动容器，别在页面内再开第二个纵向滚动区，否则同一抖动会在页面内重现。 */
 .shell-content {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: var(--content-pad-y, 20px) var(--content-pad-x, 24px);
   margin-left: var(--pinned-left-inset, 0px);
   margin-right: var(--pinned-right-inset, 0px);
 }
-/* fullbleed：交给页面自绘（沙盘 3D），去内边距并禁滚动 */
-.shell-content.is-fullbleed { padding: 0; overflow: hidden; }
+/* fullbleed：交给页面自绘（沙盘 3D），去内边距并禁滚动。
+   画布类页面按「真实可用宽」铺满，故不预留滚动条槽位（overflow:hidden 本身也不会触发抖动）。 */
+.shell-content.is-fullbleed { padding: 0; overflow: hidden; scrollbar-gutter: auto; }
 
 /* 全屏沙盘：侧栏改为毛玻璃悬浮在 3D 之上（保留导航可用性） */
 .app-shell.is-fullbleed :deep(.domain-sidebar) {

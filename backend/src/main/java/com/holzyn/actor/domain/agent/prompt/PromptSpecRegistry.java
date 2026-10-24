@@ -151,6 +151,23 @@ public class PromptSpecRegistry {
         // 0.5 / 8192：地图生成是「创意 + 结构」混合任务（布局要现实、坐标必须合法），温度中等防呆板、
         // 上限给足余量防 15 地点×20 角色输出被截断导致整批 JSON 报废。
         register("world_map_generate", 1, PromptContractType.SCHEMA_JSON, 8192, 0.5);
+        // ===== 世界地图生成管线 V1.1（S0 世界档案 / S2 建筑资产 / S3 路网拓扑）=====
+        // 三个调用全部「只给语义、不给坐标」：坐标由地形算法与最小代价寻路确定性推导，
+        // 这样 AI 的创造性只作用在「性格」上，几何永远合法（上一版 AI 直接画坐标的失败根因）。
+        // S0（world_map_profile，0.5 / 2048）：地理性格 → 一组带量纲的地理参数（岛多狭长、
+        // 山脊朝哪、平原多大、河几条）。温度中等：地理描述需要一点想象，但数字要守范围。
+        register("world_map_profile", 1, PromptContractType.SCHEMA_JSON, 2048, 0.5);
+        // S2（world_map_assets，0.5 / 8192）：建筑类型库（12~22 条，含尺寸/层数/配色/形制），
+        // 上限给足——一次要吐 20 条带配色与描述的资产，截断就整批报废。
+        register("world_map_assets", 1, PromptContractType.SCHEMA_JSON, 8192, 0.5);
+        // S3（world_map_roads，0.4 / 4096）：路网拓扑（节点角色 + 连接关系 + 路性格），
+        // 温度偏低：拓扑要稳，不然每次重生成街道结构都变，玩家会觉得世界不真实。
+        register("world_map_roads", 1, PromptContractType.SCHEMA_JSON, 4096, 0.4);
+        // S0b（world_map_brief，0.5 / 2048）：世界数据 → 地图契约（区域方位/设施清单/住所绑定），
+        // 是「AI 给区域与设施、程序钳制方位与数量」那条边界的输入口。必须在此登记：
+        // 未登记的场景会走默认 spec（上限/温度都不对），且 PromptTemplateServiceTest 的模板
+        // 总数会与 registry 漂移——V1.3 就漏了这一条（94→95 只改了模板、没登记）。
+        register("world_map_brief", 1, PromptContractType.SCHEMA_JSON, 2048, 0.5);
         // 途中轻量交互（move_encounter，位置移动与地图生成系统 M3）：SCHEMA_JSON——
         // 输入=移动者处境+迎面人物+关系提示，输出={greet:"一句话", stop:bool}（§4.6）。
         // 0.5 / 200：一句招呼的轻量判定，温度中等自然、上限收敛防废话。

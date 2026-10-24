@@ -17,7 +17,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { fetchAccountMe, fetchAccount, saveAccount, markAccountOnboarded } from '@/shared/api/account'
+import { fetchAccountMe, fetchAccount, saveAccount, markAccountOnboarded, markLayoutTourSeen as markLayoutTourSeenApi } from '@/shared/api/account'
 
 /**
  * 本地账户 store（替代原认证/登录 store）。
@@ -80,6 +80,17 @@ export const useAccountStore = defineStore('account', {
       this.account = vo
       this.onboarded = !!vo.onboarded
       return vo
+    },
+    /**
+     * 标记「界面导览」已看过（后端持久化，避免桌面端 origin 变化导致 localStorage 标记丢失后每次启动重播）。
+     * <p>幂等：账户已是已看过态时不再请求；请求失败静默（本机 localStorage 仍记录）。</p>
+     */
+    async markLayoutTourSeen() {
+      if (Number(this.account?.layoutTourSeen) === 1) return
+      try {
+        const vo = await markLayoutTourSeenApi()
+        if (vo && this.account) this.account = { ...this.account, layoutTourSeen: vo.layoutTourSeen }
+      } catch (_) { /* 后端不可用：本机标记仍生效，不阻塞 */ }
     }
   }
 })

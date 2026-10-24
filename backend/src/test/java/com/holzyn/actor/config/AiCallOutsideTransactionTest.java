@@ -555,6 +555,40 @@ class AiCallOutsideTransactionTest {
         assertNoTransaction(consolidation, "preview", Long.class, Long.class, Long.class);
     }
 
+    /**
+     * 世界地图生成管线 V1.1（S0 档案 / S2 资产 / S3 拓扑各一次 AI 调用，秒级~分钟级）追加入网：
+     * 编排器 {@code MapGenOrchestrator#run}（含全部 AI 与数秒的重算）与三个阶段服务必须无事务；
+     * 落库由 {@code MapPersistService} 的短事务承担（每阶段一次，几十毫秒）。
+     *
+     * <p>这条断言的环境独特性：{@code run} 是包私有的（只允许经 {@code generate/rerunStage}
+     * 提交到线程池执行），所以这里用 {@code getDeclaredMethod} 取——不能用 {@code getMethod}，
+     * 否则测试会因为「找不到方法」直接红，而不是真的检查了注解。</p>
+     */
+    @Test
+    @DisplayName("V1.1 地图管线编排与三个阶段服务不得带 @Transactional（三次 AI 在事务外）")
+    void mapgenPipelineIsNotTransactional() throws Exception {
+        Class<?> orch = Class.forName("com.holzyn.actor.domain.mapgen.service.MapGenOrchestrator");
+        Method run = orch.getDeclaredMethod("run", Long.class, Long.class, int.class);
+        assertNull(run.getAnnotation(Transactional.class),
+                "MapGenOrchestrator#run 不得带 @Transactional：内部有 3 次 AI 调用 + 数秒地形侵蚀，"
+                        + "事务包住它就是数分钟的 H2 行锁；落库由 MapPersistService 短事务承担");
+        assertNoTransaction(orch, "generate", Long.class, Long.class);
+        assertNoTransaction(orch, "rerunStage", Long.class, String.class);
+
+        assertNoTransaction(Class.forName("com.holzyn.actor.domain.mapgen.service.WorldMapProfileService"),
+                "build", Long.class, long.class);
+        assertNoTransaction(Class.forName("com.holzyn.actor.domain.mapgen.service.MapAssetPolicyService"),
+                "build", Long.class, Class.forName("com.holzyn.actor.domain.mapgen.model.MapProfile"));
+        // 注意：MapRoadPlanService#build 在 V1.3 增加了第 8 个参数 townRadius（米）——
+        // 反射签名必须跟着走，否则这里会 NoSuchMethod 而不是「检查通过」，等于把护栏关掉。
+        assertNoTransaction(Class.forName("com.holzyn.actor.domain.mapgen.service.MapRoadPlanService"),
+                "build", Long.class,
+                Class.forName("com.holzyn.actor.domain.mapgen.algo.TerrainData"),
+                Class.forName("com.holzyn.actor.domain.mapgen.model.MapProfile"),
+                Class.forName("com.holzyn.actor.domain.mapgen.model.MapAssetCatalog"),
+                Class.forName("java.util.Map"), long.class, Class.forName("[F"), double.class);
+    }
+
     /** 断言指定公开方法存在且未标注 @Transactional（方法不存在则测试失败，防止签名漂移后静默放过）。 */
     private void assertNoTransaction(Class<?> type, String name, Class<?>... params) throws Exception {
         Method m = type.getMethod(name, params);

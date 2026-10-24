@@ -131,9 +131,12 @@ class WorldClockUnifiedTimeTest {
     @Test
     void pausedClockFreezesFlowingDiagnostic() {
         ActorWorldClock c = restoredBaselineClock();
+        // 两个参考时刻必须取自同一个 now：分开调 now() 会跨越秒边界，
+        // 差值变成 7199 秒而不是 7200 秒（真机全量跑时蓝过一次，与业务逻辑无关）。
+        LocalDateTime now = LocalDateTime.now();
         c.setPaused(1);
-        c.setPausedAt(LocalDateTime.now().minusHours(2));
-        c.setWorldStartAt(LocalDateTime.now().minusHours(4));
+        c.setPausedAt(now.minusHours(2));
+        c.setWorldStartAt(now.minusHours(4));
         c.setWorldStartGameHour(0L);
         stubClock(c);
 

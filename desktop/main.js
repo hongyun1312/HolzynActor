@@ -5,9 +5,11 @@
  *
  * 职责：
  *  1. 作为 sidecar 启动内置后端（随包裁剪 JRE + Spring Boot fat jar），数据目录固定在
- *     %LOCALAPPDATA%\HolzynActor（首次运行自动注入示例世界「青禾村」）；
+ *     %LOCALAPPDATA%\HolzynActor（首次运行自动注入示例世界「浮生小镇 · 青屿镇」）；
  *  2. 后端就绪后，用 Chromium 内核打开应用窗口（http://127.0.0.1:<随机空闲端口>），
- *     即「双击 exe → 弹出应用窗口」的桌面体验；
+ *     即「双击 exe → 弹出应用窗口」的桌面体验；窗口**无边框 + 16:9**（基准逻辑尺寸 1280×720，
+ *     见 window-geometry.js）：标题栏由前端顶栏自绘（拖拽区 + 最小化/最大化/关闭三键），
+ *     每次打开都按 1280×720 开、屏幕装不下时等比缩小，拖拽缩放时保持 16:9；
  *  3. 关闭窗口 → 停掉后端子进程 → 退出应用（单实例锁防重复启动）。
  *  4. 自动更新（U1+U2，设计文档《HolzynActor_桌面端更新机制_设计方案_V1.0》）：
  *     - electron-updater（GitHub Releases provider）启动后台检查 + 设置页手动检查；
@@ -20,17 +22,49 @@
  *   数据：%LOCALAPPDATA%\HolzynActor\{data,uploads,logs,backups,updater}
  */
 
-const { app, BrowserWindow, dialog, shell, ipcMain, clipboard, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, dialog, shell, ipcMain, clipboard, Tray, Menu, nativeImage, screen } = require('electron');
 const { spawn } = require('child_process');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
+const windowGeometry = require('./window-geometry');
 
 const APP_NAME = 'HolzynActor';
 const APP_ID = 'com.holzyn.actor'; // 与 desktop/package.json build.appId 一致（AUMID/托盘/通知）
 const JAR_FILE = 'holzyn-actor.jar';
 const BOOT_TIMEOUT_MS = 120_000; // 首次启动含示例世界注入，放宽到 120s
 const BACKUP_KEEP = 3;            // 更新前备份滚动保留份数
+
+// ---- 主窗口形态：无边框 + 16:9 沉浸式（UI 设计基准 1280×720，见 window-geometry.js 与设计文档）----
+// 无边框（frame:false）后，原生标题栏与三个系统按钮都不再绘制，由渲染进程的顶栏承担：
+// 顶栏是拖拽区（-webkit-app-region: drag），右侧自绘「最小化 / 最大化 / 关闭」控件（WindowControls.vue），
+// 通过下面的 holzyn:window:* IPC 回到主进程执行真实窗口操作。thickFrame 保留 Windows 的
+// 阴影与边框热区（无可见边框，但可以拖拽缩放、可以贴边分屏）。
+const WINDOW_ASPECT_RATIO = windowGeometry.ASPECT_RATIO;
+const WINDOW_BASE_WIDTH = windowGeometry.BASE_WIDTH;
+const WINDOW_BASE_HEIGHT = windowGeometry.BASE_HEIGHT;
+const WINDOW_MIN_WIDTH = windowGeometry.MIN_WIDTH;
+const WINDOW_MIN_HEIGHT = windowGeometry.MIN_HEIGHT;
+
+// ---- 启动闪屏（IDEA 式：点击快捷方式立即弹出等待弹窗，消除「点击 → 界面打开」的空窗期）----
+const SPLASH_HTML = 'splash.html';
+const SPLASH_PRELOAD = 'splash-preload.js';
+// 启动闪屏：尺寸一比一复刻 IntelliJ IDEA 2025.2 真实启动画面 splash.png（640×400，16:10）
+const SPLASH_WIDTH = 640;
+const SPLASH_HEIGHT = 400;
+const SPLASH_CLOSE_DELAY_MS = 340; // 闪屏淡出后再销毁
+// 退出过渡延迟：真实关闭耗时 <300ms 时完全不显示遮罩（研究结论：<300ms 的加载态会被当成卡顿闪烁；
+// 300ms 后才浮出「正在关闭」），修掉 JVM 不退出后正常路径约 0.4s，只有异常路径才看得到遮罩。
+const CLOSE_OVERLAY_DELAY_MS = 300;
+
+/** 后端启动阶段：按后端控制台日志特征串命中 → 驱动闪屏「真实进度」；时间兜底保证平滑前进 */
+const BOOT_STAGES = [
+  { key: 'db',     re: /\[数据库\]/,   label: '正在校验世界数据库…', span: [18, 32] },
+  { key: 'demo',   re: /\[示例世界\]/, label: '正在注入示例世界…',   span: [34, 46] },
+  { key: 'ai',     re: /\[SpringAI\]/, label: '正在装载 AI 意识层…', span: [48, 62] },
+  { key: 'clock',  re: /\[世界时钟\]|Tomcat started|Started .*Application/, label: '正在唤醒世界时钟…', span: [64, 76] },
+  { key: 'engine', re: /\[世界引擎\]/, label: '正在预热角色决策…',   span: [78, 88] },
+];
 const GITHUB_OWNER = 'hongyun1312';
 const GITHUB_REPO = 'HolzynActor';
 const RELEASE_PAGE_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;
@@ -63,9 +97,16 @@ function main() {
   let quitting = false;
   let backendStarted = false;
   let intentionalBackendStop = false; // 更新/冒烟演练主动停后端时，不按「意外退出」处理
+  let splash = null;          // 启动闪屏窗口（点击快捷方式后立即弹出，覆盖后端启动空窗期）
+  let startupRunning = false; // 防止并发触发后端启动（初始启动 / 闪屏「重试」）
+  let splashPreviewTimer = null; // 预览模式的进度循环定时器
+  let closeOverlayTimer = null;  // 「正在关闭」遮罩的延迟定时器（超时才显示，避免闪一下）
+  let closeOverlayShown = false; // 遮罩是否已推送渲染进程（防重复注入）
 
   const isDev = !app.isPackaged;
   const mockMode = process.env.HOLZYN_UPDATER_MOCK === '1'; // 开发冒烟：模拟「发现新版本→下载→可安装」
+  // 闪屏预览模式：HOLZYN_SPLASH_PREVIEW=1 时只展示闪屏（进度循环动画），不启动后端、不自动关闭，供设计评审
+  const splashPreview = process.env.HOLZYN_SPLASH_PREVIEW === '1';
   // U4 便携版检测：electron-builder portable 目标运行时注入 PORTABLE_EXECUTABLE_DIR；
   // 便携版不支持 electron-updater 自动安装 → 引导下载（设计文档 §12）
   const isPortable = app.isPackaged && !!process.env.PORTABLE_EXECUTABLE_DIR;
@@ -121,18 +162,24 @@ function main() {
   // ==================== 桌面端行为设置（后台运行 / 系统托盘） ====================
   const desktopSettingsFile = () => path.join(dataRoot, 'desktop-settings.json');
   let closeToTray = true; // 关闭窗口 → 最小化到系统托盘（后台运行），世界继续；默认开启
+  // 后端端口记忆：窗口用 http://127.0.0.1:<port> 打开，而 localStorage 按 origin（含端口）隔离——
+  // 端口每次启动都变，等于每次启动都换一份空的本地状态（主题/布局/教程进度/引导标记全丢）。
+  // 所以优先复用上次的端口，只有被占用时才回退随机端口。
+  let preferredPort = null;
 
   function loadDesktopSettings() {
     try {
       const s = JSON.parse(fs.readFileSync(desktopSettingsFile(), 'utf8'));
       if (typeof s.closeToTray === 'boolean') closeToTray = s.closeToTray;
+      const p = Number(s.preferredPort);
+      if (Number.isInteger(p) && p > 0 && p < 65536) preferredPort = p;
     } catch (_) { /* 首次运行/损坏：使用默认值 */ }
   }
 
   function saveDesktopSettings() {
     try {
       fs.mkdirSync(dataRoot, { recursive: true });
-      fs.writeFileSync(desktopSettingsFile(), JSON.stringify({ closeToTray }, null, 2));
+      fs.writeFileSync(desktopSettingsFile(), JSON.stringify({ closeToTray, preferredPort }, null, 2));
     } catch (_) { /* 忽略写入失败 */ }
   }
 
@@ -424,12 +471,152 @@ function main() {
     });
   }
 
+  // ==================== 启动闪屏（IDEA 式等待弹窗） ====================
+
+  /** 立即弹出启动闪屏：无边框、屏幕居中、不占任务栏（普通层级，可被其他窗口遮挡）；深色 IDEA 风格 + 品牌渐变 */
+  function createSplash() {
+    if (splash && !splash.isDestroyed()) return;
+    splash = new BrowserWindow({
+      width: SPLASH_WIDTH,
+      height: SPLASH_HEIGHT,
+      useContentSize: true,  // 内容区精确等于设定尺寸（640×400，与 IDEA splash.png 一致）
+      frame: false,
+      thickFrame: false,     // 去掉 Windows 隐形缩放边框，避免内宽多出 2px
+      resizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      center: true,
+      show: false,
+      skipTaskbar: true,
+      backgroundColor: '#0B1220',
+      title: `${APP_NAME} · 正在启动`,
+      webPreferences: {
+        preload: path.join(__dirname, SPLASH_PRELOAD),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    splash.setMenuBarVisibility(false);
+    splash.setContentSize(SPLASH_WIDTH, SPLASH_HEIGHT); // 强制内容区精确等于 IDEA splash.png 尺寸（640×400）
+    splash.loadFile(path.join(__dirname, SPLASH_HTML));
+    splash.once('ready-to-show', () => {
+      splash.show();
+      splash.focus();
+    });
+    splash.on('closed', () => {
+      splash = null;
+      if (splashPreviewTimer) { clearInterval(splashPreviewTimer); splashPreviewTimer = null; }
+      if (splashPreview) app.quit(); // 预览模式：关掉闪屏即退出应用
+    });
+  }
+
+  /** 闪屏预览模式：模拟启动进度循环播放（不启动后端、不自动关闭，供设计评审） */
+  function runSplashPreview() {
+    let idx = 0;
+    let pct = 5;
+    splashPreviewTimer = setInterval(() => {
+      const stage = BOOT_STAGES[Math.min(idx, BOOT_STAGES.length - 1)];
+      pct = Math.min(94, pct + 1 + Math.random() * 5);
+      sendSplashState({ state: 'loading', progress: Math.round(pct), label: stage.label });
+      if (pct >= 94) {
+        idx = (idx + 1) % BOOT_STAGES.length;
+        pct = BOOT_STAGES[idx].span[0] - 2;
+      }
+    }, 380);
+  }
+
+  /** 推启动状态给闪屏页面（loading 进度 / done 完成 / error 错误） */
+  function sendSplashState(state) {
+    if (splash && !splash.isDestroyed()) {
+      splash.webContents.send('holzyn:splash:state', state);
+    }
+  }
+
+  /** 销毁闪屏（主窗口就绪淡出后调用） */
+  function closeSplash() {
+    if (splash && !splash.isDestroyed()) splash.destroy();
+    splash = null;
+  }
+
+  /**
+   * 退出过渡层：延迟 {@link CLOSE_OVERLAY_DELAY_MS} 后才推送「正在关闭」遮罩。
+   * <p>为什么要延迟：JVM 退出根因修复后，正常关闭约 0.4s，立刻弹遮罩会变成「闪一下」的假卡顿；
+   * 只有真正在等（后端收尾、强杀兜底、更新前备份）时才让用户看到反馈。</p>
+   *
+   * @param {string} label 遮罩文案
+   * @returns {() => void} 取消函数（关闭在延迟窗口内完成时调用，则什么都不显示）
+   */
+  function scheduleClosingOverlay(label) {
+    if (closeOverlayTimer || closeOverlayShown) return () => {};
+    closeOverlayTimer = setTimeout(() => {
+      closeOverlayTimer = null;
+      showClosingOverlay(label);
+    }, CLOSE_OVERLAY_DELAY_MS);
+    return () => {
+      if (closeOverlayTimer) {
+        clearTimeout(closeOverlayTimer);
+        closeOverlayTimer = null;
+      }
+    };
+  }
+
+  /** 立即让主窗口浮出「正在关闭」遮罩（主窗口不可见时退回启动闪屏状态区，避免无反馈） */
+  function showClosingOverlay(label) {
+    if (closeOverlayShown) return;
+    closeOverlayShown = true;
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed() && win.isVisible()) {
+      try {
+        win.webContents.send('holzyn:app:closing', { label, hint: '正在安全保存世界数据，请稍候' });
+        log(`[quit] 显示关闭过渡层：${label}`);
+        return;
+      } catch (_) { /* 渲染进程不可用：退回闪屏/静默退出 */ }
+    }
+    if (splash && !splash.isDestroyed()) {
+      // 启动失败时主窗口可能从未创建，只剩闪屏：复用闪屏自己的状态区给反馈
+      sendSplashState({ state: 'loading', progress: 100, label });
+    }
+  }
+
+  /** 收起关闭过渡层（更新流程中止、开发态重启后端等「其实不用退出」的场景） */
+  function hideClosingOverlay() {
+    if (closeOverlayTimer) { clearTimeout(closeOverlayTimer); closeOverlayTimer = null; }
+    if (!closeOverlayShown) return;
+    closeOverlayShown = false;
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+      try { win.webContents.send('holzyn:app:closing-cancel'); } catch (_) { /* ignore */ }
+    }
+  }
+
+  /** 后端就绪 + 主窗口可见后：闪屏进度拉满并淡出关闭 */
+  function finishSplash() {
+    sendSplashState({ state: 'done', progress: 100, label: '欢迎来到世界', closing: true });
+    setTimeout(() => closeSplash(), SPLASH_CLOSE_DELAY_MS);
+  }
+
+  /** 闪屏「重试」：清掉残留进程后重新拉起后端，进度从 0 重新推进 */
+  async function retryStartup() {
+    if (startupRunning) return;
+    startupRunning = true;
+    sendSplashState({ state: 'loading', progress: 0, label: '正在重新启动世界引擎…' });
+    if (backend) killBackendTree(); // 兜底：上次启动残留的进程先清掉
+    backendStarted = false;
+    const onStage = (s) => sendSplashState({ state: 'loading', progress: s.progress, label: s.label });
+    const result = await startBackend({ onStage, onError: (e) => sendSplashState({ state: 'error', ...e }) });
+    startupRunning = false;
+    if (result.ok) {
+      if (!win || win.isDestroyed()) createWindow(`http://127.0.0.1:${result.port}`);
+      createTray();
+      scheduleStartupCheck();
+    }
+  }
+
   // ==================== 后端 sidecar 生命周期 ====================
 
   function resolveBackend() {
     if (isDev) {
       // 开发模式：直接用仓库构建产物 + 本机 JDK（免打包快速联调）
-      const jar = path.resolve(__dirname, '..', 'backend', 'target', 'holzyn-actor-1.1.0-beta.2.jar');
+      const jar = path.resolve(__dirname, '..', 'backend', 'target', 'holzyn-actor-1.1.1-beta.1.jar');
       const java = process.env.JAVA_HOME
         ? path.join(process.env.JAVA_HOME, 'bin', 'java.exe')
         : 'java';
@@ -441,16 +628,39 @@ function main() {
     };
   }
 
-  function getFreePort() {
-    return new Promise((resolve, reject) => {
+  /**
+   * 探测单个端口是否可监听；可用返回端口号，被占用/失败返回 null。
+   *
+   * @param {number} port 0 表示由系统分配空闲端口
+   * @returns {Promise<number|null>}
+   */
+  function probePort(port) {
+    return new Promise((resolve) => {
       const srv = net.createServer();
       srv.unref();
-      srv.on('error', reject);
-      srv.listen(0, '127.0.0.1', () => {
-        const port = srv.address().port;
-        srv.close(() => resolve(port));
+      srv.once('error', () => resolve(null));
+      srv.listen(port, '127.0.0.1', () => {
+        const p = srv.address().port;
+        srv.close(() => resolve(p));
       });
     });
+  }
+
+  /**
+   * 取后端端口：优先复用上次端口（保证窗口 origin 稳定 → localStorage 连续），
+   * 被占用时才回退系统随机端口。
+   *
+   * <p>2026-10-23 修复：旧实现每次启动都用 `listen(0)` 随机端口，导致窗口 origin 每次都变；
+   * Chromium 的 localStorage 按 origin（scheme+host+port）隔离，于是「已跳过/看完的新手引导」
+   * 「主题与布局偏好」「教程进度」在每次重启后全部归零，表现为引导反复出现。</p>
+   */
+  async function getFreePort() {
+    if (preferredPort) {
+      const p = await probePort(preferredPort);
+      if (p) return p;
+      log(`[window] 上次端口 ${preferredPort} 被占用，回退随机端口（本次本地偏好可能与上次不连续）`);
+    }
+    return (await probePort(0)) || 0;
   }
 
   async function waitForHttp(url, timeoutMs) {
@@ -514,21 +724,82 @@ function main() {
     }
   }
 
-  async function startBackend() {
+  /** 启动进度追踪：后端控制台日志命中阶段标记 → 推进「真实进度」；无标记时按时间兜底平滑前进 */
+  function createBootStageTracker(onStage) {
+    const matched = new Set();
+    const matchedAt = new Map();
+    const bootStart = Date.now();
+    let lastPct = 5;
+
+    const labelByTime = (pct) => {
+      if (pct >= 76) return BOOT_STAGES[3].label; // clock
+      if (pct >= 62) return BOOT_STAGES[2].label; // ai
+      if (pct >= 46) return BOOT_STAGES[1].label; // demo
+      if (pct >= 32) return BOOT_STAGES[0].label; // db
+      return '正在启动世界引擎…';
+    };
+
+    const current = () => {
+      const elapsed = Date.now() - bootStart;
+      // 时间兜底：线性爬到 85（真实就绪由 /api/health 收尾）
+      const timePct = Math.min(88, 5 + (elapsed / BOOT_TIMEOUT_MS) * 80);
+      let pct = Math.max(lastPct, timePct);
+      const highest = [...BOOT_STAGES].reverse().find((s) => matched.has(s.key));
+      if (highest) {
+        // 命中阶段后在区间内缓慢爬升（15s 内走完区间），观感接近真实加载
+        const since = Date.now() - (matchedAt.get(highest.key) || bootStart);
+        const ramp = highest.span[0] + Math.min(1, since / 15000) * (highest.span[1] - highest.span[0]);
+        pct = Math.max(pct, ramp);
+      }
+      pct = Math.max(0, Math.min(88, Math.round(pct)));
+      return { pct, label: highest ? highest.label : labelByTime(pct) };
+    };
+
+    const emit = () => {
+      const { pct, label } = current();
+      onStage({ progress: pct, label });
+    };
+
+    return {
+      applyLine(line) {
+        let changed = false;
+        for (const s of BOOT_STAGES) {
+          if (!matched.has(s.key) && s.re.test(line)) {
+            matched.add(s.key);
+            matchedAt.set(s.key, Date.now());
+            lastPct = Math.max(lastPct, s.span[0]);
+            changed = true;
+          }
+        }
+        if (changed) emit();
+      },
+      emit,
+    };
+  }
+
+  async function startBackend({ onStage = null, onError = null } = {}) {
     const { jar, java } = resolveBackend();
     if (!fs.existsSync(jar)) {
-      dialog.showErrorBox(APP_NAME, `未找到后端程序：\n${jar}\n\n请先构建后端（仓库根 build.bat 或 desktop 目录 npm run build:backend）。`);
-      app.quit();
-      return null;
+      const err = {
+        title: '未找到后端程序',
+        detail: `未找到后端程序：\n${jar}\n\n请先构建后端（仓库根 build.bat 或 desktop 目录 npm run build:backend）。`,
+      };
+      if (onError) { onError(err); } else { dialog.showErrorBox(APP_NAME, err.detail); app.quit(); }
+      return { ok: false };
     }
     if (!fs.existsSync(java)) {
-      dialog.showErrorBox(APP_NAME, `未找到 Java 运行时：\n${java}`);
-      app.quit();
-      return null;
+      const err = { title: '未找到 Java 运行时', detail: `未找到 Java 运行时：\n${java}` };
+      if (onError) { onError(err); } else { dialog.showErrorBox(APP_NAME, err.detail); app.quit(); }
+      return { ok: false };
     }
 
     const port = await getFreePort();
     backendPort = port;
+    // 记住本次端口：下次启动继续复用，保证窗口 origin（进而 localStorage）稳定
+    if (port && port !== preferredPort) {
+      preferredPort = port;
+      saveDesktopSettings();
+    }
     const env = {
       ...process.env,
       HOLOZYN_ACTOR_DATA_DIR: path.join(dataRoot, 'data'),
@@ -540,29 +811,51 @@ function main() {
     };
     delete env.HOLOZYN_ACTOR_DB_URL; // 屏蔽外部数据源覆盖，桌面端始终本地
 
+    // 闪屏进度：日志阶段标记 + 时间兜底（无 onStage 时不创建，保持原有行为）
+    const tracker = onStage ? createBootStageTracker(onStage) : null;
+    const nudge = onStage ? setInterval(() => tracker.emit(), 800) : null;
+    let failed = false;
+    const fail = (err) => {
+      if (failed) return;
+      failed = true;
+      if (nudge) clearInterval(nudge);
+      if (onError) { onError({ title: err.title || '启动失败', detail: err.detail || String((err && err.message) || err) }); }
+      else if (splash && !splash.isDestroyed()) { sendSplashState({ state: 'error', title: err.title || '启动失败', detail: err.detail || String((err && err.message) || err) }); }
+      else { dialog.showErrorBox(APP_NAME, err.detail || String((err && err.message) || err)); app.quit(); }
+    };
+
     backend = spawn(java, ['-jar', jar], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    backend.stdout.on('data', (d) => log(`[out] ${d}`));
-    backend.stderr.on('data', (d) => log(`[err] ${d}`));
+    const feedConsole = (d) => {
+      const text = d.toString();
+      log(`[out] ${text}`);
+      if (tracker) for (const line of text.split(/\r?\n/)) tracker.applyLine(line);
+    };
+    backend.stdout.on('data', feedConsole);
+    backend.stderr.on('data', feedConsole);
     backend.on('error', (err) => {
       log(`[spawn-error] ${err}`);
-      if (!quitting) {
-        dialog.showErrorBox(APP_NAME, `无法启动后端进程：${err.message}`);
-        app.quit();
-      }
+      if (!quitting) fail({ title: '无法启动后端进程', detail: `无法启动后端进程：${err.message}` });
     });
     backend.on('exit', (code) => {
       log(`[exit] backend exited code=${code}`);
       backend = null;
-      if (backendStarted && !quitting && !intentionalBackendStop) {
-        dialog.showErrorBox(
-          APP_NAME,
-          `后端服务意外退出（code=${code}）。\n\n日志：${path.join(logDir, 'holzyn-actor-console.log')}`
-        );
-        app.quit();
+      if (backendStarted) {
+        // 就绪后的意外退出：维持原有弹错并退出
+        if (!quitting && !intentionalBackendStop) {
+          dialog.showErrorBox(
+            APP_NAME,
+            `后端服务意外退出（code=${code}）。\n\n日志：${path.join(logDir, 'holzyn-actor-console.log')}`
+          );
+          app.quit();
+        }
+      } else if (!quitting && !intentionalBackendStop) {
+        // 就绪前退出：闪屏内展示错误（可重试/退出）
+        fail({ title: '后端进程提前退出', detail: `后端服务在就绪前退出（code=${code}）。\n\n日志：${path.join(logDir, 'holzyn-actor-console.log')}` });
       }
     });
 
     const ok = await waitForHttp(`http://127.0.0.1:${port}`, BOOT_TIMEOUT_MS);
+    if (nudge) clearInterval(nudge);
     if (!ok) {
       if (!quitting) {
         // U2+U3 回滚：更新后首次启动失败 → 恢复备份数据 + 自动重装旧版（成功则退出装旧版；否则引导手动重装）
@@ -571,15 +864,11 @@ function main() {
           await handlePostUpdateStartupFailure(pending);
           // 自动重装已触发时 quitAndInstall 会接管退出；未触发（引导手动）则正常退出本进程
           app.quit();
-          return null;
+          return { ok: false };
         }
-        dialog.showErrorBox(
-          APP_NAME,
-          `后端启动超时（${BOOT_TIMEOUT_MS / 1000} 秒未就绪）。\n\n日志：${path.join(logDir, 'holzyn-actor-console.log')}`
-        );
-        app.quit();
+        fail({ title: '后端启动超时', detail: `后端启动超时（${BOOT_TIMEOUT_MS / 1000} 秒未就绪）。\n\n日志：${path.join(logDir, 'holzyn-actor-console.log')}` });
       }
-      return null;
+      return { ok: false };
     }
     backendStarted = true;
     // 更新后首次成功启动 → 清除待安装标记（更新成功）
@@ -589,18 +878,70 @@ function main() {
     }
     recordLastGood();
     log(`[ready] backend ready at 127.0.0.1:${port}`);
-    return port;
+    if (onStage) onStage({ progress: 94, label: '世界已就绪，正在进入…' });
+    return { ok: true, port };
   }
 
   // ==================== 窗口 ====================
 
+  /** 把「当前是否最大化」推给渲染进程（自绘标题栏据此切换「最大化/还原」图标） */
+  function pushWindowState() {
+    if (!win || win.isDestroyed()) return;
+    try {
+      win.webContents.send('holzyn:window:maximized', win.isMaximized());
+    } catch (_) { /* 窗口正在销毁：忽略 */ }
+  }
+
+  /**
+   * 16:9 拖拽夹紧：用户手动拖边框时先反算另一边，再 setBounds 落地。
+   *
+   * <p>为什么不用 `win.setAspectRatio()`：Windows 上不可靠（Electron 文档中 `extraSize`
+   * 标注为 macOS 专属），实测拖拽仍会破比例。`will-resize` 在 macOS/Windows 都会触发，
+   * 且只由**用户手动拖拽**触发（程序化 setBounds 不触发，不会自我递归）。
+   * 最大化/全屏时放行——铺满工作区是系统级预期，16:9 保证的是「窗口化状态与每次打开时」。</p>
+   */
+  function applyAspectGuard() {
+    if (!win || win.isDestroyed()) return;
+    win.on('will-resize', (event, newBounds, details) => {
+      if (win.isMaximized() || win.isFullScreen()) return;
+      const current = win.getBounds();
+      const fitted = windowGeometry.constrainToAspect(newBounds, details && details.edge, current);
+      const unchanged = fitted.x === newBounds.x && fitted.y === newBounds.y
+        && fitted.width === newBounds.width && fitted.height === newBounds.height;
+      if (unchanged) return;
+      event.preventDefault();
+      win.setBounds(fitted);
+    });
+  }
+
+  /**
+   * 从最大化/托盘恢复后自检比例：系统还原的是「最大化之前的 bounds」，
+   * 正常路径一定还是 16:9；但外部缩放工具/多屏切换可能把尺寸改飘，这里兜一层修正。
+   */
+  function ensureAspectAfterRestore() {
+    if (!win || win.isDestroyed()) return;
+    if (win.isMaximized() || win.isFullScreen() || win.isMinimized()) return;
+    const bounds = win.getBounds();
+    if (windowGeometry.isAspectRatioOk(bounds)) return;
+    const fixed = windowGeometry.normalizeToAspect(bounds);
+    log(`[window] 恢复后尺寸 ${bounds.width}x${bounds.height} 非 16:9 → 修正为 ${fixed.width}x${fixed.height}`);
+    win.setBounds(fixed);
+  }
+
   function createWindow(url) {
+    // 每次打开都按 16:9 基准 1280×720 开（屏幕装不下时等比缩小，最小 960×540）
+    const size = windowGeometry.fitToWorkArea(screen.getPrimaryDisplay().workAreaSize);
+    log(`[window] 打开主窗口 ${size.width}x${size.height}（基准 ${WINDOW_BASE_WIDTH}x${WINDOW_BASE_HEIGHT}，比例 ${WINDOW_ASPECT_RATIO.toFixed(3)} = 16:9，无边框）`);
     win = new BrowserWindow({
-      width: 1440,
-      height: 900,
-      minWidth: 1024,
-      minHeight: 640,
+      width: size.width,
+      height: size.height,
+      minWidth: WINDOW_MIN_WIDTH,
+      minHeight: WINDOW_MIN_HEIGHT,
       show: false,
+      // 无边框 + 沉浸式：标题栏/边框交给我们自己的顶栏（拖拽区 + 自绘三键）
+      frame: false,
+      thickFrame: true, // 保留 Windows 阴影与缩放热区（贴边分屏、拖拽缩放仍可用）
+      titleBarStyle: 'hidden',
       autoHideMenuBar: true,
       backgroundColor: '#0B1220',
       title: `${APP_NAME} · 全境众生 · 浮生`,
@@ -613,9 +954,17 @@ function main() {
       },
     });
     win.setMenuBarVisibility(false);
+    win.center();
+    applyAspectGuard();
+    win.on('maximize', pushWindowState);
+    win.on('unmaximize', () => { ensureAspectAfterRestore(); pushWindowState(); });
+    win.on('restore', () => { ensureAspectAfterRestore(); pushWindowState(); });
+    win.webContents.on('did-finish-load', pushWindowState);
     win.once('ready-to-show', () => {
       win.show();
+      win.focus();
       maybeShowSecurityNotice(); // U4：无签名首次运行展示安全说明（标记位防重复）
+      finishSplash(); // 主窗口已可见 → 闪屏进度拉满并淡出关闭
     });
     // 应用内新窗口/外部链接一律交系统默认浏览器，避免弹出空壳窗口
     win.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -625,10 +974,17 @@ function main() {
     win.loadURL(url);
     // 关闭窗口：默认最小化到系统托盘（后台运行），世界继续推进；真正退出由托盘菜单/设置决定
     win.on('close', (e) => {
-      if (!quitting && closeToTray) {
+      if (quitting) return;
+      if (closeToTray) {
         e.preventDefault();
         hideToTray();
+        return;
       }
+      // 「关闭窗口=退出」模式：以前直接关窗 → window-all-closed → app.quit() → before-quit 的
+      // killBackendTree() 直接强杀后端，H2 不是干净落盘。现在拦住关闭，走统一的
+      // 「优雅停后端 → 关窗退出」时序（与托盘退出完全一致，同样有延迟遮罩兜底）。
+      e.preventDefault();
+      quitApp();
     });
     win.on('closed', () => {
       win = null;
@@ -670,12 +1026,18 @@ function main() {
     }
   }
 
-  /** 真正退出：先优雅停后端（H2 干净落盘），再退出应用 */
+  /**
+   * 真正退出（托盘「退出」/ 闪屏「退出」/「关闭窗口=退出」三条路径共用）：
+   * 先优雅停后端（H2 干净落盘），再退出应用；关得慢时主窗口浮出「正在关闭」遮罩。
+   */
   function quitApp() {
     if (quitting) return;
     quitting = true;
     intentionalBackendStop = true;
+    scheduleClosingOverlay('正在关闭世界…'); // 关得快就不显示，慢才浮出（不制造闪烁）
     stopBackendGracefully().finally(() => {
+      // 已关完：撤掉延迟定时器；已显示的遮罩不撤，直接随窗口一起消失（避免闪回主界面）
+      if (closeOverlayTimer) { clearTimeout(closeOverlayTimer); closeOverlayTimer = null; }
       intentionalBackendStop = false;
       app.quit();
     });
@@ -722,8 +1084,10 @@ function main() {
     pushUpdaterState();
     log(`[updater] 玩家确认安装 v${newVersion}，开始「停后端→备份→安装」`);
 
-    // 1) 优雅停后端（H2 干净落盘）；主动停止不按「意外退出」弹错
+    // 1) 优雅停后端（H2 干净落盘）；主动停止不按「意外退出」弹错。
+    //    这一步 + 后面的备份都可能要几秒，延迟遮罩负责「别让玩家以为卡死」。
     intentionalBackendStop = true;
+    scheduleClosingOverlay('正在准备更新…');
     await stopBackendGracefully();
     intentionalBackendStop = false;
 
@@ -733,6 +1097,7 @@ function main() {
       backupDir = createPreUpdateBackup(newVersion);
     } catch (e) {
       log(`[updater] 备份失败，中止更新: ${e}`);
+      hideClosingOverlay(); // 不更新了：撤掉「正在准备更新」遮罩，把界面还给玩家
       updaterState.status = 'error';
       updaterState.error = `更新前备份失败，已中止更新（${e.message}）。请检查磁盘空间后重试。`;
       pushUpdaterState();
@@ -742,8 +1107,10 @@ function main() {
     if (isDev || mockMode) {
       // 开发冒烟：完整演练「停后端→备份」后，重启后端保持会话可用（不执行真实安装）
       log(`[updater] dev 冒烟模式：备份完成 ${backupDir}，重启后端以继续会话`);
+      hideClosingOverlay(); // 会话继续，遮罩必须收起
       backendStarted = false;
-      const newPort = await startBackend();
+      const restart = await startBackend();
+      const newPort = restart.ok ? restart.port : null;
       updaterState.status = 'idle';
       pushUpdaterState();
       // 延迟重载窗口，确保本次 invoke 响应先回到渲染进程
@@ -799,6 +1166,24 @@ function main() {
   // ==================== IPC（preload 桥） ====================
 
   function registerIpc() {
+    // ===== 无边框窗口的自绘标题栏（WindowControls.vue → preload → 这里）=====
+    // 窗口是 frame:false，系统按钮不存在；三个动作都必须回主进程执行真实窗口操作。
+    ipcMain.handle('holzyn:window:minimize', () => {
+      if (win && !win.isDestroyed()) win.minimize();
+    });
+    ipcMain.handle('holzyn:window:toggle-maximize', () => {
+      if (!win || win.isDestroyed()) return false;
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+      return win.isMaximized();
+    });
+    // 关闭按钮走 win.close()，因此仍然复用既有 close 语义：
+    // 「关闭到托盘后台运行」或「关闭=退出（优雅停后端 + 关闭遮罩）」由设置决定。
+    ipcMain.handle('holzyn:window:close', () => {
+      if (win && !win.isDestroyed()) win.close();
+    });
+    ipcMain.handle('holzyn:window:is-maximized', () => !!(win && !win.isDestroyed() && win.isMaximized()));
+
     ipcMain.handle('holzyn:updater:get-state', () => ({ ...updaterState }));
     ipcMain.handle('holzyn:updater:check', () => { checkForUpdate(); return { ...updaterState }; });
     ipcMain.handle('holzyn:updater:confirm-install', () => confirmInstallAndRestart());
@@ -845,6 +1230,10 @@ function main() {
       saveDesktopSettings();
       return { closeToTray };
     });
+    // 启动闪屏：错误态操作（打开日志目录 / 重试启动 / 退出）
+    ipcMain.handle('holzyn:splash:open-log-dir', () => shell.openPath(logDir));
+    ipcMain.handle('holzyn:splash:retry', () => retryStartup());
+    ipcMain.handle('holzyn:splash:quit', () => quitApp());
   }
 
   // ==================== 启动 ====================
@@ -865,20 +1254,33 @@ function main() {
     loadDesktopSettings();
     configureUpdater();
     registerIpc();
-    const port = await startBackend();
-    if (!port) return;
-    createWindow(`http://127.0.0.1:${port}`);
+    createSplash(); // 点击快捷方式后立即弹出启动闪屏（覆盖后端启动空窗期，给出即时反馈）
+    if (splashPreview) {
+      runSplashPreview(); // 预览模式：闪屏一直保留在屏幕上（进度循环动画），不启动后端
+      return;
+    }
+    startupRunning = true;
+    const onStage = (s) => sendSplashState({ state: 'loading', progress: s.progress, label: s.label });
+    const onError = (e) => sendSplashState({ state: 'error', ...e });
+    const result = await startBackend({ onStage, onError });
+    startupRunning = false;
+    if (!result.ok) return; // 失败由闪屏内展示（打开日志/重试/退出）；更新回滚路径已在内部退出
+    createWindow(`http://127.0.0.1:${result.port}`);
     createTray();
     scheduleStartupCheck();
   });
 
   app.on('window-all-closed', () => {
     // 后台运行模式下窗口是「隐藏」而非关闭，不会走到这里；
-    // 仅在「关闭窗口=退出程序」模式下兜底退出。
-    if (!closeToTray) app.quit();
+    // 仅在「关闭窗口=退出程序」模式下兜底：仍走统一的优雅停后端时序（不再直接 app.quit() 强杀）。
+    if (closeToTray) return;
+    if (quitting) { app.quit(); return; }
+    quitApp();
   });
   app.on('before-quit', () => {
     quitting = true;
+    if (splash && !splash.isDestroyed()) splash.destroy();
+    splash = null;
     killBackendTree();
   });
   app.on('second-instance', () => {

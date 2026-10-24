@@ -4,8 +4,8 @@ rem  HolzynActor 桌面端一键构建（Windows）
 rem  步骤：1) 后端 fat jar（含前端静态资源，build.bat）
 rem        2) 裁剪 JRE 运行时（packaging/runtime，缺失时自动生成）
 rem        3) electron-builder 打包 NSIS 安装版 + 免安装便携版
-rem  产物：desktop\release\HolzynActor-Setup-1.1.0-beta.2.exe（安装版）
-rem        desktop\release\HolzynActor-Portable-1.1.0-beta.2.exe（绿色版）
+rem  产物：desktop\release\HolzynActor-Setup-1.1.1-beta.1.exe（安装版）
+rem        desktop\release\HolzynActor-Portable-1.1.1-beta.1.exe（绿色版）
 rem ============================================================
 setlocal
 set "ROOT=%~dp0.."

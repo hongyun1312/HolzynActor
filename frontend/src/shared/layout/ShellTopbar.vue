@@ -14,9 +14,11 @@
 <template>
   <!--
     顶部栏（52px）：全局唯一实现。
-    三段结构：左侧（返回/侧栏开关/项目切换/标题面包屑）· 中部（全局搜索=命令面板入口）· 右侧（酒馆式图标抽屉栏 + 主题/密度 + 通知 + 账户）。
+    三段结构：左侧（返回/侧栏开关/项目切换/标题面包屑）· 中部（全局搜索=命令面板入口）· 右侧（酒馆式图标抽屉栏 + 主题/密度 + 通知 + 应用菜单 + 窗口三键）。
     历史背景：此前项目空间顶栏与 ConsoleTopbar 是两套独立实现，导致「画廊能用的入口进项目就没了」；
     现统一到本组件，用 mode 区分数据来源（项目模式显示项目切换与面包屑，全局模式显示品牌）。
+    桌面端：主窗口是**无边框**的，本顶栏同时承担窗口标题栏——整条是拖拽移动区
+    （-webkit-app-region: drag），最右侧嵌 WindowControls 自绘「最小化 / 最大化 / 关闭」。
   -->
   <header class="shell-topbar">
     <div class="tb-left">
@@ -211,7 +213,9 @@
           <el-icon :size="17"><HIcon :name="helpEntry.icon" /></el-icon>
         </button>
       </div>
-      <AvatarMenu />
+      <AppMenu />
+      <!-- 无边框窗口（桌面壳）自绘的三个系统按钮：只在 Electron 里渲染，贴窗口右缘 -->
+      <WindowControls />
     </div>
   </header>
 </template>
@@ -224,7 +228,7 @@
  * <ul>
  *   <li>左侧：返回画廊、侧栏开关、项目切换器（下拉最近项目）、标题面包屑；</li>
  *   <li>中部：命令面板入口（点击或 Ctrl+K，快捷键由 AppShell 统一监听）；</li>
- *   <li>右侧：酒馆式图标抽屉组（来自 navModel.TOPBAR_ENTRIES）、信息密度切换、深浅主题、通知、账户。</li>
+ *   <li>右侧：酒馆式图标抽屉组（来自 navModel.TOPBAR_ENTRIES）、信息密度切换、深浅主题、通知、应用菜单（关于/更新/设置/工作区）。</li>
  * </ul>
  *
  * <p>为什么图标抽屉要放在顶栏：对齐 SillyTavern 用户的肌肉记忆——「功能入口是一排顶部图标，
@@ -238,7 +242,8 @@ import { useLayoutStore, DENSITY_MODES, CONTENT_MODES } from '@/shared/store/lay
 import { TOPBAR_ENTRIES, DRAWER_PANELS, interfaceInfo } from './navModel'
 import { fetchProjects } from '@/shared/api'
 import NotificationBell from '@/shared/components/console/NotificationBell.vue'
-import AvatarMenu from '@/shared/components/console/AvatarMenu.vue'
+import AppMenu from '@/shared/components/console/AppMenu.vue'
+import WindowControls from './WindowControls.vue'
 
 /** 深浅模式三档（与 theme 模块的 mode 取值一一对应；不额外持久化，由 theme 模块负责） */
 const THEME_MODES = [
@@ -372,7 +377,19 @@ function onEntryClick(e) {
   border-bottom: 1px solid var(--border-l1);
   box-shadow: var(--shadow-lv1);
   z-index: var(--z-topbar, 50);
+  /* 无边框窗口：顶栏即标题栏，整条可拖拽移动窗口（最大化时拖拽 = 还原并跟随光标，系统行为） */
+  -webkit-app-region: drag;
+  app-region: drag;
 }
+
+/* 可交互的左右两个集群整体 no-drag：按钮/下拉/徽标很多，逐个标注易漏（漏一个就点不动）。
+   中部（.tb-center）故意保持 drag：搜索按钮之外的空白是最大的拖拽区。 */
+.tb-left,
+.tb-right {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+.tb-search { -webkit-app-region: no-drag; app-region: no-drag; }
 
 .tb-left { display: flex; align-items: center; gap: var(--space-2, 8px); min-width: 0; }
 .tb-right { display: flex; align-items: center; gap: 2px; margin-left: auto; }

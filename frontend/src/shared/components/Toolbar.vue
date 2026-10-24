@@ -23,8 +23,8 @@
 
   规范（本组件用 API 形状强制）：
     常驻内联动作 ≤ maxInline（默认 3，宽屏档）；**空间不足时收进「⋯」而不是换行**——
-    窄屏档（shellMode ≠ wide，即 <1440）内联数自动降到 narrowMaxInline（默认 1），
-    其余动作仍然一键可达（溢出菜单），因此工具条**永不折行**。
+    窄屏档（内容区宽度 < 1152px，见 useShellLayout.contentIsNarrow）内联数自动降到
+    narrowMaxInline（默认 1），其余动作仍然一键可达（溢出菜单），因此工具条**永不折行**。
     状态（如世界时钟/运行状态）走 #status 插槽固定在左侧，与动作区分层。
 
   用法：
@@ -86,8 +86,9 @@
 /**
  * 统一页内工具条：状态区固定左侧，动作区固定右侧，并强制"常驻动作预算 + 溢出收纳"。
  *
- * <p>窄屏自动降低内联预算而不是折行——预算来自权威断点 {@link useShellLayout} 的 `shellMode`，
- * 不写任何媒体查询，保证与外壳的折叠档位永远一致。</p>
+ * <p>窄屏自动降低内联预算而不是折行——预算来自 {@link useShellLayout} 的 `contentIsNarrow`
+ * （按**内容区实际宽度**判定：基准 1280 下侧栏常驻展开要吃掉 288px，用视口宽度会把 1280
+ * 误判成宽屏），不写任何媒体查询，保证与外壳的折叠档位永远一致。</p>
  *
  * @see docs/设计文档/HolzynActor_界面布局与IA人性化重构_方案_V2.0.md §5.5
  */
@@ -106,8 +107,8 @@ const props = defineProps({
 })
 const emit = defineEmits(['action'])
 
-const { shellMode } = useShellLayout()
-const budget = computed(() => (shellMode.value === 'wide' ? props.maxInline : props.narrowMaxInline))
+const { contentIsNarrow } = useShellLayout()
+const budget = computed(() => (contentIsNarrow.value ? props.narrowMaxInline : props.maxInline))
 const inlineActions = computed(() => props.actions.slice(0, budget.value))
 const overflowActions = computed(() => props.actions.slice(budget.value))
 </script>

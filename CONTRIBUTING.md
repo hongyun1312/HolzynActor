@@ -29,7 +29,7 @@ build.bat
 
 :: 2) 运行（本地 H2 数据库自动创建在 <仓库>\data）
 run.bat
-:: 浏览器打开 http://localhost:18080（首次建库自动注入示例世界「青禾村」）
+:: 浏览器打开 http://localhost:18080（首次建库自动注入示例世界「浮生小镇 · 青屿镇」）
 
 :: 桌面端（可选）：一键构建安装包
 desktop\build-desktop.bat

@@ -73,6 +73,27 @@ public class ActorNpcHome {
     @Column(name = "pos_z")
     private Double posZ;
 
+    /**
+     * 已绑定的地图 ID（V5 / M6）。
+     *
+     * <p>「这个住所在哪张图上被画出来了」——重掷地图后旧绑定会失效，所以它必须有值才能
+     * 认为 {@link #posX}/{@link #posZ} 可信；为 null 表示还没被任何一张地图落位过。</p>
+     */
+    @Column(name = "map_id")
+    private Long mapId;
+
+    /** 已绑定的地图要素 ID（actor_map_feature.id；指向真正的那栋主屋） */
+    @Column(name = "map_feature_id")
+    private Long mapFeatureId;
+
+    /** 大门坐标 X（米；角色「回家」走到门口，而不是走进墙里） */
+    @Column(name = "door_x")
+    private Double doorX;
+
+    /** 大门坐标 Z（米） */
+    @Column(name = "door_z")
+    private Double doorZ;
+
     /** 主屋标签（「正房」） */
     @Column(name = "room_label", length = 100)
     private String roomLabel;

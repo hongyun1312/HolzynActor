@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-labelledby="posterTitle posterDesc">
+  <title id="posterTitle">HolzynActor 全境众生 · 浮生</title>
+  <desc id="posterDesc">让世界自己活着，自己长出故事。你不在的时候，世界没有停笔。八大能力域：世界构建与生成、世界运行与时间演化、角色认知与记忆、角色状态与情绪、角色生命历程与人格、社会关系与群体涌现、世界沙盘与实时干预、外部接入与质量保障。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#16233A"/>
+      <stop offset="0.55" stop-color="#0D1728"/>
+      <stop offset="1" stop-color="#0A111E"/>
+    </linearGradient>
+    <linearGradient id="embBg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#16233A"/>
+      <stop offset="1" stop-color="#0B1220"/>
+    </linearGradient>
+    <radialGradient id="lamp" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#F2CE7E" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#E8B457" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#E8B457" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4E9B8A" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#4E9B8A" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4E9B8A" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#4E9B8A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- 时间涟漪 -->
+  <circle cx="1230" cy="30" r="360" fill="none" stroke="#E8B457" stroke-width="1.4" opacity="0.055"/>
+  <circle cx="1230" cy="30" r="460" fill="none" stroke="#E8B457" stroke-width="1.4" opacity="0.038"/>
+  <circle cx="1230" cy="30" r="560" fill="none" stroke="#E8B457" stroke-width="1.4" opacity="0.024"/>
+  <circle cx="118" cy="256" r="300" fill="url(#halo)"/>
+
+  <!-- 徽记 -->
+  <g transform="translate(84,150) scale(0.70)">
+    <rect x="0" y="0" width="240" height="240" rx="52" fill="url(#embBg)"/>
+    <rect x="5" y="5" width="230" height="230" rx="48" fill="none" stroke="#2A3A55" stroke-width="1.5"/>
+    <circle cx="120" cy="120" r="82" fill="none" stroke="#E8B457" stroke-width="5"
+            stroke-dasharray="3 18.467" stroke-linecap="round" opacity="0.5"/>
+    <circle cx="120" cy="120" r="64" fill="#0E1A2B" stroke="#4E9B8A" stroke-width="1.6" opacity="0.9"/>
+    <circle cx="120" cy="120" r="64" fill="url(#sky)"/>
+    <circle cx="120" cy="120" r="54" fill="none" stroke="#4E9B8A" stroke-width="1" opacity="0.28"/>
+    <path d="M 68 178 Q 120 190 172 178" fill="none" stroke="#4E9B8A" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+    <circle cx="120" cy="126" r="34" fill="url(#lamp)"/>
+    <circle cx="92" cy="140" r="6" fill="#EAF0F7" opacity="0.82"/>
+    <rect x="83" y="149" width="18" height="24" rx="9" fill="#EAF0F7" opacity="0.72"/>
+    <circle cx="120" cy="127" r="7.4" fill="#F2CE7E"/>
+    <rect x="110" y="137" width="20" height="36" rx="10" fill="#E8B457"/>
+    <circle cx="148" cy="136" r="6.6" fill="#EAF0F7" opacity="0.88"/>
+    <rect x="138.5" y="145" width="19" height="28" rx="9.5" fill="#EAF0F7" opacity="0.78"/>
+  </g>
+
+  <!-- 标题区 -->
+  <g font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif">
+    <text x="320" y="214" font-size="64" font-weight="700" fill="#EAF0F7" letter-spacing="1.5">HolzynActor</text>
+  </g>
+  <g font-family="'Microsoft YaHei','PingFang SC','Noto Sans CJK SC','Source Han Sans SC','Hiragino Sans GB',sans-serif">
+    <text x="320" y="268" font-size="30" fill="#E8B457" letter-spacing="8">全境众生 · 浮生</text>
+    <text x="322" y="326" font-size="26" fill="#C7D3E3" letter-spacing="1">让世界自己活着，自己长出故事。</text>
+    <text x="322" y="366" font-size="20" fill="#8FA3BC" letter-spacing="0.5">你不在的时候，世界没有停笔。</text>
+    <text x="322" y="406" font-size="20" fill="#9FB0C6" letter-spacing="0.5">无人值守世界 · 四层记忆 · 一生与人格 · 需配置模型</text>
+  </g>
+
+  <line x1="84" y1="462" x2="1116" y2="462" stroke="#22314A" stroke-width="1.2"/>
+
+  <!-- 八大能力域 -->
+  <g font-family="'Microsoft YaHei','PingFang SC','Noto Sans CJK SC','Source Han Sans SC','Hiragino Sans GB',sans-serif" font-size="18" fill="#A9B8CC">
+    <text x="84" y="506">① 世界构建与生成</text>
+    <text x="344" y="506">② 世界运行与时间演化</text>
+    <text x="604" y="506">③ 角色认知与记忆</text>
+    <text x="864" y="506">④ 角色状态与情绪</text>
+    <text x="84" y="544">⑤ 角色生命历程与人格</text>
+    <text x="344" y="544">⑥ 社会关系与群体涌现</text>
+    <text x="604" y="544">⑦ 世界沙盘与实时干预</text>
+    <text x="864" y="544">⑧ 外部接入与质量保障</text>
+  </g>
+
+  <text x="1116" y="592" text-anchor="end" font-family="'Microsoft YaHei','PingFang SC','Noto Sans CJK SC',sans-serif" font-size="15" fill="#5C6E88">本地数据 · 需配置 AI 模型 · Apache-2.0</text>
+</svg>

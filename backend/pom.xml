@@ -12,7 +12,7 @@
 
     <groupId>com.holzyn</groupId>
     <artifactId>holzyn-actor</artifactId>
-    <version>1.1.0-beta.2</version>
+    <version>1.1.1-beta.1</version>
     <name>holzyn-actor</name>
     <description>Holzyn 全境 - NPC 角色 AI 驱动模块（Spring Boot）</description>
 

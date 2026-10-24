@@ -54,6 +54,14 @@ spring:
     import: classpath:application-actor.yml
   application:
     name: holzyn-actor
+  # 关闭阶段上限（2026-10-23 实测补充）：桌面端退出时窗口里仍挂着世界实时 SSE 长连接
+  # （页面在 bfcache/重连状态下服务端请求不结束），Tomcat 优雅停机停在
+  # 「Commencing graceful shutdown. Waiting for active requests to complete」一直等，
+  # 桌面端 8s 超时后 taskkill 进程树 → H2 不是干净落盘（真实日志：20:18:13 请求 → 20:18:21 强杀）。
+  # 把停机阶段上限压到 3s：到点后强制停 Web 层，继续正常销毁 Bean（Hikari 连接池、H2 数据源
+  # 依次关闭 = 干净落盘），JVM 在 ~4s 内退出，桌面端不再触发强杀（实测见设计文档 §7）。
+  lifecycle:
+    timeout-per-shutdown-phase: ${HOLZYN_ACTOR_SHUTDOWN_TIMEOUT:3s}
   # 数据源：本地 H2 文件库（MySQL 兼容模式，支持 LONGTEXT/JSON/DATETIME 等语法）
   datasource:
     # LOCK_TIMEOUT=10000ms：并发写热点表时让竞争者排队而非立即失败（AI 结果不因锁超时丢弃）
@@ -125,7 +133,7 @@ holzyn:
       # 向量库文件根目录（默认空=数据目录下 <data-dir>/vector-store/<projectId>/embeddings.json）
       vector-store-dir: ${HOLOZYN_ACTOR_VECTOR_STORE_DIR:}
       # HTTP 调用超时（防网络悬挂的 AI 调用永久阻塞引擎线程）。
-      # ⚠️ 实测：自托管网关重活（story-engine/persona_bootstrap/worldgen 大 prompt）
+      # ⚠️ 2026-10-02 实测：自托管网关（llm.mbfsr.com）重活（story-engine/persona_bootstrap/worldgen 大 prompt）
       # 生成可达 200s+，原 120s/130s 读超时把慢请求掐断→story-plan 失败、建档反复重试。调大默认值：
       # read=300s（socket 读）、request=320s（整次硬上限，须 > read）。
       timeout-read-seconds: ${HOLOZYN_ACTOR_AI_TIMEOUT_READ_SECONDS:300}
@@ -294,7 +302,7 @@ holzyn:
       nanojev:
         # 判定调用总开关（默认 false：未配置 base-url 前一律禁用，调用方回退 Qwen/程序化，fail-closed）
         enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_ENABLED:false}
-        # evaluate 网关 Base URL（已含 /v1）
+        # evaluate 网关 Base URL（已含 /v1；外网=https://llm.mbfsr.com:14443/v1，内网=http://127.0.0.1:9100/v1）
         base-url: ${HOLOZYN_ACTOR_AI_NANOJEV_BASE_URL:}
         # NanoJev 专用 API Key（空=沿用当前 chat provider Key；非空=专用。env 正确形态 HOLOZYN_ACTOR_AI_NANOJEV_APIKEY）
         api-key: ${HOLOZYN_ACTOR_AI_NANOJEV_API_KEY:}

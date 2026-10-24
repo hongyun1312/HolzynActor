@@ -18,6 +18,7 @@
 
 package com.holzyn.actor.domain.account.controller;
 
+import com.holzyn.actor.common.BizException;
 import com.holzyn.actor.common.R;
 import com.holzyn.actor.domain.account.service.LocalAccountService;
 import com.holzyn.actor.domain.account.vo.LocalAccountVO;
@@ -110,5 +111,48 @@ public class LocalAccountController {
             projectId = Long.valueOf(String.valueOf(raw));
         }
         return R.ok(localAccountService.setLastProject(projectId));
+    }
+
+    /**
+     * 新用户 7 步引导状态（跨重启持久化的唯一权威）。
+     * <p>请求体 { completed: true|false }：true=完成/跳过（不再自动出现）；
+     * false=重置（教程中心「重看新手引导」）。</p>
+     * <p>为什么不在前端 localStorage：桌面端窗口 origin 含随机端口，每次启动都变，
+     * localStorage 按 origin 隔离 → 「完成后重启又出现」。故完成状态必须落到后端账户。</p>
+     *
+     * @param body 请求体 { completed }
+     *
+     * @return 更新后的 VO（含 guideCompleted）
+     */
+    @PutMapping("/first-run-guide")
+    public R<LocalAccountVO> updateFirstRunGuide(@RequestBody(required = false) Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("completed");
+        if (raw == null) {
+            throw new BizException(400, "completed 必填（true=完成/跳过，false=重看）");
+        }
+        boolean completed = raw instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(raw));
+        return R.ok(completed
+                ? localAccountService.markGuideCompleted()
+                : localAccountService.resetGuide());
+    }
+
+    /**
+     * 「界面导览」（GuidedTour）已看过状态（跨重启持久化，避免每次启动自动重播）。
+     * <p>请求体 { seen: true|false }：true=已看过；false=重置（重看导览时可用）。</p>
+     *
+     * @param body 请求体 { seen }
+     *
+     * @return 更新后的 VO（含 layoutTourSeen）
+     */
+    @PutMapping("/layout-tour")
+    public R<LocalAccountVO> updateLayoutTour(@RequestBody(required = false) Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("seen");
+        if (raw == null) {
+            throw new BizException(400, "seen 必填（true=已看过，false=重置）");
+        }
+        boolean seen = raw instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(raw));
+        return R.ok(seen
+                ? localAccountService.markLayoutTourSeen()
+                : localAccountService.resetLayoutTourSeen());
     }
 }

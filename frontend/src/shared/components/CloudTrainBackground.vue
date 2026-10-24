@@ -27,7 +27,8 @@
   渲染器共享 state 对象，改属性 + wake 即可热更新 uniform，无需重启 GL 上下文。</p>
   <p>定位：`position: fixed; z-index: -1` 铺满视口 —— 位于根层背景之上、所有页面内容之下，
   页面自身的半透明底与卡片 backdrop-filter 都能叠加出层次。</p>
-  <p>性能：渲染器自带 prefers-reduced-motion 降级、document.hidden 暂停、DPR 上限与分辨率缩放。</p>
+  <p>性能：GPU 自适应降噪细节（detail 8→4）、内部像素预算上限（≈1080p）与 DPR 上限；
+  窗口隐藏或失焦（被遮挡/切后台）自动停绘归零 GPU；prefers-reduced-motion 降级。</p>
 -->
 <template>
   <Teleport to="body">

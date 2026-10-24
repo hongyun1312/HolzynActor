@@ -81,7 +81,7 @@
         </div>
         <div v-if="recentProjects.length === 0" class="section-empty">暂无最近项目</div>
         <div v-else class="recent-row">
-          <div v-for="p in recentProjects" :key="p.id" class="project-card tech-card" :data-tour="p.id === DEMO_PROJECT_ID ? 'fr-demo-card' : undefined" @click="openProject(p)">
+          <div v-for="p in recentProjects" :key="p.id" class="project-card tech-card" data-tour="project-card" :data-guide-demo="p.id === DEMO_PROJECT_ID ? '1' : undefined" @click="openProject(p)">
             <div class="card-cover" :style="coverStyle(p)">
               <span class="cover-name">{{ p.name || '未命名项目' }}</span>
               <el-tag v-if="p.characterCount > 0" size="small" class="cover-tag">{{ p.characterCount }} 角色</el-tag>
@@ -109,7 +109,7 @@
         </div>
         <div v-if="filteredProjects.length === 0" class="section-empty">没有匹配的项目</div>
         <div v-else class="project-grid">
-          <div v-for="p in filteredProjects" :key="p.id" class="project-card tech-card" :data-tour="p.id === DEMO_PROJECT_ID ? 'fr-demo-card' : undefined">
+          <div v-for="p in filteredProjects" :key="p.id" class="project-card tech-card" data-tour="project-card" :data-guide-demo="p.id === DEMO_PROJECT_ID ? '1' : undefined">
             <div class="card-cover" :style="coverStyle(p)" @click="openProject(p)">
               <span class="cover-name">{{ p.name || '未命名项目' }}</span>
               <el-tag v-if="p.characterCount > 0" size="small" class="cover-tag">{{ p.characterCount }} 角色</el-tag>
@@ -221,7 +221,7 @@ const settingsRef = ref(null)
 const newProjectRef = ref(null)
 // P0-5：未配置模型 API 提醒横幅（会话内可关闭；sessionStorage 记关闭，下次启动再提醒）
 const showApiBanner = ref(false)
-// 示例世界（内置演示项目）ID：青禾村——新手引导第③步的目标卡片
+// 示例世界（内置演示项目）ID：浮生小镇 · 青屿镇——新手引导第③步的目标卡片
 const DEMO_PROJECT_ID = 1
 
 /** 打开首页设置弹窗（顶栏事件 / 操作区 / 空态三入口统一入口；可指定初始 Tab，默认 API 配置） */

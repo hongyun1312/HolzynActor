@@ -87,11 +87,11 @@
       <section class="tut-demo tech-card">
         <header class="tut-card-head">
           <el-icon :size="16"><HIcon name="ic_gallery_map_all" /></el-icon>
-          <span class="tut-card-title">演示项目：青禾村 · 测试村庄</span>
+          <span class="tut-card-title">演示项目：浮生小镇 · 青屿镇</span>
         </header>
         <p class="tut-card-desc">
-          不想从零建世界？项目 ID <code>1</code> 是随库内置的演示村庄（仙人遗风的仙侠世界，20 名角色、
-          完整时间线与关系网）。下面的入口直接打开它，怎么点都不会把数据弄坏——它本来就是给你试的。
+          不想从零建世界？项目 ID <code>1</code> 是随库内置的演示小镇（治愈系小岛生活模拟，12 名角色、
+          真实感世界地图与完整关系网）。下面的入口直接打开它，怎么点都不会把数据弄坏——它本来就是给你试的。
         </p>
         <div class="tut-card-foot">
           <el-button size="small" type="primary" @click="go('/project/1/dashboard')">打开演示项目仪表盘</el-button>
@@ -131,6 +131,7 @@ import { useRouter } from 'vue-router'
 import AppShell from '@/shared/layout/AppShell.vue'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 import { useLayoutStore } from '@/shared/store/layout'
+import { replayGuide } from '@/shared/onboarding/firstRunGuide'
 
 const router = useRouter()
 const layout = useLayoutStore()
@@ -138,7 +139,7 @@ const layout = useLayoutStore()
 /** localStorage 键（版本化，改结构时换键避免读到旧格式） */
 const STORE_KEY = 'holzyn.tutorial.v1'
 
-/** 演示项目 ID（随库内置的「青禾村 · 测试村庄」） */
+/** 演示项目 ID（随库内置的「浮生小镇 · 青屿镇」） */
 const DEMO_PROJECT_ID = 1
 
 /** 已完成的章节 key 集合 */
@@ -311,14 +312,12 @@ function replayTour() {
 }
 
 /**
- * 重看新用户 7 步引导：置 pending、清 done，回到画廊由 FirstRunGuide 接续。
- * （键名与 FirstRunSetup / FirstRunGuide 共用，避免两处各写一套导致不同步。）
+ * 重看新用户 7 步引导：清后端完成标记 + 置位「待启动（replay）」，回到画廊由 FirstRunGuide 接续。
+ * <p>状态统一走 {@link replayGuide}（与首次向导/FirstRunGuide 共用一套键与后端字段），
+ * 不再在本页手写 localStorage —— 历史上三处各写一套正是状态漂移的根源。</p>
  */
-function replayFirstRunGuide() {
-  try {
-    localStorage.setItem('holzyn.firstRunGuide.pending.v1', '1')
-    localStorage.setItem('holzyn.firstRunGuide.done.v1', '')
-  } catch (_) { /* 隐私模式静默 */ }
+async function replayFirstRunGuide() {
+  await replayGuide()
   router.push('/')
 }
 </script>

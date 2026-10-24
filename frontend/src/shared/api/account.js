@@ -38,3 +38,25 @@ export const markAccountOnboarded = () => http.post('/api/local-account/onboarde
  * 会话信息（替代原 /api/auth/me）：返回 { onboarded, account }。
  */
 export const fetchAccountMe = () => http.get('/api/local-account/me')
+
+/**
+ * 标记新用户 7 步引导完成/跳过（跨重启持久化的唯一权威）。
+ * <p>为什么需要后端：桌面端窗口 origin 含随机端口，每次启动都变，localStorage 按 origin 隔离，
+ * 只存本地标记必然「完成后重启又出现」。</p>
+ */
+export const markFirstRunGuideCompleted = () => http.put('/api/local-account/first-run-guide', { completed: true })
+
+/**
+ * 重置新用户引导完成标记（教程中心「重看新手引导」）。
+ */
+export const resetFirstRunGuideCompleted = () => http.put('/api/local-account/first-run-guide', { completed: false })
+
+/**
+ * 标记「界面导览」已看过（跨重启持久化；否则桌面端端口变化会让 tourSeen 丢失、每次启动自动重播）。
+ */
+export const markLayoutTourSeen = () => http.put('/api/local-account/layout-tour', { seen: true })
+
+/**
+ * 重置「界面导览已看过」标记（重看导览时可显式重置）。
+ */
+export const resetLayoutTourSeen = () => http.put('/api/local-account/layout-tour', { seen: false })

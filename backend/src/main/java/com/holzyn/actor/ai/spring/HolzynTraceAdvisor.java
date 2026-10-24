@@ -208,6 +208,12 @@ public class HolzynTraceAdvisor implements CallAdvisor, StreamAdvisor {
                 hit = cacheRead.intValue();
             }
         }
+        // 未命中推算：部分兼容网关（HolzynLLMServer / 部分 DeepSeek 风格代理）只回传
+        // prompt_cache_hit_tokens 而省略 prompt_cache_miss_tokens——若缺 miss 但已知 prompt 与 hit，
+        // 按「prompt = hit + miss」约定补齐 miss，否则命中率会恒被算成 100%（hit/(hit+0)）。
+        if (miss == null && hit != null && prompt != null) {
+            miss = Math.max(0, prompt - hit);
+        }
         return new AiUsage(prompt, completion, hit, miss);
     }
 

@@ -120,7 +120,8 @@ class HolzynTraceAdvisorTest {
     }
 
     /**
-     * usageOf：OpenAI 风格 prompt_tokens_details.cached_tokens → cacheHit 解析。
+     * usageOf：OpenAI 风格 prompt_tokens_details.cached_tokens → cacheHit 解析；
+     * 未回传 miss 时按「prompt = hit + miss」推算（否则命中率恒 100%）。
      */
     @Test
     void usageOfParsesOpenAiCachedTokens() {
@@ -131,7 +132,7 @@ class HolzynTraceAdvisorTest {
         Usage usage = new DefaultUsage(100, 25, 125, nativeUsage, null, null);
         AiUsage parsed = HolzynTraceAdvisor.usageOf(response("x", usage));
         assertEquals(40, parsed.cacheHitTokens());
-        assertNull(parsed.cacheMissTokens());
+        assertEquals(60, parsed.cacheMissTokens(), "未回传 miss 应推算为 prompt - hit = 100 - 40");
     }
 
     /**

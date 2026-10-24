@@ -40,6 +40,9 @@ export default defineConfig({
             { name: 'vendor-element', test: /[\\/]node_modules[\\/](element-plus|@element-plus)[\\/]/, priority: 30 },
             { name: 'vendor-echarts', test: /[\\/]node_modules[\\/](echarts|zrender)[\\/]/, priority: 30 },
             { name: 'vendor-g6', test: /[\\/]node_modules[\\/](@antv|d3|d3-[a-z-]+)[\\/]/, priority: 30 },
+            // 地图渲染：PixiJS 只在首页地图用，体积约 500KB（未压缩）→ 单独一组，
+            // 升级 Pixi 不会让其它 vendor 组失效（本地打包，不走 CDN：决策 #9）。
+            { name: 'vendor-pixi', test: /[\\/]node_modules[\\/](pixi\.js|@pixi)[\\/]/, priority: 30 },
             { name: 'vendor-markdown', test: /[\\/]node_modules[\\/](markdown-it|highlight\.js|linkify-it|mdurl|uc\.micro|entities)[\\/]/, priority: 25 }
           ]
         }

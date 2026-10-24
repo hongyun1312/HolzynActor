@@ -20,6 +20,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAccountStore } from '@/shared/store'
 import { fetchProject } from '@/shared/api'
+import { isGuideArmed } from '@/shared/onboarding/firstRunGuide'
 
 /**
  * 世界沙盘 S1：应用启动直达上次项目的一次性标记。
@@ -78,7 +79,7 @@ const routes = [
     component: () => import('@/features/settings/views/SettingsView.vue'),
     meta: { requiresAccount: true, title: '设置 · HolzynActor' },
     children: [
-      { path: '', redirect: 'general' },
+      { path: '', redirect: '/settings/general' },
       { path: 'general', name: 'global-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { requiresAccount: true, title: '通用设置 · HolzynActor', domain: 'settings' } },
       { path: 'apis', name: 'global-settings-apis', component: () => import('@/features/settings/views/ProjectApiSettings.vue'), meta: { requiresAccount: true, title: 'API 配置 · HolzynActor', domain: 'settings' } },
       { path: 'prompts', name: 'global-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { requiresAccount: true, title: 'Prompt 模板 · HolzynActor', domain: 'settings' } },
@@ -127,7 +128,8 @@ const routes = [
     meta: { requiresAccount: true },
     children: [
       // 世界沙盘 S1：项目默认落地页 = 世界沙盘（绝对主界面，侧边栏第一位）
-      { path: '', redirect: 'sandbox' },
+      // 注意：相对 redirect 在本项目 vue-router 下会按根路径解析（潜藏坑），此处用函数生成绝对路径
+      { path: '', redirect: (to) => `/project/${to.params.id}/sandbox` },
       // 1. 世界地图：项目默认落地页（M4 新首页：2D 地图 + 双主角并置，取代旧 3D 沙盘）
       //    meta.fullbleed 不再需要（三层壳内布局，非全屏 3D 画布）
       { path: 'sandbox', name: 'project-sandbox', component: () => import('@/features/home/views/NewHomeView.vue'), meta: { title: '世界地图 · HolzynActor', domain: 'world' } },
@@ -149,7 +151,7 @@ const routes = [
         component: () => import('@/features/settings/views/SettingsView.vue'),
         meta: { title: '设置 · HolzynActor', domain: 'dialogue' },
         children: [
-          { path: '', redirect: 'general' },
+          { path: '', redirect: (to) => `/project/${to.params.id}/dialogue/settings/general` },
           { path: 'general', name: 'project-dialogue-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { title: '通用设置 · HolzynActor', domain: 'dialogue' } },
           { path: 'apis', name: 'project-dialogue-settings-apis', component: () => import('@/features/settings/views/ProjectApiSettings.vue'), meta: { title: 'API 配置 · HolzynActor', domain: 'dialogue' } },
           { path: 'prompts', name: 'project-dialogue-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { title: 'Prompt 模板 · HolzynActor', domain: 'dialogue' } },
@@ -176,7 +178,7 @@ const routes = [
         component: () => import('@/features/settings/views/SettingsView.vue'),
         meta: { title: '设置 · HolzynActor', domain: 'settings' },
         children: [
-          { path: '', redirect: 'general' },
+          { path: '', redirect: (to) => `/project/${to.params.id}/settings/general` },
           { path: 'general', name: 'project-settings-general', component: () => import('@/features/settings/views/ProjectGeneralSettings.vue'), meta: { title: '通用设置 · HolzynActor', domain: 'settings' } },
           { path: 'apis', name: 'project-settings-apis', component: () => import('@/features/settings/views/ProjectApiSettings.vue'), meta: { title: 'API 配置 · HolzynActor', domain: 'settings' } },
           { path: 'prompts', name: 'project-settings-prompts', component: () => import('@/features/settings/views/ProjectPromptSettings.vue'), meta: { title: 'Prompt 模板 · HolzynActor', domain: 'settings' } },
@@ -245,10 +247,9 @@ router.beforeEach(async (to) => {
   }
 
   // 世界沙盘 S1：应用启动直达上次所在项目（仅画廊落地页首次导航触发；会话内回画廊不再重定向）
-  // v1.1.0-beta.2：新用户引导 pending 时屏蔽直达——刚完成首次向导的用户必须落在画廊看到引导
-  // （否则「安装完成 → 直接进示例世界」绕过了引导；pending 由 FirstRunGuide 消费后清除）。
-  const guidePending = (() => { try { return localStorage.getItem('holzyn.firstRunGuide.pending.v1') === '1' } catch (_) { return false } })()
-  if (!startupRedirectHandled && account.isOnboarded && to.path === '/' && !guidePending) {
+  // v1.1.0-beta.2：新用户引导「待启动」时屏蔽直达——刚完成首次向导的用户必须落在画廊看到引导
+  // （否则「安装完成 → 直接进示例世界」绕过了引导；待启动标记由 FirstRunGuide 消费后清除）。
+  if (!startupRedirectHandled && account.isOnboarded && to.path === '/' && !isGuideArmed()) {
     startupRedirectHandled = true
     const lastId = account.lastProjectId
     if (lastId) {

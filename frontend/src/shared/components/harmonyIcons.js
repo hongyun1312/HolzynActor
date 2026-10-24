@@ -28,6 +28,7 @@
  * API→ic_public_security、用量→ic_public_view_list、展开箭头→ic_public_drawer。</p>
  */
 import ic_public_add from '@/assets/icons/ic_public_add.svg?raw'
+import ic_public_about from '@/assets/icons/ic_public_about.svg?raw'
 import ic_public_albums from '@/assets/icons/ic_public_albums.svg?raw'
 import ic_public_arrow_left from '@/assets/icons/ic_public_arrow_left.svg?raw'
 import ic_public_arrow_right from '@/assets/icons/ic_public_arrow_right.svg?raw'
@@ -71,6 +72,7 @@ import ic_gallery_map_all from '@/assets/icons/ic_gallery_map_all.svg?raw'
 /** HarmonyOS 图标文件名 → SVG 文本（供 HIcon 渲染；key 不带 .svg 后缀） */
 export const HARMONY_ICONS = {
   ic_public_add,
+  ic_public_about,
   ic_public_albums,
   ic_public_arrow_left,
   ic_public_arrow_right,
@@ -115,6 +117,7 @@ export const HARMONY_ICONS = {
 /** Element Plus 图标名 → HarmonyOS 图标文件名（HIcon 的 name 传 Element 名即可自动替换） */
 export const ELEMENT_TO_HARMONY = {
   Plus: 'ic_public_add',
+  InfoFilled: 'ic_public_about',
   Delete: 'ic_public_delete',
   Clock: 'ic_public_clock',
   MagicStick: 'ic_public_highlight',

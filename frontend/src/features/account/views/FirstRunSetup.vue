@@ -24,8 +24,8 @@
         后端 AI 生成六维 → 回填表单预览 → 确认保存。保存同时写本地账户与玩家档案，
         身份/个人档案与 persona 的 identity/background 自动同步。</li>
   </ul>
-  <p>完成后：标记向导完成 → 设「新手引导 pending」→ 进入项目画廊，自动启动 7 步交互式引导
-  （画廊 → 示例世界青禾村 → 世界内），可跳过、可重看。</p>
+  <p>完成后：标记向导完成 → 置位「新手引导待启动」→ 进入项目画廊，自动启动 7 步交互式引导
+  （画廊 → 示例世界浮生小镇 · 青屿镇 → 世界内），可跳过、可重看。</p>
   <p>数据：useAccountStore（本地账户），保存走 /api/local-account；模型配置走 /api/model-apis
   （projectId 空 = 用户级默认）；玩家档案走 /api/player-profile；AI 补充生成走
   POST /api/player-profile/generate（新接口）。</p>
@@ -34,6 +34,15 @@
   <div class="firstrun-page glass-scene" :class="{ 'no-cloudtrain': !cloudTrainEnabled }">
     <!-- 云间列车动态背景（全站统一；可在「设置 → 主题与外观」关闭或调分辨率） -->
     <CloudTrainBackground v-if="cloudTrainEnabled" :overrides="cloudTrainOverrides" />
+    <!--
+      无边框窗口：本页不走 AppShell（全屏向导），所以自己提供窗口标题栏能力——
+      顶部 52px 拖拽条（可拖动窗口/双击最大化）+ 右上角自绘三键。
+      不给的话首启向导期间窗口既不能拖动也不能最小化（无系统标题栏）。
+    -->
+    <div class="fr-window-chrome">
+      <div class="fr-window-drag" aria-hidden="true"></div>
+      <WindowControls standalone />
+    </div>
     <!-- ===== 阶段 0：启动动画（占位版，仅首次显示） ===== -->
     <div v-if="stage === 'splash'" class="fr-splash" @click="finishSplash">
       <div class="fr-splash-inner">
@@ -256,7 +265,7 @@
 /**
  * 首次设置向导（新用户引导，v1.1.0-beta.2 重构）。
  * <p>阶段机：splash（启动动画，仅首次）→ api（连接模型，可跳过）→ persona（我的形象，含 AI 补充生成）
- * → 保存并进入画廊（设新手引导 pending，由 FirstRunGuide 接续 7 步引导）。</p>
+ * → 保存并进入画廊（置位新手引导待启动标记，由 FirstRunGuide 接续 7 步引导）。</p>
  * <p>旧「开始使用」信息卡（时钟/成本/对谈/AI 助手）由新引导流程取代：完成本向导后
  * 进入画廊自动启动引导，引导内逐一步骤讲解这些能力。</p>
  */
@@ -266,7 +275,9 @@ import { ElMessage } from 'element-plus'
 import { useAccountStore } from '@/shared/store'
 import { useTheme } from '@/shared/theme'
 import { savePlayerProfile, fetchPlayerProfile, fetchModelApis, createModelApi, testModelApi, generatePlayerProfile } from '@/shared/api'
+import { armGuide } from '@/shared/onboarding/firstRunGuide'
 import CloudTrainBackground from '@/shared/components/CloudTrainBackground.vue'
+import WindowControls from '@/shared/layout/WindowControls.vue'
 import { useGlassScene } from '@/shared/composables/useGlassScene'
 
 const router = useRouter()
@@ -292,8 +303,6 @@ const stage = ref('')
 
 /** 启动动画「本机已看过」标记（仅首次显示；刷新后不再重复） */
 const SPLASH_SEEN_KEY = 'holzyn.splash.seen.v1'
-/** 新手引导 pending 标记（完成向导后置位，FirstRunGuide 消费后清除） */
-const GUIDE_PENDING_KEY = 'holzyn.firstRunGuide.pending.v1'
 
 const form = reactive({
   nickname: '',
@@ -528,12 +537,7 @@ async function persistAccount() {
   await syncPlayerProfile()
 }
 
-/** 置位新手引导 pending（FirstRunGuide 消费：进入画廊后自动启动引导） */
-function armGuide() {
-  try { localStorage.setItem(GUIDE_PENDING_KEY, '1') } catch (_) { /* 隐私模式静默 */ }
-}
-
-/** 完成向导：保存并进入画廊（设引导 pending，FirstRunGuide 接续） */
+/** 完成向导：保存并进入画廊（置位引导待启动，由 FirstRunGuide 接续 7 步引导） */
 async function finish() {
   saving.value = true
   try {
@@ -584,6 +588,26 @@ onMounted(init)
   background: var(--bg-page);
 }
 
+/* ===== 无边框窗口的自绘标题栏（本页不走 AppShell，需自带拖拽区与窗口三键） =====
+   层级取 --z-window（90），高于本页的启动动画层（其 z = --z-window − 1），
+   否则启动动画期间窗口三键会被盖住点不到。 */
+.fr-window-chrome {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--shell-topbar-h, 52px);
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  z-index: var(--z-window, 90);
+}
+.fr-window-drag {
+  flex: 1;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
 /* ===== 启动动画（占位版：品牌字 + 光晕环 + 淡入，后期再精修；背景由云间列车承担） ===== */
 .fr-splash {
   position: fixed;
@@ -597,7 +621,7 @@ onMounted(init)
     radial-gradient(1000px 600px at 50% 30%, rgba(90, 140, 255, 0.14), transparent 60%),
     radial-gradient(800px 500px at 80% 90%, rgba(130, 90, 255, 0.12), transparent 60%),
     var(--glass-scrim, rgba(5, 9, 14, 0.35));
-  z-index: 2000;
+  z-index: calc(var(--z-window, 90) - 1);
 }
 .fr-splash-inner { text-align: center; animation: frSplashIn 1s var(--dsw-ease, ease) both; }
 @keyframes frSplashIn {

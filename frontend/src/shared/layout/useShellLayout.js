@@ -26,12 +26,28 @@ import {
 } from '@/shared/store/layout'
 
 /**
- * 断点（**唯一事实来源在 CSS 令牌**：`variables.css` 的 `--bp-md/--bp-lg/--bp-xl`；
- * 本文件的两个常量必须与之保持同值——改一处必须同时改另一处，别处不得再定义断点）。
- * V2.0 起 CSS 侧只允许使用这三个档位值。
+ * 外壳断点（**唯一事实来源在 CSS 令牌**：`variables.css` 的
+ * `--bp-shell-rail` / `--bp-shell-overlay`；本文件的两个常量必须与之保持同值——
+ * 改一处必须同时改另一处，别处不得再定义断点）。
+ *
+ * <p>取值依据：桌面端窗口**每次打开都是 16:9、基准逻辑尺寸 1280×720**（见
+ * `docs/设计文档/HolzynActor_桌面端16比9沉浸式窗口与UI基准_设计_V1.0.md`）。
+ * 基准 1280 下侧栏必须**默认常驻展开**，所以「自动收回」的门槛压到 1120：
+ * 只有把窗口拖得明显小于基准（「当前界面特别小」）才收成图标栏，而不是一开窗就收
+ * （旧值 1440 会在基准尺寸直接收栏，与「默认展开」冲突）。</p>
  */
-export const BREAKPOINT_MEDIUM = 1440
-export const BREAKPOINT_SMALL = 1024
+export const BREAKPOINT_MEDIUM = 1120 // = --bp-shell-rail：低于此值侧栏自动收回为图标栏
+export const BREAKPOINT_SMALL = 960 // = --bp-shell-overlay：低于此值侧栏改覆盖式滑入
+
+/**
+ * 内容区「窄」门槛（= CSS 令牌 `--bp-content-narrow`）。
+ *
+ * <p>为什么页面不能直接用视口宽度判定窄屏：侧栏在 1280 基准下常驻展开要吃掉 288px，
+ * 视口 1280 时内容区只有约 992px。取 1152 = 旧版 1440 视口扣掉侧栏与留白后的内容区宽度，
+ * 这样「内容窄不窄」在历史各档位上的结论与改造前一致，同时不再与外壳形态耦合
+ * （用户手动收起侧栏 → 内容变宽 → 页面自动回到宽布局）。</p>
+ */
+export const BREAKPOINT_CONTENT = 1152
 
 /** 侧栏与内容区之间的留白（悬浮岛左右各一份；沙盘 3D 向左延伸需用同一数值） */
 export const SIDEBAR_MARGIN = 12
@@ -52,11 +68,13 @@ function bindViewport() {
  * <p>职责：把「视口断点 → 侧栏形态 → CSS 变量」这条链路收敛到一处，让所有页面与组件
  * 只读令牌、不各自算尺寸。同时提供抽屉开关的语义化封装（互斥 / Esc 分层）。</p>
  *
- * <p>三种形态（对齐设计规格 §3.3）：</p>
+ * <p>三种形态（对齐设计规格 §3.3；门槛按 16:9 基准 1280×720 重新校准）：</p>
  * <ul>
- *   <li>`wide`（≥1440）：侧栏按用户记忆宽度常驻；</li>
- *   <li>`medium`（1024–1439）：侧栏自动收窄为 56px 图标栏（用户手动展开可覆盖该自动行为）；</li>
- *   <li>`overlay`（&lt;1024）：侧栏改为覆盖式滑入，内容区占满。</li>
+ *   <li>`wide`（≥1120）：侧栏按用户记忆宽度**常驻展开**——基准 1280 落在这里，
+ *       也就是「每次打开窗口侧栏都是展开的」；</li>
+ *   <li>`medium`（960–1119）：窗口被拖到明显小于基准（「界面特别小」）时，侧栏自动收窄为
+ *       56px 图标栏（用户手动展开可覆盖该自动行为）；</li>
+ *   <li>`overlay`（&lt;960）：侧栏改为覆盖式滑入，内容区占满。</li>
  * </ul>
  *
  * <p>关键职责之二：**动态写入 `--shell-side-w` 与 `--sb-inset-left`**。
@@ -100,6 +118,15 @@ export function useShellLayout() {
     const sb = shellMode.value === 'overlay' ? 0 : effectiveSidebarWidth.value + SIDEBAR_MARGIN * 2
     return Math.max(320, viewportWidth.value - sb)
   })
+
+  /**
+   * 内容区是否「窄」（页面布局降级判定）。
+   *
+   * <p>页面若直接用 `shellMode !== 'wide'` 当窄屏，在基准 1280 上会误判为宽屏：
+   * 外壳认为「侧栏该展开了」不等于「页面还有地方摆三栏」。这里按**内容区实际宽度**
+   * 判定，与侧栏宽度、用户是否手动收起侧栏联动，是页面侧唯一正确的降级依据。</p>
+   */
+  const contentIsNarrow = computed(() => contentAreaWidth.value < BREAKPOINT_CONTENT)
 
   /** 把布局数值同步到 CSS 变量（样式层唯一事实来源）；返回值便于测试断言 */
   function applyCssVars() {
@@ -179,6 +206,7 @@ export function useShellLayout() {
     effectiveSidebarWidth,
     sidebarIsIconOnly,
     contentAreaWidth,
+    contentIsNarrow,
     sidebarWidth,
     sidebarCollapsed,
     // 动作

@@ -280,26 +280,25 @@ const route = useRoute()
 const projectId = Number(route.params.id)
 
 // ==================== 响应式档位（P1-3） ====================
-/** 窄屏：<1280px → 上下文栏改为覆盖式抽屉 */
+/** 窄屏：内容区不足 1152px → 上下文栏改为覆盖式抽屉 */
 const narrow = ref(false)
-/** 极窄：<1024px → 会话列表也改为覆盖式抽屉（外壳侧栏此时同样是覆盖式） */
+/** 极窄：外壳进入覆盖式（视口 <960px）→ 会话列表也改为覆盖式抽屉 */
 const veryNarrow = ref(false)
 /** 覆盖式抽屉开关 */
 const ctxOpen = ref(false)
 const listOpen = ref(false)
 
 /**
- * 窄屏档位直接读外壳的权威状态（V2.0 修正）。
+ * 窄屏档位读外壳的权威状态，但分两把尺子（16:9 基准 1280 校准）。
  *
- * <p>改造前本页自带两个野断点字符串（`max-width: 1279px` / `1023px`），与外壳的
- * `BREAKPOINT_MEDIUM=1440` / `BREAKPOINT_SMALL=1024` 不一致：在 1280–1439 区间里，
- * 外壳已把侧栏收成图标导轨，本页却仍按"宽屏"渲染三栏 → 中间对话列被挤压。
- * 现在改为订阅 {@link useShellLayout} 的 `shellMode`，与侧栏/抽屉降级永远同步：
- * `narrow` = 非 wide（&lt;1440，右栏转覆盖式抽屉）；`veryNarrow` = overlay（&lt;1024，会话列表也转抽屉）。</p>
+ * <p>`narrow` 必须按**内容区宽度**判定（{@link useShellLayout} 的 `contentIsNarrow`）：
+ * 桌面对话窗口基准 1280×720 下侧栏是常驻展开的（要吃掉 288px），若按视口宽度判定，
+ * 1280 会被误判成"宽屏"→ 三栏（会话列表 260 + 对话流 + 角色信息 340）把中间对话流压成细条。
+ * `veryNarrow` 仍按外壳形态（overlay = 视口 <960），此时会话列表也转抽屉兜底。</p>
  */
-const { shellMode } = useShellLayout()
-watch(shellMode, (mode) => {
-  const n = mode !== 'wide'
+const { shellMode, contentIsNarrow } = useShellLayout()
+watch([shellMode, contentIsNarrow], ([mode, contentNarrow]) => {
+  const n = contentNarrow
   const vn = mode === 'overlay'
   if (narrow.value !== n || veryNarrow.value !== vn) {
     // 回到宽屏时关掉覆盖式抽屉，避免「布局变了抽屉还开着」

@@ -28,7 +28,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
-import java.util.concurrent.Executors;
 
 /**
  * 优雅关闭控制器。
@@ -65,19 +64,38 @@ public class GracefulShutdownController {
             return R.fail(403, "shutdown disabled");
         }
         log.info("[system] 收到优雅关闭请求，300ms 后关闭 Spring 上下文（H2 干净落盘）");
-        Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "holzyn-graceful-shutdown");
-            t.setDaemon(false);
-            return t;
-        }).submit(() -> {
+        // 关闭时序修复（2026-10-23 实测）：此前这里用 Executors.newSingleThreadExecutor 且线程
+        // setDaemon(false)、线程池从不 shutdown —— SpringApplication.exit() 只关闭上下文、
+        // 不会结束 JVM，遗留的非守护池线程让 JVM 永远不退出，桌面端只能等满 8s 超时后强杀
+        // （真实日志：19:20:04.459 上下文已关闭，19:20:12.132 才被 taskkill）。
+        // 现在改为「守护线程 + 上下文关闭后显式 System.exit」，落盘语义不变，退出耗时从 ~8s 降到 <1s。
+        Thread shutdownThread = new Thread(() -> {
             try {
                 Thread.sleep(300);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
             int code = SpringApplication.exit(context, () -> 0);
-            log.info("[system] Spring 上下文已关闭，exitCode={}", code);
-        });
+            log.info("[system] Spring 上下文已关闭，exitCode={}，随后结束 JVM（守护线程，不拖延退出）", code);
+            // 显式结束 JVM：上下文关闭只释放资源，能否退出还取决于是否残留非守护线程
+            exitJvm(code);
+        }, "holzyn-graceful-shutdown");
+        shutdownThread.setDaemon(true);
+        shutdownThread.start();
         return R.ok(Map.of("status", "shutting-down"));
+    }
+
+    /**
+     * 结束当前 JVM（生产实现）。
+     *
+     * <p>抽成包内可覆盖方法<b>只为</b>让回归测试能断言「上下文关闭后确实结束了 JVM」——
+     * 2026-10-23 的事故恰恰漏了这一步：上下文已关闭、但 JVM 因残留非守护线程不退出，
+     * 桌面端每次退出都要等满 8s 超时再强杀（真实日志 19:20:04.459 → 19:20:12.132）。
+     * 若在测试里直接调 {@code System.exit} 会把 Surefire 进程一起干掉，故留这个替换点。</p>
+     *
+     * @param code 退出码
+     */
+    void exitJvm(int code) {
+        System.exit(code);
     }
 }

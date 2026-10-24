@@ -57,7 +57,10 @@ class PromptTemplateServiceTest {
         // 对谈 M5（2026-10-13 第 58 次）：新增 dialogue_group_reply 群聊逐角色回复模板 → 88 → 89
         // 对谈 M6（2026-10-13 第 59 次）：新增 dialogue_consolidation 沉淀（关系 delta + 记忆要点）模板 → 89 → 90
         // 首次引导·我的形象（第 72 次）：新增 player_profile_gen 玩家 persona 六维补充生成模板 → 90 → 91
-        assertEquals(91, builtins.size());
+        // 世界地图生成管线 V1.1（第 76 次）：新增 world_map_profile 世界档案 /
+        // world_map_assets 建筑资产类型库 / world_map_roads 路网拓扑 三模板 → 91 → 94
+        // 世界地图生成管线 V1.3（第 82 次）：新增 world_map_brief 世界→地图契约（S0b）模板 → 94 → 95
+        assertEquals(95, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_CARD_GEN));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOG));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_GROUP));
@@ -167,8 +170,10 @@ class PromptTemplateServiceTest {
         // 对谈 M5（2026-10-13 第 58 次）：新增 dialogue_group_reply 群聊逐角色回复模板 → 88 → 89，
         // 对谈 M6（2026-10-13 第 59 次）：新增 dialogue_consolidation 沉淀模板 → 89 → 90，
         // 新用户引导（2026-10-16 第 71 次第二批）：新增 player_profile_gen 玩家档案 AI 补充生成模板 → 90 → 91，
+        // 世界地图生成管线 V1.1（第 76 次）：新增 world_map_profile / world_map_assets / world_map_roads → 91 → 94，
+        // 世界地图生成管线 V1.3（第 82 次）：新增 world_map_brief（S0b 契约）→ 94 → 95，
         // 此处的逐段计数断言与最终断言保持一致，避免历史注释计数误导。
-        assertEquals(91, builtins.size());
+        assertEquals(95, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_A));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_B));
         // 世界常识摘要（2026-10-08）：world_common_knowledge 模板含世界观占位符 + 300-500 字要求

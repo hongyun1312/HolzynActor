@@ -31,4 +31,4 @@ rm -rf "$ROOT/backend/target/classes/static"
 echo "[build] mvn clean package ..."
 ( cd "$ROOT/backend" && mvn -q -Dmaven.test.skip=true clean package )
 
-echo "[build] OK: backend/target/holzyn-actor-1.1.0-beta.2.jar"
+echo "[build] OK: backend/target/holzyn-actor-1.1.1-beta.1.jar"

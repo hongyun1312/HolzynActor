@@ -82,7 +82,8 @@ public class DebugUsageStatsService {
         long tokenIn = logs.stream().mapToLong(l -> l.getTokenIn() == null ? 0 : l.getTokenIn()).sum();
         long tokenOut = logs.stream().mapToLong(l -> l.getTokenOut() == null ? 0 : l.getTokenOut()).sum();
         long cacheHit = logs.stream().mapToLong(l -> l.getCacheHitTokens() == null ? 0 : l.getCacheHitTokens()).sum();
-        long cacheMiss = logs.stream().mapToLong(l -> l.getCacheMissTokens() == null ? 0 : l.getCacheMissTokens()).sum();
+        long cacheMiss = logs.stream().mapToLong(l -> UsageService.effectiveMiss(l.getTokenIn(),
+                l.getCacheHitTokens(), l.getCacheMissTokens())).sum();
         long duration = logs.stream().mapToLong(l -> l.getDurationMs() == null ? 0 : l.getDurationMs()).sum();
         m.put("count", count);
         m.put("tokenIn", tokenIn);

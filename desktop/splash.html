@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'unsafe-inline'; font-src 'none';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HolzynActor · 正在启动</title>
+<style>
+  :root {
+    --bg-a: #0D1526;
+    --bg-b: #0A111F;
+    --brand-a: #4D7CFF;
+    --brand-b: #9D6BFF;
+    --text-hi: #EDF2FA;
+    --text-mid: #93A5BF;
+    --text-low: #5C6B82;
+    --track: rgba(148, 163, 184, 0.16);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    background:
+      radial-gradient(110% 120% at 10% -12%, rgba(29, 92, 255, 0.15), transparent 55%),
+      radial-gradient(130% 120% at 92% 116%, rgba(123, 77, 255, 0.12), transparent 55%),
+      linear-gradient(180deg, var(--bg-a) 0%, var(--bg-b) 100%);
+    color: var(--text-hi);
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+    transition: opacity .26s ease;
+  }
+  body.closing { opacity: 0; }
+
+  /* 极细暗角，增加质感 */
+  .vignette {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background: radial-gradient(120% 120% at 50% 42%, transparent 62%, rgba(0, 0, 0, 0.34) 100%);
+  }
+
+  /* 品牌区：大 Logo + 产品名（IDEA 式并排） */
+  .brand {
+    position: relative; z-index: 1;
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    gap: 24px;
+    padding: 0 48px;
+  }
+  .logo {
+    flex: none;
+    width: 88px; height: 88px;
+    border-radius: 22px; overflow: hidden; position: relative;
+    background: linear-gradient(135deg, #16233D, #0E1830);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.09),
+      0 14px 36px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+      0 0 52px rgba(77, 124, 255, 0.22);
+    animation: logo-in .5s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  .logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .logo svg { width: 100%; height: 100%; display: block; }
+  @keyframes logo-in {
+    from { opacity: 0; transform: scale(.92); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  .brand-text { display: flex; flex-direction: column; }
+  .product {
+    font-size: 30px; font-weight: 700; letter-spacing: 1.5px;
+    line-height: 1.1; color: var(--text-hi);
+    animation: fade-up .55s ease .08s both;
+  }
+  .sub-tag {
+    margin-top: 9px;
+    font-size: 12px; letter-spacing: 5px; color: var(--text-mid);
+    animation: fade-up .55s ease .18s both;
+  }
+  .sub-slogan {
+    margin-top: 12px;
+    font-size: 13px; font-weight: 600; letter-spacing: 1.5px;
+    background: linear-gradient(120deg, #6FA8FF, #9C7BFF);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: fade-up .55s ease .28s both;
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 底部：阶段文字 + 细进度条 + 版本/版权 */
+  .boot { position: relative; z-index: 1; padding: 0 34px 22px; }
+  .stage-row { display: flex; align-items: center; gap: 9px; height: 20px; }
+  .spinner {
+    flex: none; width: 11px; height: 11px; border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.16);
+    border-top-color: #8FB4FF;
+    animation: spin .8s linear infinite;
+  }
+  .stage {
+    font-size: 11.5px; letter-spacing: .4px; color: var(--text-mid);
+    white-space: nowrap;
+  }
+  .track {
+    margin-top: 9px; height: 3px; border-radius: 999px;
+    background: var(--track); overflow: visible; position: relative;
+  }
+  .fill {
+    position: relative; height: 100%; width: 5%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--brand-a), var(--brand-b));
+    transition: width .38s cubic-bezier(.3, .6, .3, 1);
+  }
+  /* 进度条前缘光点 */
+  .fill::after {
+    content: ''; position: absolute; right: -2px; top: 50%; transform: translateY(-50%);
+    width: 9px; height: 9px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 10px 2px rgba(140, 160, 255, 0.7);
+  }
+  /* 细流光 */
+  .fill::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    animation: shimmer 1.5s linear infinite;
+  }
+  .meta-row {
+    margin-top: 13px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10.5px; letter-spacing: .5px; color: var(--text-low);
+  }
+  .ver { font-family: Consolas, "Courier New", monospace; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes shimmer { from { transform: translateX(-120%); } to { transform: translateX(120%); } }
+  body.done .spinner { display: none; }
+  body.done .fill::before { display: none; }
+
+  /* 错误态：启动失败 → 弹窗内展示错误 + 操作按钮 */
+  .error {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 30px 34px;
+    background: rgba(10, 17, 31, 0.95);
+    backdrop-filter: blur(6px);
+  }
+  .error[hidden] { display: none; }
+  .error h2 { font-size: 15px; font-weight: 600; color: #F87171; letter-spacing: .5px; }
+  .error pre {
+    margin-top: 12px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px; line-height: 1.7; color: #C7D2E0;
+    white-space: pre-wrap; word-break: break-all;
+    max-height: 200px; overflow: auto;
+  }
+  .error .btns {
+    margin-top: 20px;
+    display: flex; gap: 10px; justify-content: flex-end;
+  }
+  .btn {
+    padding: 7px 16px; border-radius: 8px; font-size: 12.5px; cursor: pointer;
+    font-family: inherit; border: 1px solid transparent;
+    transition: all .15s ease; outline: none;
+  }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--brand-a), var(--brand-b));
+    color: #fff; font-weight: 600;
+  }
+  .btn.primary:hover { filter: brightness(1.12); }
+  .btn.secondary {
+    background: rgba(148, 163, 184, 0.12); color: #D7E3F4; border-color: rgba(148, 163, 184, 0.32);
+  }
+  .btn.secondary:hover { background: rgba(148, 163, 184, 0.2); }
+  .btn.danger {
+    background: transparent; color: #F87171; border-color: rgba(248, 113, 113, 0.36);
+  }
+  .btn.danger:hover { background: rgba(248, 113, 113, 0.12); }
+</style>
+</head>
+<body class="splash">
+  <div class="vignette" aria-hidden="true"></div>
+
+  <!-- 品牌区：Logo + 产品名并排（IDEA 式） -->
+  <main class="brand">
+    <div class="logo">
+      <img id="logoImg" src="build/icon.png" alt="HolzynActor" onerror="renderLogoFallback()">
+    </div>
+    <div class="brand-text">
+      <h1 class="product">HolzynActor</h1>
+      <div class="sub-tag">全境众生 · 浮生</div>
+      <div class="sub-slogan">让世界像真人一样生活</div>
+    </div>
+  </main>
+
+  <!-- 底部：阶段文字 + 细进度条 + 版本/版权 -->
+  <footer class="boot" id="boot">
+    <div class="stage-row">
+      <span class="spinner" id="spinner"></span>
+      <span class="stage" id="stage">正在启动世界引擎…</span>
+    </div>
+    <div class="track"><div class="fill" id="fill"></div></div>
+    <div class="meta-row">
+      <span class="copy">© 2026 HONGYUN</span>
+      <span class="ver" id="ver">Version 1.1.1-beta.1</span>
+    </div>
+  </footer>
+
+  <!-- 错误态（隐藏） -->
+  <section class="error" id="error" hidden>
+    <h2 id="errTitle">启动失败</h2>
+    <pre id="errDetail"></pre>
+    <div class="btns">
+      <button class="btn secondary" id="btnLog">打开日志目录</button>
+      <button class="btn primary" id="btnRetry">重试</button>
+      <button class="btn danger" id="btnQuit">退出</button>
+    </div>
+  </section>
+
+  <script>
+    'use strict';
+    var $ = function (id) { return document.getElementById(id); };
+    var verEl = $('ver'), stageEl = $('stage'), fillEl = $('fill'),
+        spinnerEl = $('spinner'), bootEl = $('boot'), errEl = $('error');
+
+    // Logo 兜底：应用图标缺失/未打包时用品牌 SVG 占位（不依赖任何外部资源）
+    function renderLogoFallback() {
+      var img = $('logoImg');
+      if (!img) return;
+      var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 128 128');
+      var defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      var g = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+      g.setAttribute('id', 'lg'); g.setAttribute('x1', '0'); g.setAttribute('y1', '0'); g.setAttribute('x2', '1'); g.setAttribute('y2', '1');
+      var s1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop'); s1.setAttribute('offset', '0'); s1.setAttribute('stop-color', '#4D7CFF');
+      var s2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop'); s2.setAttribute('offset', '1'); s2.setAttribute('stop-color', '#9D6BFF');
+      g.appendChild(s1); g.appendChild(s2); defs.appendChild(g); svg.appendChild(defs);
+      var bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bg.setAttribute('width', '128'); bg.setAttribute('height', '128'); bg.setAttribute('fill', 'url(#lg)');
+      svg.appendChild(bg);
+      var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', '64'); circle.setAttribute('cy', '58'); circle.setAttribute('r', '26');
+      circle.setAttribute('fill', 'rgba(255,255,255,0.92)');
+      svg.appendChild(circle);
+      var arc = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+      arc.setAttribute('cx', '64'); arc.setAttribute('cy', '104'); arc.setAttribute('rx', '40'); arc.setAttribute('ry', '13');
+      arc.setAttribute('fill', 'rgba(255,255,255,0.25)');
+      svg.appendChild(arc);
+      img.replaceWith(svg);
+    }
+
+    // 主进程推送的启动状态（进度/阶段文字/错误/淡出）
+    function setState(s) {
+      if (!s) return;
+      if (s.state === 'error') {
+        bootEl.hidden = true;
+        errEl.hidden = false;
+        if (s.title) $('errTitle').textContent = s.title;
+        if (s.detail) $('errDetail').textContent = s.detail;
+        return;
+      }
+      if (s.state === 'done') {
+        document.body.classList.add('done');
+        if (s.closing) document.body.classList.add('closing');
+      }
+      if (typeof s.progress === 'number') {
+        fillEl.style.width = Math.max(0, Math.min(100, s.progress)) + '%';
+      }
+      if (s.label) stageEl.textContent = s.label;
+    }
+
+    var api = window.holzynSplash;
+    if (api) {
+      api.onState(setState);
+      // 版本号以主进程 app.getVersion() 为准（打包后与 package.json 同口径）
+      api.getVersion().then(function (v) {
+        if (v) verEl.textContent = 'Version ' + v;
+      }).catch(function () { /* 保持静态兜底版本号 */ });
+      $('btnLog').addEventListener('click', function () { api.openLogDir(); });
+      $('btnRetry').addEventListener('click', function () { api.retry(); });
+      $('btnQuit').addEventListener('click', function () { api.quit(); });
+    }
+  </script>
+</body>
+</html>

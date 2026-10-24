@@ -65,6 +65,15 @@ public class LocalAccountVO {
     /** 上次所在项目 ID（世界沙盘 S1：应用启动直达上次项目；可空） */
     private Long lastProjectId;
 
+    /** 新用户 7 步引导完成标记：0 未完成/1 已完成（前端据此决定是否自动启动引导） */
+    private Integer guideCompleted;
+
+    /** 引导完成时间（未完成时为空） */
+    private LocalDateTime guideCompletedAt;
+
+    /** 「界面导览」是否已看过：0 未看过/1 已看过（跨重启持久化） */
+    private Integer layoutTourSeen;
+
     /** 创建时间 */
     private LocalDateTime createdAt;
 

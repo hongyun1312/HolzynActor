@@ -49,6 +49,38 @@ class UsageServiceTest {
     }
 
     /**
+     * 有效未命中推算：网关只回传命中不回传未命中（miss=0）时按「prompt = hit + miss」补齐，
+     * 避免命中率被恒 100%（2026-10-20 抓修）。
+     */
+    @Test
+    void effectiveMissDerivesFromTokenInWhenMissing() {
+        // 正常：显式 miss > 0 原样保留
+        assertEquals(60, UsageService.effectiveMiss(100, 40, 60));
+        // 缺失（miss=0）且 hit>0、tokenIn>hit → 推算 tokenIn - hit
+        assertEquals(60, UsageService.effectiveMiss(100, 40, 0));
+        assertEquals(3378, UsageService.effectiveMiss(7474, 4096, 0));
+        // 全命中：tokenIn == hit → 0（命中率 100% 是真实的）
+        assertEquals(0, UsageService.effectiveMiss(40, 40, 0));
+        // 无缓存信息（hit=0）→ 0，不虚构
+        assertEquals(0, UsageService.effectiveMiss(100, 0, 0));
+        assertEquals(0, UsageService.effectiveMiss(null, null, null));
+    }
+
+    /**
+     * summary 对历史缺失 miss 的数据自愈：命中率不再恒 100%。
+     */
+    @Test
+    void summarySelfHealsMissingMiss() {
+        ActorUsageLog a = new ActorUsageLog();
+        a.setTokenIn(100); a.setTokenOut(10);
+        a.setCacheHitTokens(40); a.setCacheMissTokens(0); // 网关只回传命中
+        Map<String, Object> s = UsageService.summary(List.of(a));
+        assertEquals(40, s.get("cacheHit"));
+        assertEquals(60, s.get("cacheMiss"));
+        assertEquals(40.0, (double) s.get("cacheHitRate"), 0.001);
+    }
+
+    /**
      * 分组：按场景聚合（count / token 累加），并按次数降序。
      */
     @Test

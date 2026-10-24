@@ -108,7 +108,7 @@ class NanoJevEvaluateClientTest {
         client = new NanoJevEvaluateClient();
         properties = new NanoJevProperties();
         properties.setEnabled(true);
-        properties.setBaseUrl("https://llm.example.com:14443/v1");
+        properties.setBaseUrl("https://llm.mbfsr.com:14443/v1");
         properties.setMaxRetries(1);
         properties.setTimeoutConnectSeconds(10);
         properties.setTimeoutReadSeconds(30);
@@ -122,7 +122,7 @@ class NanoJevEvaluateClientTest {
         when(currentUserProvider.currentUserId()).thenReturn(1L);
         when(aiCallTraceService.begin(1L)).thenReturn(trace);
         when(modelApiService.resolveProviderConfig(1L, 1L, null)).thenReturn(
-                new ProviderConfig(67L, "https://llm.example.com:14443/v1", "test-key", "qwen3.6-35b-q4-un", false));
+                new ProviderConfig(67L, "https://llm.mbfsr.com:14443/v1", "test-key", "qwen3.6-35b-q4-un", false));
 
         ReflectionTestUtils.setField(client, "properties", properties);
         ReflectionTestUtils.setField(client, "modelApiService", modelApiService);
@@ -161,12 +161,12 @@ class NanoJevEvaluateClientTest {
 
         // 请求 URL 与 Key 复用（N1 用户决策 A：Key 来自 chat provider）
         assertEquals(1, executor.calls.size());
-        assertTrue(executor.calls.get(0).startsWith("POST https://llm.example.com:14443/v1/nanojev/evaluate key=test-key"),
+        assertTrue(executor.calls.get(0).startsWith("POST https://llm.mbfsr.com:14443/v1/nanojev/evaluate key=test-key"),
                 "实际请求：" + executor.calls.get(0));
 
         // trace 记账：model/baseUrl/paramsSnapshot/raw/0 token
         verify(trace).setModel("nanojev");
-        verify(trace).setBaseUrl("https://llm.example.com:14443/v1");
+        verify(trace).setBaseUrl("https://llm.mbfsr.com:14443/v1");
         verify(trace).setStream(false);
         verify(trace).setProviderId(67L);
         verify(trace).setNanojevParams("states=1, questions=3, paths=7");

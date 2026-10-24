@@ -128,12 +128,38 @@ public class UsageService {
         m.put("tokenIn", logs.stream().mapToInt(l -> l.getTokenIn() == null ? 0 : l.getTokenIn()).sum());
         m.put("tokenOut", logs.stream().mapToInt(l -> l.getTokenOut() == null ? 0 : l.getTokenOut()).sum());
         int cacheHit = logs.stream().mapToInt(l -> l.getCacheHitTokens() == null ? 0 : l.getCacheHitTokens()).sum();
-        int cacheMiss = logs.stream().mapToInt(l -> l.getCacheMissTokens() == null ? 0 : l.getCacheMissTokens()).sum();
+        int cacheMiss = logs.stream().mapToInt(l -> effectiveMiss(l.getTokenIn(), l.getCacheHitTokens(),
+                l.getCacheMissTokens())).sum();
         m.put("cacheHit", cacheHit);
         m.put("cacheMiss", cacheMiss);
         m.put("cacheHitRate", cacheHitRate(cacheHit, cacheMiss));
         m.put("durationMs", logs.stream().mapToInt(l -> l.getDurationMs() == null ? 0 : l.getDurationMs()).sum());
         return m;
+    }
+
+    /**
+     * 有效未命中 token（历史数据自愈）。
+     * <p>兼容网关（HolzynLLMServer / 部分 DeepSeek 风格代理）常只回传
+     * {@code prompt_cache_hit_tokens} 而省略 {@code prompt_cache_miss_tokens}，导致落库 miss=0、
+     * 命中率被算成恒 100%。按「prompt = hit + miss」约定：当 miss 缺失（0）但 hit&gt;0 且
+     * tokenIn&gt;hit 时，以 {@code tokenIn - hit} 推算未命中；否则原样返回。</p>
+     *
+     * @param tokenIn 输入 token（可空）
+     *
+     * @param hit 命中 token（可空）
+     *
+     * @param miss 未命中 token（可空）
+     *
+     * @return 有效未命中 token
+     */
+    public static int effectiveMiss(Integer tokenIn, Integer hit, Integer miss) {
+        int h = hit == null ? 0 : hit;
+        int m = miss == null ? 0 : miss;
+        if (m > 0 || h <= 0) {
+            return m;
+        }
+        int in = tokenIn == null ? 0 : tokenIn;
+        return in > h ? in - h : 0;
     }
 
     /**
@@ -173,7 +199,8 @@ public class UsageService {
                     m.put("tokenIn", e.getValue().stream().mapToInt(l -> l.getTokenIn() == null ? 0 : l.getTokenIn()).sum());
                     m.put("tokenOut", e.getValue().stream().mapToInt(l -> l.getTokenOut() == null ? 0 : l.getTokenOut()).sum());
                     int gHit = e.getValue().stream().mapToInt(l -> l.getCacheHitTokens() == null ? 0 : l.getCacheHitTokens()).sum();
-                    int gMiss = e.getValue().stream().mapToInt(l -> l.getCacheMissTokens() == null ? 0 : l.getCacheMissTokens()).sum();
+                    int gMiss = e.getValue().stream().mapToInt(l -> effectiveMiss(l.getTokenIn(), l.getCacheHitTokens(),
+                            l.getCacheMissTokens())).sum();
                     m.put("cacheHit", gHit);
                     m.put("cacheMiss", gMiss);
                     m.put("cacheHitRate", cacheHitRate(gHit, gMiss));
@@ -256,7 +283,7 @@ public class UsageService {
         m.put("tokenIn", l.getTokenIn());
         m.put("tokenOut", l.getTokenOut());
         m.put("cacheHitTokens", l.getCacheHitTokens());
-        m.put("cacheMissTokens", l.getCacheMissTokens());
+        m.put("cacheMissTokens", effectiveMiss(l.getTokenIn(), l.getCacheHitTokens(), l.getCacheMissTokens()));
         m.put("durationMs", l.getDurationMs());
         m.put("cost", l.getCost());
         m.put("createdAt", l.getCreatedAt());

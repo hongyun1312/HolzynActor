@@ -73,6 +73,9 @@ import com.holzyn.actor.domain.worldmap.entity.ActorNpcHome;
 import com.holzyn.actor.domain.worldmap.entity.ActorHomeMember;
 import com.holzyn.actor.domain.worldmap.repository.ActorNpcHomeRepository;
 import com.holzyn.actor.domain.worldmap.repository.ActorHomeMemberRepository;
+// 角色社会关系（actor/relations.json；本次新增段——历史包无此数据 → 跳过，零阻断）
+import com.holzyn.actor.domain.npc.relation.entity.ActorCharacterRelation;
+import com.holzyn.actor.domain.npc.relation.repository.ActorCharacterRelationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -142,6 +145,8 @@ public class HolzynImportService {
     private final ActorEventRepository eventRepository;
     private final ActorSceneRepository sceneRepository;
     private final WorldLocationRepository worldLocationRepository;
+    /** 角色社会关系（actor_relation；随包导入，端点按角色 id 重链） */
+    private final ActorCharacterRelationRepository relationRepository;
     private final ActorPromptTemplateRepository promptTemplateRepository;
     private final ModelProviderRepository modelProviderRepository;
     private final ActorGroupChatConfigRepository groupChatConfigRepository;
@@ -329,6 +334,11 @@ public class HolzynImportService {
         JsonNode characters = readJson(entries, "actor/characters.json");
         if (characters != null && characters.isArray()) {
             for (JsonNode c : characters) {
+                // 普通型 NPC 由 ordinary_npcs.json 段统一导入（type=common），这里跳过——
+                // 否则与 characters.json 里的同型行重复建行，产生克隆副本（兼容旧包同样跳过）。
+                if (com.holzyn.actor.common.NpcRefs.isCommonType(readText(c, "type", "special"))) {
+                    continue;
+                }
                 ActorCharacter ch = new ActorCharacter();
                 ch.setProjectId(project.getId());
                 ch.setType(readText(c, "type", "special"));
@@ -342,6 +352,41 @@ public class HolzynImportService {
                 characterIdMap.put(c.path("id").asLong(), ch.getId());
             }
         }
+
+        // 普通型 NPC（单表 actor_profile，type=common）——紧随特殊型导入，
+        // 必须在角色档案/世界地图/关系/事件/记忆等任何引用普通型 NPC 的段之前导入，
+        // 并把 id 记入 characterIdMap，确保后续所有 npc:{oldId} 引用都能重链到新 id（无缝回导闭环）。
+        JsonNode ordinaryNpcs = readJson(entries, "actor/ordinary_npcs.json");
+        if (ordinaryNpcs != null && ordinaryNpcs.isArray()) {
+            int ordinaryImported = 0;
+            for (JsonNode n : ordinaryNpcs) {
+                ActorCharacter npc = new ActorCharacter();
+                npc.setProjectId(project.getId());
+                // 旧表 actor_profile_ordinary 已废弃：普通型不再靠"在哪张表"表达，必须显式标 type=common，
+                // 否则会被默认成 special（人群调度/沙盘等按 type 过滤的查询就再也找不到这些人）。
+                npc.setType("common");
+                npc.setName(Texts.truncate(readText(n, "name"), 50));
+                npc.setGender(Texts.truncate(readText(n, "gender"), 20));
+                npc.setRace(Texts.truncate(readText(n, "race"), 50));
+                npc.setSubRace(Texts.truncate(readText(n, "subRace"), 50));
+                Integer age = readInt(n, "age");
+                npc.setAge(age == null || age < 0 ? null : age);
+                npc.setAffiliation(Texts.truncate(readText(n, "affiliation"), 100));
+                npc.setLocation(Texts.truncate(readText(n, "location"), 255));
+                npc.setOccupation(Texts.truncate(readText(n, "occupation"), 50));
+                npc.setDetail(readText(n, "detail"));
+                // 运行态（state/lastAction）不再随包导入：这两列已从主表移除，运行态的唯一家在
+                // actor_state（作息状态机/生理与情绪），导入后由状态机按默认态重建，不在这里写。
+                npc = ordinaryNpcRepository.save(npc);
+                // id 映射：普通型 NPC 也记入 characterIdMap（供关系/沙盘/事件等 npc: 引用重链）
+                if (n.path("id").isIntegralNumber()) {
+                    characterIdMap.put(n.path("id").asLong(), npc.getId());
+                }
+                ordinaryImported++;
+            }
+            log.info("[导入] 项目={} 还原普通型 NPC {} 条", project.getName(), ordinaryImported);
+        }
+
         // 角色档案（包内文件名仍是 actor/character_cards.json：格式不变，仅落库目标变了）
         // 起 actor_profile_card 表物理废弃，档案并入角色统一主表 actor_profile 的
         // persona_json / persona_version 两列，因此这里改为：按 id 映射后的 newCharId 找到
@@ -349,6 +394,8 @@ public class HolzynImportService {
         // · systemPrompt 不再导入：system_prompt 概念已废弃（改为运行时按场景渲染分片），包里的旧值无落点；
         // · source 不再导入：来源改由档案 JSON 内的 _sources/generated_by 表达，包外层的旧字段无落点；
         // · 零阻断：单条缺 personaJson、或角色没映射上时跳过并计数，绝不让一个坏条目打断整包导入。
+        // · 特殊型与普通型卡都在此统一还原（普通型须已在 ordinary_npcs 段建行并映射进
+        //   characterIdMap，否则其角色卡会被当成"角色缺失"跳过——顺序：characters→ordinary→cards）。
         JsonNode cards = readJson(entries, "actor/character_cards.json");
         if (cards != null && cards.isArray()) {
             int profileImported = 0;
@@ -387,6 +434,50 @@ public class HolzynImportService {
             }
             log.info("[导入] 项目={} 还原角色档案 {} 条（无 personaJson 或角色缺失跳过 {} 条）",
                     project.getName(), profileImported, profileSkipped);
+        }
+
+        // 角色社会关系（actor/relations.json；本次新增段，历史包无此数据 → 跳过，零阻断）。
+        // 端点重链：fromRef/toRef（npc:/special:/crowd:{旧id}）优先 → characterIdMap 新 id；
+        // fromCharacterId/toCharacterId 兜底；幽灵端点（id=0/未映射）保留名称、id 记 0，不阻断。
+        JsonNode relations = readJson(entries, "actor/relations.json");
+        if (relations != null && relations.isArray()) {
+            int imported = 0, skipped = 0;
+            for (JsonNode r : relations) {
+                String relationType = readText(r, "relationType");
+                if (relationType == null || relationType.isBlank()) {
+                    skipped++;
+                    continue;
+                }
+                String fromRef = readText(r, "fromRef");
+                String toRef = readText(r, "toRef");
+                Long fromId = resolveRelationEndpoint(fromRef, characterIdMap);
+                Long toId = resolveRelationEndpoint(toRef, characterIdMap);
+                Long oldFrom = r.path("fromCharacterId").isNull() ? null : r.path("fromCharacterId").asLong();
+                Long oldTo = r.path("toCharacterId").isNull() ? null : r.path("toCharacterId").asLong();
+                if (fromId == null && oldFrom != null) {
+                    fromId = characterIdMap.get(oldFrom);
+                }
+                if (toId == null && oldTo != null) {
+                    toId = characterIdMap.get(oldTo);
+                }
+                ActorCharacterRelation rel = new ActorCharacterRelation();
+                rel.setProjectId(project.getId());
+                rel.setFromCharacterId(fromId == null ? 0L : fromId);
+                rel.setToCharacterId(toId == null ? 0L : toId);
+                rel.setFromRef(remapRef(fromRef, characterIdMap));
+                rel.setToRef(remapRef(toRef, characterIdMap));
+                rel.setFromName(Texts.truncate(readText(r, "fromName"), 100));
+                rel.setToName(Texts.truncate(readText(r, "toName"), 100));
+                rel.setRelationType(Texts.truncate(relationType, 50));
+                rel.setDescription(readText(r, "description"));
+                rel.setAffinity(readInt(r, "affinity"));
+                rel.setTrust(readInt(r, "trust"));
+                rel.setRelationState(Texts.truncate(readText(r, "relationState"), 30));
+                rel.setLastInteractionAt(parseTime(readText(r, "lastInteractionAt")));
+                relationRepository.save(rel);
+                imported++;
+            }
+            log.info("[导入] 项目={} 还原社会关系 {} 条（跳过 {} 条）", project.getName(), imported, skipped);
         }
 
         // M1 世界地图（沙盘场景/摆放/住所/沙盘状态；v2.0 新增段，历史包无此数据 → 跳过，零阻断）
@@ -496,31 +587,8 @@ public class HolzynImportService {
             }
         }
 
-        // 普通型 NPC
-        // + 标准字段字典 + 项目级调度运行时（紧随其后的两段）
-        JsonNode ordinaryNpcs = readJson(entries, "actor/ordinary_npcs.json");
-        if (ordinaryNpcs != null && ordinaryNpcs.isArray()) {
-            for (JsonNode n : ordinaryNpcs) {
-                ActorCharacter npc = new ActorCharacter();
-                npc.setProjectId(project.getId());
-                // 旧表 actor_profile_ordinary 已废弃：普通型不再靠"在哪张表"表达，必须显式标 type=common，
-                // 否则会被默认成 special（人群调度/沙盘等按 type 过滤的查询就再也找不到这些人）。
-                npc.setType("common");
-                npc.setName(Texts.truncate(readText(n, "name"), 50));
-                npc.setGender(Texts.truncate(readText(n, "gender"), 20));
-                npc.setRace(Texts.truncate(readText(n, "race"), 50));
-                npc.setSubRace(Texts.truncate(readText(n, "subRace"), 50));
-                Integer age = readInt(n, "age");
-                npc.setAge(age == null || age < 0 ? null : age);
-                npc.setAffiliation(Texts.truncate(readText(n, "affiliation"), 100));
-                npc.setLocation(Texts.truncate(readText(n, "location"), 255));
-                npc.setOccupation(Texts.truncate(readText(n, "occupation"), 50));
-                npc.setDetail(readText(n, "detail"));
-                // 运行态（state/lastAction）不再随包导入：这两列已从主表移除，运行态的唯一家在
-                // actor_state（作息状态机/生理与情绪），导入后由状态机按默认态重建，不在这里写。
-                ordinaryNpcRepository.save(npc);
-            }
-        }
+        // 普通型 NPC 已在上文（角色档案之后、世界地图/关系之前）导入并记入 characterIdMap。
+        // 标准字段字典 + 项目级调度运行时（紧随其后的两段）
         // 标准字段字典（actor/npc_field_dict.json， 取代旧 actor/crowd_categories.json）
         // 收口：字段名走分类白名单（race/affiliation/occupation），一级/二级值按列宽截断。
         // 白名单外的字段名直接跳过而不是兜底改名——落库后按 field 聚合的人群分类会静默失效，
@@ -577,6 +645,12 @@ public class HolzynImportService {
             wc.setLastSummary(readText(clock, "lastSummary"));
             Integer paused = readInt(clock, "paused");
             wc.setPaused(paused == null ? 0 : paused);
+            // 世界持续运行常驻开关：随包还原（world_running=0 冻结/1 持续运行）——必须显式设置，
+            // 否则 @PrePersist 会默认成 1（导入后的世界会自动开跑，违背"世界保持静止"的语义）。
+            Integer worldRunning = readInt(clock, "worldRunning");
+            if (worldRunning != null) {
+                wc.setWorldRunning(worldRunning);
+            }
             worldClockRepository.save(wc);
             // 时间口径统一：世界时间权威=引擎推进位置（last_game_second）——导入必须恢复该列，
             // 否则导入后的世界时间从纪元 0 起跑（0001年01月01日 00时），与导出档的世界时间不一致。
@@ -887,6 +961,18 @@ public class HolzynImportService {
             }
         }
         return ref;
+    }
+
+    /**
+     * 关系端点 id 重链：解析 npc:/special:/crowd:{旧id}（或裸数字）→ characterIdMap 新 id。
+     * 解析失败或未映射返回 null（幽灵端点，由调用方兜底 id=0 + 名称）。
+     */
+    private Long resolveRelationEndpoint(String ref, Map<Long, Long> characterIdMap) {
+        if (ref == null || characterIdMap == null || characterIdMap.isEmpty()) {
+            return null;
+        }
+        Long oldId = com.holzyn.actor.common.NpcRefs.parseLenient(ref);
+        return oldId == null ? null : characterIdMap.get(oldId);
     }
 
     // ==================== 工具 ====================

@@ -63,25 +63,20 @@
         />
       </aside>
 
-      <!-- 中栏：2D 世界地图（主角） -->
+      <!-- 中栏：世界地图（主角）
+           V1.1：换用六阶段管线产出的米制地图（PixiJS）。旧 WorldMap2D 是 500×0.2m 的
+           "父组件算坐标喂进来"式组件，已被本组件取代；旧数据（regions/roads/placements/homes）
+           在 M7 尺度迁移完成前一并保留，仅用于 locationDetail 兜底与 sceneSize。 -->
       <main class="hm-col hm-col-center">
-        <WorldMap2D
-          :regions="regions"
-          :roads="roads"
-          :placements="placements"
-          :homes="homes"
-          :movements="movements"
+        <WorldMapPixi
+          :project-id="projectId"
+          :night="nightAmount"
           :npcs="npcList"
           :scene-size="sceneSize"
           :selected-ref="selectedRef"
-          :active-location-id="activeLocationId"
-          :show="showLayers"
-          @pick-region="onPickRegion"
-          @pick-placement="onPickPlacement"
-          @pick-home="onPickHome"
-          @pick-npc="onPickNpc"
+          @pick-feature="onPickMapFeature"
           @pick-empty="onPickEmpty"
-          @toggle-layer="(k, v) => (showLayers[k] = v)"
+          @ready="onMapReady"
         />
         <!-- 时钟暂停：单行细横幅（纯提示，不自带 CTA）
              V2.0：世界时间状态的**唯一控制入口**已收敛到工具条（时钟徽标 + ▶ 开始推进 / ⏸ 暂停），
@@ -96,21 +91,11 @@
           <span class="hm-banner-hint">角色不会自主推进 · 用上方「▶ 开始推进」继续</span>
           <button type="button" class="hm-banner-close" title="知道了，不再提示" @click="pausedHintDismissed = true">✕</button>
         </div>
-        <!-- 阻塞态（未初始化 / 加载失败）：仍居中提示（这两种状态地图本身没有内容可看） -->
-        <div v-else-if="homeStatus" class="hm-status" :class="'is-' + homeStatus.kind">
-          <div class="hm-status-icon">{{ homeStatus.icon }}</div>
-          <div class="hm-status-title">{{ homeStatus.title }}</div>
-          <div class="hm-status-desc">{{ homeStatus.desc }}</div>
-          <el-button
-            :type="homeStatus.btnType || 'primary'"
-            size="large"
-            class="hm-status-btn"
-            :loading="homeStatus.loading"
-            @click="homeStatus.run()"
-          >
-            {{ homeStatus.action }}
-          </el-button>
-        </div>
+        <!-- 阻塞态已下线（V1.1 地图换芯）。
+             旧 WorldMap2D 是"父组件拉 /world-map → 算坐标 → 喂进来"，所以父组件必须替它
+             表达"未初始化 / 加载失败"两种空态。新 WorldMapPixi **自己拉数据**，空态（还没生成地图
+             + 「生成地图」CTA）、生成中（S0–S5 阶段进度）、错误（底部错误条）都由它内部表达，
+             父组件再盖一层大卡只会挡住地图 —— 因此这里整块移除。 -->
         <!-- 地点详情卡（点击区域/建筑/住所弹出） -->
         <div v-if="locationDetail" class="hm-loc-card">
           <div class="hm-loc-head">
@@ -203,7 +188,7 @@ import {
   fetchWorldLocations
 } from '@/shared/api/home'
 import HomeTopbar from '../components/HomeTopbar.vue'
-import WorldMap2D from '../components/WorldMap2D.vue'
+import WorldMapPixi from '../components/WorldMapPixi.vue'
 import CharacterActivityPanel from '../components/CharacterActivityPanel.vue'
 import WorldEvolutionPanel from '../components/WorldEvolutionPanel.vue'
 import InterventionDrawer from '../components/InterventionDrawer.vue'
@@ -313,6 +298,23 @@ const movingMap = computed(() => {
     m[mv.npcRef] = { targetLocationName: mv.targetLocationName, progress: mv.progress }
   }
   return m
+})
+
+/**
+ * 夜色强度 0~1（新地图的昼夜层）。
+ *
+ * <p>为什么在这里算而不在后端：新地图的底色是烘死的正午卫星图，夜色只是一层乘算色片，
+ * 属于**表现**而不是世界状态。世界时钟（gameSecond）才是权威，前端按"一日内时刻"插值就够了：
+ * 05:00 前仍是深夜，05:00–06:00 渐亮，06:00–18:00 全白天，18:00–20:00 渐暗，之后全黑。</p>
+ */
+const nightAmount = computed(() => {
+  const daySecond = ((Number(liveGameSecond.value) || 0) % 86400 + 86400) % 86400
+  const hour = daySecond / 3600
+  if (hour < 5) return 1
+  if (hour < 6) return 1 - (hour - 5)
+  if (hour < 18) return 0
+  if (hour < 20) return (hour - 18) / 2
+  return 1
 })
 
 /** 时钟文案（本地插值 → 后端文本 → 紧凑回退） */
@@ -669,6 +671,49 @@ function selectNpcByName(name) {
 
 function onPickNpc(npcRef) { selectNpc(npcRef); locationDetail.value = null }
 function onPickEmpty() { selectedRef.value = null; locationDetail.value = null; activeLocationId.value = null }
+
+/**
+ * 新地图点选要素 → 地点详情卡。
+ *
+ * <p>新图的要素（建筑/农田/林地/码头…）是**米坐标 + 语义标签**，不再有旧图的 region/placement
+ * 三套模型。这里把要素就地摊成详情卡能显示的最小集：名字、类别、一句构成说明（语义 + 层数 + 尺寸）。
+ * 若要素带 locationCode 且能对上世界地点表，则补上它的简介——那条链路（地点 → 在场角色）
+ * 要等 M7 把 actor 的位置锚到要素上才通，现在只取静态字段。</p>
+ *
+ * @param {object} f /map/bundle 里的单个 feature
+ */
+function onPickMapFeature(f) {
+  if (!f) return onPickEmpty()
+  selectedRef.value = null
+  activeLocationId.value = null
+  const loc = f.locationCode ? matchWorldLocation(f.locationCode) : null
+  // semantic 是摆放器写下的**结构化标注**（一般是 {"compound":true,"part":0} 这类内部字段），
+  // 直接 join 进文案会把 JSON 摆在用户脸上，所以只接受"看起来是人话"的字符串。
+  const semanticText = typeof f.semantic === 'string' && f.semantic && !f.semantic.trim().startsWith('{')
+    ? f.semantic
+    : ''
+  const parts = [semanticText, f.category, f.floors ? `${f.floors} 层` : '',
+    f.w && f.d ? `${Math.round(f.w)}×${Math.round(f.d)} 米` : '']
+  locationDetail.value = {
+    name: f.name || (loc && loc.name) || f.code || '未知之地',
+    type: f.category || (loc && loc.type) || '',
+    intro: [loc?.intro, parts.filter(Boolean).join(' · ')].filter(Boolean).join('　'),
+    nearby: [],
+    homes: [],
+    placements: []
+  }
+}
+
+/**
+ * 地图首次渲染就绪 → 结束"地图加载中"的阻塞态。
+ *
+ * <p>新地图自己拉数据，父组件的 mapLoadState 是旧管线（/world-map）留下的三态机。
+ * 这里把"就绪"回写进去，避免旧的空态/错误卡盖在新地图上。</p>
+ */
+function onMapReady() {
+  mapLoadState.value = 'ok'
+  mapLoadError.value = ''
+}
 
 /** 点击区域 → 地点详情卡（world-map/location/{id}） */
 async function onPickRegion(r) {
