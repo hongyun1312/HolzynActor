@@ -64,7 +64,7 @@ public class EvolutionController {
      *
      * @return 演化会话摘要列表
      */
-    @GetMapping("/projects/{projectId}/evolutions")
+    @GetMapping("/worlds/{projectId}/evolutions")
     public R<List<Map<String, Object>>> list(@PathVariable("projectId") Long projectId) {
         Long userId = currentUserProvider.currentUserId();
         return R.ok(evolutionService.list(userId, projectId));
@@ -77,7 +77,7 @@ public class EvolutionController {
      *
      * @return 演化会话详情（含参与者）
      */
-    @PostMapping("/projects/{projectId}/evolutions")
+    @PostMapping("/worlds/{projectId}/evolutions")
     public R<Map<String, Object>> start(@PathVariable("projectId") Long projectId,
                                         @RequestBody(required = false) Map<String, Object> body) {
         Long userId = currentUserProvider.currentUserId();

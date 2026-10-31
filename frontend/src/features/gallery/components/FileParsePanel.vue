@@ -12,9 +12,11 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="file-parse-panel">
+  <div class="file-parse-panel" :class="{ 'is-embedded': props.embedded }">
     <!-- 顶部：选择文件 + 解析按钮 -->
+    <!-- 嵌入新建世界向导时页头由向导统一提供（一页一头），这里只保留操作条 -->
     <PageHeader
+      v-if="!props.embedded"
       size="sm"
       title="文件解析"
       desc="上传世界观 txt / md 文件，AI 自动分段（地理/势力/规则/文化/历史/补充/角色）→ 扩写 → 建项目落库 → 角色分离入库，下方控制台实时输出后端解析日志（工作流进度）。"
@@ -28,6 +30,17 @@
         </el-button>
       </template>
     </PageHeader>
+    <div v-else class="fp-action-bar tech-card">
+      <div class="fp-action-tip">上传世界观 txt / md 文件（可多选），AI 自动分段、扩写并建库；解析完成后进入下一步改世界观。</div>
+      <div class="fp-action-ops">
+        <el-button type="primary" plain :disabled="parsing" @click="fileInputRef?.click()">
+          <el-icon><HIcon name="UploadFilled" /></el-icon>&nbsp;选择文件
+        </el-button>
+        <el-button type="success" :loading="parsing" :disabled="files.length === 0" @click="doParse">
+          <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;开始解析
+        </el-button>
+      </div>
+    </div>
 
     <!-- 扩写开关：不足 1500 字的分段是否自动 AI 扩写（默认关闭，由用户决定） -->
     <div class="expand-bar tech-card">
@@ -97,10 +110,14 @@ const autoExpand = ref(false) // 是否自动 AI 扩写不足 1500 字的分段�
 const apiReady = ref(null)
 const apiChecking = ref(false)
 
-/** 判断某 API 是否可作主 AI（chat/both）用途（与后端 ModelApiService.isChatCapable 对齐） */
+/** 判断某供应商是否存在可用的文本模型（新结构看 models 角色，旧结构回退 purpose/embeddingEnabled） */
 function isChatCapableApi(a) {
-  const p = a && a.purpose
-  if (!p) return !a || a.embeddingEnabled !== 1
+  if (!a) return false
+  if (Array.isArray(a.models)) {
+    return a.models.some(m => (m.role || 'text') === 'text' && m.enabled !== 0)
+  }
+  const p = a.purpose
+  if (!p) return a.embeddingEnabled !== 1
   return p === 'chat' || p === 'both'
 }
 
@@ -173,7 +190,12 @@ async function doParse() {
     if (!result) throw new Error('解析未返回结果')
     consoleRef.value?.push({ level: 'success', time: now(), message: `[文件解析] 完成：项目「${result.projectName}」已创建（世界观=${result.worldName}，角色 ${result.characterCount} 位，知识文档 ${result.knowledgeDocCount} 条）` })
     ElMessage.success(`项目「${result.projectName}」解析完成`)
-    askInit(result.projectId, result.projectName)
+    if (props.embedded) {
+      // 嵌入向导：把新建好的项目交回父级，由向导继续「改世界观 → 初始化」
+      emit('created', { projectId: result.projectId, projectName: result.projectName, worldName: result.worldName })
+    } else {
+      askInit(result.projectId, result.projectName)
+    }
   } catch (e) {
     consoleRef.value?.setRunning(false)
     consoleRef.value?.push({ level: 'error', time: now(), message: `[文件解析] 失败：${e.message || '解析失败'}` })
@@ -195,10 +217,10 @@ function askInit(projectId, projectName) {
       type: 'info'
     }
   ).then(() => {
-    router.replace(`/project/${projectId}/init`)
+    router.replace(`/world/${projectId}/init`)
   }).catch((action) => {
     if (action === 'cancel') {
-      router.replace(`/project/${projectId}/sandbox`)
+      router.replace(`/world/${projectId}/sandbox`)
     }
     // close（点 X）留在本页
   })
@@ -210,14 +232,33 @@ function now() {
 }
 
 // 进入面板时自动预检 AI API
-const emit = defineEmits(['open-settings'])
+const emit = defineEmits(['open-settings', 'created'])
+
+/**
+ * 嵌入模式（新建世界向导的「文件」步）：解析成功不弹「是否初始化」，而是 emit('created') 交给向导继续。
+ */
+const props = defineProps({
+  embedded: { type: Boolean, default: false }
+})
 onMounted(checkApiReady)
 watch(() => files.value.length, () => { if (apiReady.value === null) checkApiReady() })
 </script>
 
 <style scoped>
 /* V2.0 批次二：1100 硬编码 → 全站栅格令牌 */
-.file-parse-panel { max-width: var(--page-w-content, 1200px); margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.file-parse-panel { width: 100%; max-width: var(--page-w-content, 1200px); margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+/* 嵌入向导：宽度交给向导，自身不再抢 max-width */
+.file-parse-panel.is-embedded { max-width: none; margin: 0; }
+/* 嵌入模式的操作条（页头由向导提供） */
+.fp-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 18px; flex-wrap: wrap; }
+.fp-action-tip { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; flex: 1; min-width: 240px; }
+.fp-action-ops { display: flex; gap: 8px; flex-shrink: 0; }
+/* 没选文件时「开始解析」是 disabled 态，主题白字压浅绿几乎看不清，统一成可读的灰底深字 */
+.fp-action-ops :deep(.el-button.is-disabled) {
+  color: #7b8794 !important;
+  background: #eef1f3 !important;
+  border-color: #d9dee3 !important;
+}
 /* 页头（size="sm"）样式由全局类提供 */
 /* 扩写开关条 */
 .expand-bar { display: flex; align-items: center; gap: 10px; padding: 12px 18px; }

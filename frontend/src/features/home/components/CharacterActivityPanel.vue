@@ -348,7 +348,7 @@ async function doEvent() {
 .hm-head-right { margin-left: auto; display: inline-flex; gap: 2px; }
 .hm-seg {
   border: 1px solid transparent; background: transparent; cursor: pointer;
-  color: var(--hm-text-faint); font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  color: var(--hm-text-faint); font-size: 12.5px; padding: 2px 8px; border-radius: 999px;
   transition: all .15s var(--dsw-ease);
 }
 .hm-seg:hover { color: var(--hm-text); background: var(--bg-hover); }
@@ -360,7 +360,7 @@ async function doEvent() {
 /* 分组标题 */
 .hm-group-label {
   display: flex; align-items: center; gap: 6px;
-  padding: 8px 4px 4px; font-size: 11px; font-weight: 700; color: var(--hm-text-faint);
+  padding: 8px 4px 4px; font-size: 12.5px; font-weight: 700; color: var(--hm-text-faint);
   letter-spacing: .02em;
 }
 .hm-group-label span { font-weight: 600; color: var(--hm-text-faint); opacity: .75; }
@@ -379,7 +379,7 @@ async function doEvent() {
 }
 .hm-char:hover { background: var(--accent-soft); }
 .hm-char.selected { background: var(--accent-softer, var(--accent-soft)); border-color: var(--accent-border); }
-.hm-char-avatar { background: var(--accent-soft); color: var(--accent-text); font-size: 11px; flex-shrink: 0; }
+.hm-char-avatar { background: var(--accent-soft); color: var(--accent-text); font-size: 12.5px; flex-shrink: 0; }
 .hm-char-avatar.is-crowd { background: color-mix(in srgb, var(--hm-blue) 18%, transparent); color: var(--hm-blue); }
 .hm-char-main { flex: 1; min-width: 0; }
 .hm-char-head { display: flex; align-items: center; gap: 6px; }
@@ -387,12 +387,12 @@ async function doEvent() {
   font-size: 12.5px; font-weight: 700; color: var(--hm-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46%;
 }
-.hm-char-state { font-size: 10.5px; color: var(--hm-text-faint); white-space: nowrap; }
+.hm-char-state { font-size: 12px; color: var(--hm-text-faint); white-space: nowrap; }
 .hm-char-state.is-walking { color: var(--hm-gold); font-weight: 600; }
 .hm-char-state.is-acting { color: var(--hm-amber); font-weight: 600; }
 .hm-char-state.is-talking { color: var(--hm-green); font-weight: 600; }
 .hm-need-chip {
-  font-size: 10px; font-weight: 700; padding: 0 6px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; padding: 0 6px; border-radius: 999px;
   font-variant-numeric: tabular-nums; white-space: nowrap; cursor: help;
   border: 1px solid transparent;
 }
@@ -400,7 +400,7 @@ async function doEvent() {
 .hm-need-chip.is-mid { color: var(--hm-amber); background: color-mix(in srgb, var(--hm-amber) 14%, transparent); }
 .hm-need-chip.is-ok { color: var(--hm-text-faint); background: var(--bg-hover); }
 .hm-char-sub {
-  font-size: 11px; color: var(--hm-text-dim); margin-top: 1px;
+  font-size: 12.5px; color: var(--hm-text-dim); margin-top: 1px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .hm-moving { color: var(--hm-gold); font-weight: 600; }
@@ -409,7 +409,7 @@ async function doEvent() {
 .hm-moving .hm-move-pct { margin-left: 5px; }
 /* 紧急需求：列表里只留一个告警标（文字进 tooltip / 详情区），避免 7 行重复同一句 */
 .hm-urgent-chip {
-  font-size: 11px; line-height: 1; cursor: help; flex-shrink: 0;
+  font-size: 12.5px; line-height: 1; cursor: help; flex-shrink: 0;
   color: var(--hm-red-soft);
   animation: hm-urgent-pulse 1.6s ease-in-out infinite;
 }
@@ -419,13 +419,13 @@ async function doEvent() {
   margin-left: auto; width: 20px; height: 20px; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--hm-border); border-radius: 6px;
-  background: transparent; font-size: 11px; cursor: pointer;
+  background: transparent; font-size: 12.5px; cursor: pointer;
   opacity: 0; transition: opacity .15s, background .15s;
 }
 .hm-char:hover .hm-ask-mini { opacity: .7; }
 .hm-ask-mini:hover { opacity: 1 !important; background: var(--accent-soft); }
 .hm-empty { font-size: 12px; color: var(--hm-text-dim); text-align: center; padding: 26px 10px; line-height: 1.8; }
-.hm-empty span { font-size: 11px; color: var(--hm-text-faint); }
+.hm-empty span { font-size: 12.5px; color: var(--hm-text-faint); }
 
 /* 详情 / 干预区 */
 .hm-intervene {
@@ -435,23 +435,23 @@ async function doEvent() {
 }
 .hm-in-head { display: flex; align-items: baseline; gap: 8px; }
 .hm-in-title { font-size: 12.5px; font-weight: 700; color: var(--hm-text); }
-.hm-in-action { font-size: 11px; color: var(--hm-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.hm-in-close { border: none; background: transparent; cursor: pointer; color: var(--hm-text-faint); font-size: 11px; padding: 0 2px; }
+.hm-in-action { font-size: 12.5px; color: var(--hm-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.hm-in-close { border: none; background: transparent; cursor: pointer; color: var(--hm-text-faint); font-size: 12.5px; padding: 0 2px; }
 .hm-in-close:hover { color: var(--hm-text); }
 .hm-sd { display: flex; flex-direction: column; gap: 5px; padding: 7px 9px; border-radius: 8px; background: var(--accent-softer, var(--accent-soft)); border: 1px solid var(--hm-border-soft); }
-.hm-sd-urgent { font-size: 11px; font-weight: 700; color: var(--hm-red-soft); }
+.hm-sd-urgent { font-size: 12.5px; font-weight: 700; color: var(--hm-red-soft); }
 .hm-sd-emotion { font-size: 12px; font-weight: 700; color: var(--hm-gold-soft); }
-.hm-sd-em-int { font-size: 10px; font-weight: 400; color: var(--hm-text-dim); margin-left: 6px; }
-.hm-sd-health { font-size: 11px; color: var(--hm-text-dim); }
+.hm-sd-em-int { font-size: 12px; font-weight: 400; color: var(--hm-text-dim); margin-left: 6px; }
+.hm-sd-health { font-size: 12.5px; color: var(--hm-text-dim); }
 .hm-sd-needs { display: flex; flex-direction: column; gap: 4px; }
-.hm-sd-need { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--hm-text-dim); }
+.hm-sd-need { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--hm-text-dim); }
 .hm-sd-need .el-progress { flex: 1; }
 .hm-sd-need-k { flex-shrink: 0; width: 26px; color: var(--hm-text-faint); }
 .hm-sd-need b { width: 24px; text-align: right; color: var(--hm-text); font-variant-numeric: tabular-nums; }
-.hm-sd-thought { font-size: 11px; color: var(--hm-gold-soft); line-height: 1.6; }
+.hm-sd-thought { font-size: 12.5px; color: var(--hm-gold-soft); line-height: 1.6; }
 .hm-in-btns { display: flex; align-items: center; gap: 8px; }
 .hm-ask-btn { margin-left: auto; }
-.hm-in-hint { font-size: 10.5px; color: var(--hm-text-faint); line-height: 1.6; }
+.hm-in-hint { font-size: 12px; color: var(--hm-text-faint); line-height: 1.6; }
 .hm-activity-list::-webkit-scrollbar, .hm-intervene::-webkit-scrollbar { width: 5px; }
 .hm-activity-list::-webkit-scrollbar-thumb, .hm-intervene::-webkit-scrollbar-thumb { background: var(--hm-border); border-radius: 3px; }
 </style>

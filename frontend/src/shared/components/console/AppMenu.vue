@@ -132,8 +132,8 @@ const menuOpen = ref(false)
 /** 关于弹窗 */
 const aboutOpen = ref(false)
 
-/** 版本号（与 frontend/package.json 同步，即全仓版本口径 v1.1.1-beta.1） */
-const version = pkg.version || '1.1.1-beta.1'
+/** 版本号（与 frontend/package.json 同步，即全仓版本口径 v1.1.2-beta.1） */
+const version = pkg.version || '1.1.2-beta.1'
 /** 是否运行在桌面壳（Electron）；否则为纯 Web */
 const isDesktop = computed(() => typeof window !== 'undefined' && !!window.holzynDesktop)
 /** 运行环境标签 */
@@ -149,7 +149,7 @@ const appItems = [
 /** 工作区快捷入口 */
 const navItems = [
   { label: '项目总览', path: '/', icon: 'FolderOpened' },
-  { label: '新建项目', path: '/project/new', icon: 'Plus' }
+  { label: '新建项目', path: '/world/new', icon: 'Plus' }
 ]
 
 /** 应用区点击：关于=弹窗；更新/设置=跳对应设置子页（用全路径，避免依赖父级相对重定向） */

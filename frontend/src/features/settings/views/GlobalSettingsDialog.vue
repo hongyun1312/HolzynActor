@@ -13,7 +13,7 @@
 -->
 <template>
   <el-dialog v-model="visible" title="设置 · 全局（用户级）" width="900px" top="6vh"
-    class="h-dialog global-settings-dialog" :close-on-click-modal="false" destroy-on-close>
+    class="h-dialog settings-dialog" :close-on-click-modal="false" destroy-on-close @closed="$emit('closed')">
     <!-- 顶部说明（与其他弹窗一致的 el-alert 形态，h-dialog 规范统一间距） -->
     <el-alert type="info" :closable="false" show-icon class="h-dialog-alert"
       title="全局（用户级）设置，所有项目共享"
@@ -59,16 +59,30 @@ import ProjectPromptSettings from './ProjectPromptSettings.vue'
 import ProjectUsageSettings from './ProjectUsageSettings.vue'
 
 const visible = ref(false)
-/** 当前激活 Tab：general / apis / prompts / usage */
-const activeTab = ref('apis')
+
+/**
+ * 关闭事件：设置里可能刚接上模型，父页（如世界画廊的「还没接上模型」横幅）
+ * 需要据此复查配置状态，不必等用户重进页面。
+ */
+defineEmits(['closed'])
+
+/** 设置弹窗的合法 Tab（顺序即 Tab 顺序，第一项 = 打开时默认页） */
+const TABS = ['general', 'apis', 'prompts', 'usage']
+
+/** 当前激活 Tab：general / apis / prompts / usage。默认第一项（通用设置） */
+const activeTab = ref('general')
 
 /**
  * 打开设置弹窗。
  *
- * @param {string} tab 初始 Tab（general/apis/prompts/usage），默认 apis（新账户最常需要配置 API）
+ * <p>为什么要白名单校验：模板里常写成 {@code @click="open"}，Vue 会把 MouseEvent 当第一个参数传进来，
+ * {@code activeTab} 被赋成事件对象后没有任何 el-tab-pane 匹配，弹窗就整片空白（用户反馈的"打开是空的"）。
+ * 非字符串/非法值一律回落到第一个 Tab。</p>
+ *
+ * @param {string} tab 初始 Tab（general/apis/prompts/usage），默认 general（第一个）
  */
-function open(tab = 'apis') {
-  activeTab.value = tab
+function open(tab = 'general') {
+  activeTab.value = TABS.includes(tab) ? tab : 'general'
   visible.value = true
 }
 

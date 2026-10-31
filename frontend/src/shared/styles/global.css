@@ -1,5 +1,10 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+/* 基准字号 16 → 17px（2026-10-30 可读性修复）。
+   全仓 822 处 font-size 里有 ~500 处是 rem（0.72/0.74/0.78/0.8rem…），
+   在 16px 基准下这些标签只有 11.5~12.8px，实测截图里"字小、不醒目"的就是它们。
+   抬基准而不是逐个改 rem：一处生效、比例不失真；px 声明（11/12px）不受影响，
+   仍按需在具体组件里单独抬。 */
+html { font-size: 17px; scroll-behavior: smooth; }
 html, body { width: 100%; }
 body {
   font-family: var(--dsw-font-family);
@@ -127,7 +132,10 @@ img { max-width: 100%; display: block; }
 .page-desc {
   margin-top: 4px;
   font-size: var(--density-font-sm, 0.82rem);
-  color: var(--text-secondary);
+  /* 页头描述直接压在 AppShell 的半透明内容层上，背后是会动的背景画布（实测中灰 ~#a9aeb5），
+     --text-secondary(#61666e) 在这种底上对比度只有 2.6:1，截图里几乎糊掉 →
+     提到 --text-regular(#3c4148)，浅色主题下 ≈ 4.6:1，深色主题下本来就是近白，仍然可读 */
+  color: var(--text-regular);
   line-height: 1.5;
 }
 .page-actions { display: flex; align-items: center; gap: var(--space-2, 8px); flex-wrap: wrap; }
@@ -331,32 +339,37 @@ body.is-resizing * { cursor: col-resize !important; }
    ============================================================ */
 /* ===== 浅色：白玻璃（保留正常深色文字，不覆盖 --text-*） ===== */
 .glass-scene {
-  /* 玻璃材质参数 */
-  --glass-bg: rgba(255, 255, 255, 0.35);
-  --glass-bg-strong: rgba(255, 255, 255, 0.6);
-  --glass-input: rgba(255, 255, 255, 0.45);
-  --glass-border: rgba(255, 255, 255, 0.65);
-  --glass-scrim: rgba(246, 249, 253, 0.35);       /* 全页可读性压暗层 */
-  --glass-topbar-bg: rgba(255, 255, 255, 0.55);
-  --glass-topbar-border: rgba(15, 17, 21, 0.08);
+  /* 玻璃材质参数
+     ⚠ 2026-10-30 用户反馈「中间与背景靠色、容器太透明、背景与文字混杂」：
+     原来是 0.35/0.6/0.45 的白纱，压在云间列车画布上等于把文字泡在背景里
+     （0.6 白 ÷ 背景 = 有效对比度只剩 3~4:1，二级文字直接不够 WCAG AA）。
+     现在把「承载正文的层」抬到 0.86 以上，只让背景层（画布/装饰）保持半透明——
+     玻璃感留在边缘和顶部栏，正文区必须读得清。 */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-bg-strong: rgba(255, 255, 255, 0.88);
+  --glass-input: rgba(255, 255, 255, 0.82);
+  --glass-border: rgba(15, 17, 21, 0.1);
+  --glass-scrim: rgba(246, 249, 253, 0.55);       /* 全页可读性压暗层：背景再花也压得下去 */
+  --glass-topbar-bg: rgba(255, 255, 255, 0.9);
+  --glass-topbar-border: rgba(15, 17, 21, 0.1);
   --glass-blur: 18px;
   --glass-saturate: 1.35;
 
-  /* 分层背景（浅色玻璃） */
-  --bg-layer-1: var(--glass-bg-strong);
-  --bg-layer-2: rgba(255, 255, 255, 0.35);
-  --bg-layer-3: var(--glass-input);
+  /* 分层背景（浅色玻璃）：层 1 承载内容 → 不透明到 0.9；层 2/3 是内嵌块，也要够实 */
+  --bg-layer-1: rgba(255, 255, 255, 0.9);
+  --bg-layer-2: rgba(255, 255, 255, 0.78);
+  --bg-layer-3: rgba(255, 255, 255, 0.86);
   --bg-hover: rgba(15, 17, 21, 0.06);
   --bg-active: rgba(15, 17, 21, 0.12);
   --bg-mask: rgba(15, 17, 21, 0.4);
-  --bg-scrim: rgba(246, 249, 253, 0.6);
-  --bg-nav: rgba(248, 250, 253, 0.5);
-  --bg-nav-hover: rgba(255, 255, 255, 0.6);
+  --bg-scrim: rgba(246, 249, 253, 0.7);
+  --bg-nav: rgba(248, 250, 253, 0.82);
+  --bg-nav-hover: rgba(255, 255, 255, 0.9);
 
-  /* 边框（浅色玻璃） */
-  --border-l1: rgba(15, 17, 21, 0.1);
-  --border-l2: rgba(15, 17, 21, 0.16);
-  --border-l3: rgba(15, 17, 21, 0.26);
+  /* 边框（浅色玻璃）：容器边界要看得出来，否则"容器和背景混在一起" */
+  --border-l1: rgba(15, 17, 21, 0.12);
+  --border-l2: rgba(15, 17, 21, 0.2);
+  --border-l3: rgba(15, 17, 21, 0.3);
 
   /* 阴影（浅色） */
   --shadow-lv1: 0 2px 4px 0 rgba(15, 17, 21, 0.05);
@@ -396,12 +409,15 @@ body.is-resizing * { cursor: col-resize !important; }
   --el-collapse-content-bg-color: transparent;
   --el-tabs-header-bg-color: transparent;
 
-  /* 主页世界地图（--hm-*）：底色透明露出云间列车，面板玻璃化 */
+  /* 主页世界地图（--hm-*）：底色透明露出云间列车，面板玻璃化
+     ⚠ 2026-10-30：面板原来只有 0.45/0.6 白，压在画布上文字与背景糊在一起
+     （用户原话「界面中间与背景靠色…背景与文字混杂」）。承载正文的面板一律 ≥0.9，
+     只留边缘与顶部栏做玻璃感；描边同时加深，容器边界必须看得见。 */
   --hm-page-bg: transparent;
-  --hm-panel: rgba(255, 255, 255, 0.45);
-  --hm-panel-strong: rgba(255, 255, 255, 0.6);
-  --hm-border: rgba(90, 125, 205, 0.2);
-  --hm-border-soft: rgba(90, 125, 205, 0.12);
+  --hm-panel: rgba(255, 255, 255, 0.9);
+  --hm-panel-strong: rgba(255, 255, 255, 0.95);
+  --hm-border: rgba(90, 125, 205, 0.34);
+  --hm-border-soft: rgba(90, 125, 205, 0.2);
 }
 
 /* ===== 深色：夜空玻璃（浅色文字 + 深蓝半透明面） ===== */
@@ -643,6 +659,15 @@ body.holzyn-glass .el-popper .el-popper__arrow::before {
   background: var(--glass-overlay-bg, rgba(255, 255, 255, 0.92));
   border: 1px solid var(--glass-overlay-border, rgba(15, 17, 21, 0.12));
 }
+/* 工具提示文字色（全站，含开发者页）：Element 的 `is-dark` 变体把 color 设成「背景色」——
+   浅色主题下就是 rgba(255,255,255,.85)。上面这条玻璃底一覆盖，就成了「白底 + 白字」，
+   桌面上看等于没有提示（开发者页的表格溢出、指标口径、开关说明全是 tooltip）。
+   玻璃主题下两种 effect 统一按「浅玻璃底 + 令牌文字色」呈现，深浅主题都随令牌走。 */
+body.holzyn-glass .el-popper.is-dark,
+body.holzyn-glass .el-popper.is-light {
+  color: var(--text-primary);
+  box-shadow: 0 10px 28px rgba(15, 17, 21, 0.18);
+}
 
 /* ===== 统一弹窗规范（.h-dialog）=====
    项目画廊三个入口弹窗（导入项目 / 新增项目 / 设置）共用，收口「头部 → 说明 → 内容 → 页脚」
@@ -685,6 +710,30 @@ body.holzyn-glass .el-popper .el-popper__arrow::before {
 .h-dialog .h-dialog-alert .el-alert__title { font-weight: 600; }
 .h-dialog .h-dialog-alert .el-alert__description { line-height: 1.7; }
 
+/* ===== 设置类弹窗统一尺寸（.settings-dialog）=====
+   背景（2026-10 反馈）：设置相关弹窗原本四种尺寸——全局设置 900 / 新增 API 560 / Prompt 编辑 680 /
+   本地账户 720，切来切去弹窗忽大忽小；且内层弹窗没有 teleport，被外层 .el-dialog__body
+   （max-height:80vh + overflow-y:auto）裁掉下半截，「新增 API」按钮区直接看不见。
+   做法：设置类弹窗统一挂 .settings-dialog —— 同宽（模板 width="900px"，这里再钳 max-width 防小屏溢出）、
+   同高（min(680px, 视口-96px)），头/脚常驻、正文独立滚动；内层弹窗必须 append-to-body 才能逃出父级裁剪。
+   为什么必须非 scoped：弹窗 teleport 到 body，宿主组件的 scoped 规则命中不到 .el-dialog 根节点。 */
+.settings-dialog.el-dialog {
+  display: flex;
+  flex-direction: column;
+  height: min(680px, calc(100vh - 96px));
+  max-width: calc(100vw - 48px);
+  overflow: hidden;
+}
+.settings-dialog .el-dialog__header,
+.settings-dialog .el-dialog__footer { flex: 0 0 auto; }
+.settings-dialog .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* 高度已由弹窗钳死，正文不再自带 80vh 上限（否则小屏会出现"双滚动条"） */
+  max-height: none;
+  overflow-y: auto;
+}
+
 /* ===== 固定视口弹窗（.h-dialog-fit）=====
    场景：内容很长的编辑弹窗（如设置页「编辑本地账户」，表单 1200px+）。
    问题（实测）：只给 body 加 max-height 时，弹窗整体仍会长到 1368px，在 720 高的桌面窗口里被顶出屏幕，
@@ -722,4 +771,18 @@ body.holzyn-glass .el-popper .el-popper__arrow::before {
   margin-top: 4px;
   padding-top: 12px;
   border-top: 1px solid var(--border-l1, rgba(15, 17, 21, 0.1));
+}
+
+/* ===== 项目空间内容列：宽屏（≥1536px）切页不再左右跳动 =====
+   2026-10 布局审计（1920×1080 跑完全部 32 条路由）实测：项目空间内并存三档内容列——
+   1588（世界地图/世界图谱/NPC 角色/对话/对谈/玩家档案/家族谱系：完全铺满、不吃限宽）、
+   1440（PageShell wide 档）、1200（记忆归档、项目设置），切页左边界在 300 / 374 / 494 之间跳。
+   1280×720 基准窗口看不出来（内容区 1108 < 1200），但桌面端最大化（1707×912）与 1920 屏会看到抖动。
+   统一到 wide 档：铺满页在根节点加 .project-col 收进 1440，1200 档的两个页面改 PageShell width="wide"。
+   用 --content-max-w 解析而非写死像素，用户在「界面偏好」选全宽模式（--page-w-*: none）时仍能放开。 */
+.project-col {
+  width: 100%;
+  max-width: var(--content-max-w, var(--page-w-wide, 1440px));
+  margin-inline: auto;
+  min-width: 0;
 }

@@ -47,9 +47,9 @@ const routes = [
   // U1 服务端对接层（2026-09-21）：Unity 对接页（WS 模拟客户端[连接/上行发送/下行事件流回放] +
   // REST init/status + 时钟/感知/环境快捷动作）
   { path: '/unity-bridge', name: 'unity-bridge', component: () => import('../views/UnityBridgeView.vue'), meta: { title: 'Unity 对接 U1' } },
-  // N 轨道 N3/N4（2026-09-24/25）：NanoJev 判定层页（逐场景开关[测试操作切换] / 判定统计 /
+  // N 轨道 N3/N4（2026-09-24/25）：决策模型判定层页（逐场景开关[测试操作切换] / 判定统计 /
   // 最近判定记录[分布·top1Prob·熵·采纳/升级/回退]；space_decision 场景自动入表）
-  { path: '/nanojev-decision', name: 'nanojev-decision', component: () => import('../views/NanoJevDecisionView.vue'), meta: { title: 'NanoJev 判定 N3/N4' } },
+  { path: '/decision-gate', name: 'decision-gate', component: () => import('../views/DecisionGateView.vue'), meta: { title: '决策模型判定 N3/N4' } },
   // N 轨道 N5（2026-09-26）：认知 LOD + 高频微决策页（注意力卡 / 微决策卡 / 重算触发卡三卡观测）
   { path: '/n5-cognition', name: 'n5-cognition', component: () => import('../views/N5CognitionView.vue'), meta: { title: '认知 LOD + 微决策 N5' } },
   { path: '/usage', name: 'usage', component: () => import('../views/UsageView.vue'), meta: { title: '用量图' } },

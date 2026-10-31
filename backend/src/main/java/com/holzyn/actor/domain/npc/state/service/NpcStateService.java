@@ -208,7 +208,7 @@ public class NpcStateService {
 
     /**
      * 空间重算触发判定（情绪漂移检测点——AI 情绪评估写回后按情绪标签变化 +
-     * NanoJev boolean 确认触发空间重算 EMOTION_SHIFT；字段注入保持构造器不变，null=未装配跳过）
+     * 决策模型 boolean 确认触发空间重算 EMOTION_SHIFT；字段注入保持构造器不变，null=未装配跳过）
      */
     @Autowired(required = false)
     private com.holzyn.actor.domain.growth.space.SpaceTriggerJudge spaceTriggerJudge;
@@ -267,15 +267,15 @@ public class NpcStateService {
     private com.holzyn.actor.domain.agent.runtime.TickBarrier tickBarrier;
 
     /**
-     * NanoJev 判定门（crowd_decision 场景：普通 NPC 行动选择走程序化候选集 + sample 直接采纳；
-     * 字段注入保持构造器不变，null=未装配[单测]跳过 NanoJev 路径回退 Qwen/程序化）
+     * 决策模型 判定门（crowd_decision 场景：普通 NPC 行动选择走程序化候选集 + sample 直接采纳；
+     * 字段注入保持构造器不变，null=未装配[单测]跳过 决策模型 路径回退 Qwen/程序化）
      */
     @Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate nanoJevDecisionGate;
+    private com.holzyn.actor.ai.decision.gate.DecisionGate decisionGate;
 
     /**
      * 此刻可发生空间（普通 NPC crowd 统一到空间候选——决策时 ensureSpace +
-     * 空间 possible_actions + 通用三项 → precondition 过滤 → NanoJev choice；字段注入保持
+     * 空间 possible_actions + 通用三项 → precondition 过滤 → 决策模型 choice；字段注入保持
      * 构造器不变，null=未装配[单测]回退 程序化候选集）
      */
     @Autowired(required = false)
@@ -298,7 +298,7 @@ public class NpcStateService {
 
     /**
      * BrainStrategy 可插拔决策策略路由器（P2-3：普通 NPC 决策显式化为有序策略链——
-     * 危险强制→快选择[NanoJev+AI 建议]→概率化，链式责任首中即胜、命中写 trace；
+     * 危险强制→快选择[决策模型+AI 建议]→概率化，链式责任首中即胜、命中写 trace；
      * 字段注入保持构造器不变，null=未装配[单测]走既有内联管线，行为与 P2-3 前一致）
      */
     @Autowired(required = false)
@@ -1472,7 +1472,7 @@ public class NpcStateService {
                         npcRef, st.getDominantEmotion(), st.getEmotionIntensity());
             }
             // 事件驱动重算触发：情绪漂移检测点——情绪标签较评估前变化 →
-            // NanoJev boolean 确认（space_trigger 场景）→ 空间重算 EMOTION_SHIFT；
+            // 决策模型 boolean 确认（space_trigger 场景）→ 空间重算 EMOTION_SHIFT；
             // 失败/未启用 → 程序化阈值兜底；异步执行零阻断（本方法在虚拟线程，非事务）
             if (spaceTriggerJudge != null && persisted) {
                 try {
@@ -1923,7 +1923,7 @@ public class NpcStateService {
     }
 
     /**
-     * 普通 NPC 快选择（公开，BrainStrategy CrowdChoiceStrategy 委托）：NanoJev crowd 判定
+     * 普通 NPC 快选择（公开，BrainStrategy CrowdChoiceStrategy 委托）：决策模型 crowd 判定
      * （空间/程序化候选集 + choice sample 直接采纳）→ AI 建议式回退（Qwen，预算门控在调用方）；
      * 全失败返回 null（链继续 → 概率化）。
      */
@@ -1968,18 +1968,18 @@ public class NpcStateService {
         }
     }
 
-    /** 既有内联快选择管线（router 未装配[单测]；行为与 P2-3 前一致）：NanoJev 优先 → AI 建议回退。 */
+    /** 既有内联快选择管线（router 未装配[单测]；行为与 P2-3 前一致）：决策模型 优先 → AI 建议回退。 */
     private CrowdDecisionParse.CrowdAction legacyCrowdChoice(Long projectId, ActorCharacter npc,
                                                              Long gameSecond, String environmentText) {
-        // NanoJev 优先（crowd_decision 场景）：程序化候选集 + choice sample 直接采纳——
+        // 决策模型 优先（crowd_decision 场景）：程序化候选集 + choice sample 直接采纳——
         // 熵最高的平坦分布恰是「真人做琐碎决定的随意感」；失败/未启用回退 Qwen/程序化
         try {
-            CrowdDecisionParse.CrowdAction nano = decideCrowdActionNanoJev(projectId, npc, gameSecond, environmentText);
+            CrowdDecisionParse.CrowdAction nano = decideCrowdActionDecision(projectId, npc, gameSecond, environmentText);
             if (nano != null) {
                 return nano;
             }
         } catch (Exception e) {
-            log.warn("[状态驱动] NanoJev 人群决策失败（回退 Qwen/程序化）: ref=npc:{} : {}", npc.getId(), e.getMessage());
+            log.warn("[状态驱动] 决策模型 人群决策失败（回退 Qwen/程序化）: ref=npc:{} : {}", npc.getId(), e.getMessage());
         }
         if (promptTemplateService == null || aiChatGateway == null || usageLogService == null) {
             return null; // AI 依赖未装配（纯数据单测/无 AI 环境）→ 跳过
@@ -2033,20 +2033,20 @@ public class NpcStateService {
         }
     }
 
-    // ==================== NanoJev 人群行动判定（crowd_decision 场景，） ====================
+    // ==================== 决策模型 人群行动判定（crowd_decision 场景，） ====================
 
     /**
-     * NanoJev 人群行动判定：程序化候选集（需求驱动 + 通用项）→ choice 判定 →
+     * 决策模型 人群行动判定：程序化候选集（需求驱动 + 通用项）→ choice 判定 →
      * sample 直接采纳（<b>无升级阈值</b>——：熵最高 1.96 的平坦分布恰是「真人做
      * 琐碎日常决定时的随意」，judge 自然度 4.38 全场景最高；分布平坦即采纳）。选中候选映射为
      * {@link CrowdDecisionParse.CrowdAction}（目标地点经既有需求-地点匹配）。
      *
-     * @return NanoJev 行动决策（未启用/失败/升级=null → 调用方回退 Qwen/程序化）
+     * @return 决策模型 行动决策（未启用/失败/升级=null → 调用方回退 Qwen/程序化）
      */
-    private CrowdDecisionParse.CrowdAction decideCrowdActionNanoJev(Long projectId, ActorCharacter npc,
+    private CrowdDecisionParse.CrowdAction decideCrowdActionDecision(Long projectId, ActorCharacter npc,
                                                                     Long gameSecond, String environmentText) {
-        if (nanoJevDecisionGate == null || !nanoJevDecisionGate.isEnabled(
-                com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes.CROWD_DECISION)) {
+        if (decisionGate == null || !decisionGate.isEnabled(
+                com.holzyn.actor.ai.decision.gate.DecisionScenes.CROWD_DECISION)) {
             return null;
         }
         ActorNpcState st = ensureState(projectId, NpcRefs.normalizeType(npc.getType()),
@@ -2067,35 +2067,35 @@ public class NpcStateService {
             }
         }
         // ：普通 NPC crowd 统一到空间候选——空间 possible_actions + 通用三项 →
-        // precondition 过滤 → NanoJev choice sample 直接采纳；空间无效/无候选/判定失败 →
+        // precondition 过滤 → 决策模型 choice sample 直接采纳；空间无效/无候选/判定失败 →
         // 回退 程序化候选集（零阻断）
-        CrowdDecisionParse.CrowdAction fromSpace = decideCrowdActionNanoJevFromSpace(
+        CrowdDecisionParse.CrowdAction fromSpace = decideCrowdActionDecisionFromSpace(
                 projectId, npc, gameSecond, environmentText, st, currentActivity);
         if (fromSpace != null) {
             return fromSpace;
         }
         // ① 程序化候选集（需求驱动 + 通用项；≤8 项利于 0.6B 判断）
-        Map<String, String> candidates = buildNanoJevCrowdCandidates(st, currentActivity, locationNames(projectId));
+        Map<String, String> candidates = buildDecisionCrowdCandidates(st, currentActivity, locationNames(projectId));
         if (candidates.size() < 2) {
             return null;
         }
         // ② 情境文本（当前行动/地点/状态摘要/环境变化）
-        String stateText = buildNanoJevCrowdStateText(npc, st, currentActivity, environmentText);
-        Map<String, com.holzyn.actor.ai.nanojev.NanoJevQuestion> questions =
-                com.holzyn.actor.ai.nanojev.NanoJevState.newQuestions();
-        questions.put(QID_CROWD_ACTION, com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionTemplates
+        String stateText = buildDecisionCrowdStateText(npc, st, currentActivity, environmentText);
+        Map<String, com.holzyn.actor.ai.decision.DecisionQuestion> questions =
+                com.holzyn.actor.ai.decision.DecisionState.newQuestions();
+        questions.put(QID_CROWD_ACTION, com.holzyn.actor.ai.decision.gate.DecisionTemplates
                 .crowdQuestion(candidates));
-        com.holzyn.actor.ai.nanojev.NanoJevState state = com.holzyn.actor.ai.nanojev.NanoJevState.text(
+        com.holzyn.actor.ai.decision.DecisionState state = com.holzyn.actor.ai.decision.DecisionState.text(
                 "crowd" + npc.getId(), stateText, questions);
         // ③ choice 判定（sample 直接采纳）
-        com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate.ChoiceOutcome out =
-                nanoJevDecisionGate.choiceDecision(projectId, npc.getId(),
-                        com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes.CROWD_DECISION,
+        com.holzyn.actor.ai.decision.gate.DecisionGate.ChoiceOutcome out =
+                decisionGate.choiceDecision(projectId, npc.getId(),
+                        com.holzyn.actor.ai.decision.gate.DecisionScenes.CROWD_DECISION,
                         state, QID_CROWD_ACTION);
         if (out == null || !out.adopted() || out.chosen() == null || out.chosen().isBlank()) {
             return null;
         }
-        return nanoJevChosenToAction(projectId, out.chosen(), npc, st, currentActivity);
+        return decisionChosenToAction(projectId, out.chosen(), npc, st, currentActivity);
     }
 
     /** crowd choice 判定的问题键。 */
@@ -2110,7 +2110,7 @@ public class NpcStateService {
      *
      * @return 空间路径行动决策
      */
-    private CrowdDecisionParse.CrowdAction decideCrowdActionNanoJevFromSpace(Long projectId, ActorCharacter npc,
+    private CrowdDecisionParse.CrowdAction decideCrowdActionDecisionFromSpace(Long projectId, ActorCharacter npc,
                                                                              Long gameSecond, String environmentText,
                                                                              ActorNpcState st, String currentActivity) {
         if (growthSpaceService == null) {
@@ -2178,14 +2178,14 @@ public class NpcStateService {
             // 选中复核/重采样）→ 返回选中候选（null=回退程序化候选集）
             com.holzyn.actor.domain.growth.space.SpaceDecisionCandidates.SpaceCandidate chosen =
                     com.holzyn.actor.domain.growth.space.SpaceDecisionServiceUtils.decide(
-                            nanoJevDecisionGate, projectId, npc.getId(), candidates, pctx,
-                            buildNanoJevCrowdStateText(npc, st, currentActivity, environmentText));
+                            decisionGate, projectId, npc.getId(), candidates, pctx,
+                            buildDecisionCrowdStateText(npc, st, currentActivity, environmentText));
             if (chosen == null) {
                 return null;
             }
-            return nanoJevSpaceChosenToAction(projectId, chosen, npc, st, currentActivity);
+            return decisionSpaceChosenToAction(projectId, chosen, npc, st, currentActivity);
         } catch (Exception e) {
-            log.warn("[状态驱动] NanoJev 空间候选判定失败（回退程序化候选集）: ref=npc:{} : {}",
+            log.warn("[状态驱动] 决策模型 空间候选判定失败（回退程序化候选集）: ref=npc:{} : {}",
                     npc.getId(), e.getMessage());
             return null;
         }
@@ -2255,19 +2255,19 @@ public class NpcStateService {
     }
 
     /** 空间候选选中键 → 人群行动决策（动作文本/类型/目标地点）。 */
-    private CrowdDecisionParse.CrowdAction nanoJevSpaceChosenToAction(Long projectId,
+    private CrowdDecisionParse.CrowdAction decisionSpaceChosenToAction(Long projectId,
                                                                       com.holzyn.actor.domain.growth.space.SpaceDecisionCandidates.SpaceCandidate chosen,
                                                                       ActorCharacter npc, ActorNpcState st,
                                                                       String currentActivity) {
         if (chosen.generic()) {
-            return nanoJevChosenToAction(projectId, chosen.key(), npc, st, currentActivity);
+            return decisionChosenToAction(projectId, chosen.key(), npc, st, currentActivity);
         }
         String action = chosen.action() == null || chosen.action().isBlank()
                 ? "忙于日常事务" : chosen.action().trim();
         String target = chosen.target() == null ? null : chosen.target().trim();
         String type = crowdTypeOfText(action);
         return new CrowdDecisionParse.CrowdAction(action, type, target,
-                "NanoJev 判定（space_decision）");
+                "决策模型 判定（space_decision）");
     }
 
     /** 空间行动文本 → 人群动作类型（需求恢复语义关键词；默认 work）。 */
@@ -2310,7 +2310,7 @@ public class NpcStateService {
      *
      * @return 候选表（键 → 自包含描述）
      */
-    public static Map<String, String> buildNanoJevCrowdCandidates(ActorNpcState st, String currentActivity,
+    public static Map<String, String> buildDecisionCrowdCandidates(ActorNpcState st, String currentActivity,
                                                                   List<String> locations) {
         Map<String, String> c = new LinkedHashMap<>();
         c.put("continue_current", "继续当前正在做的事");
@@ -2351,7 +2351,7 @@ public class NpcStateService {
     }
 
     /** crowd 情境文本（当前行动/地点/状态摘要/环境变化；判据自包含）。 */
-    private String buildNanoJevCrowdStateText(ActorCharacter npc, ActorNpcState st,
+    private String buildDecisionCrowdStateText(ActorCharacter npc, ActorNpcState st,
                                               String currentActivity, String environmentText) {
         StringBuilder sb = new StringBuilder();
         sb.append(npc.getName() == null || npc.getName().isBlank() ? "该角色" : npc.getName());
@@ -2383,12 +2383,12 @@ public class NpcStateService {
     }
 
     /** 选中候选键 → 行动决策（动作文本/类型/目标地点；与既有 buildAction 同口径）。 */
-    private CrowdDecisionParse.CrowdAction nanoJevChosenToAction(Long projectId, String chosen,
+    private CrowdDecisionParse.CrowdAction decisionChosenToAction(Long projectId, String chosen,
                                                                  ActorCharacter npc, ActorNpcState st,
                                                                  String currentActivity) {
         List<String> locations = locationNames(projectId);
         Random rng = new Random();
-        String reason = "NanoJev 判定（crowd_decision）";
+        String reason = "决策模型 判定（crowd_decision）";
         switch (chosen) {
             case "continue_current" -> {
                 String text = currentActivity == null || currentActivity.isBlank()

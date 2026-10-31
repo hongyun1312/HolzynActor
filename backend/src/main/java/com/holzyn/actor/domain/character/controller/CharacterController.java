@@ -59,7 +59,7 @@ public class CharacterController {
      *
      * @return 角色列表（含是否已生成角色卡标记）
      */
-    @GetMapping("/projects/{projectId}/characters")
+    @GetMapping("/worlds/{projectId}/characters")
     public R<List<CharacterVO>> list(@PathVariable("projectId") Long projectId) {
         return R.ok(characterService.list(projectId));
     }
@@ -73,7 +73,7 @@ public class CharacterController {
      *
      * @return 拓扑图 VO（nodes + relations）
      */
-    @GetMapping("/projects/{projectId}/character-relations")
+    @GetMapping("/worlds/{projectId}/character-relations")
     public R<CharacterRelationGraphVO> relationsGraph(@PathVariable("projectId") Long projectId) {
         return R.ok(characterService.relationsGraph(projectId));
     }
@@ -89,7 +89,7 @@ public class CharacterController {
      *
      * @return 关系草稿列表（RelationDraftVO）
      */
-    @PostMapping("/projects/{projectId}/character-relations/generate")
+    @PostMapping("/worlds/{projectId}/character-relations/generate")
     public R<List<RelationDraftVO>> generateRelations(@PathVariable("projectId") Long projectId,
                                                       @RequestBody(required = false) RelationGenerateDTO dto) {
         return R.ok(characterRelationService.generate(projectId, dto == null ? new RelationGenerateDTO("character", null, null, "supplement") : dto));
@@ -105,7 +105,7 @@ public class CharacterController {
      *
      * @return {added 实际写入条数, total 提交条数}
      */
-    @PostMapping("/projects/{projectId}/character-relations/batch")
+    @PostMapping("/worlds/{projectId}/character-relations/batch")
     public R<Map<String, Object>> batchSaveRelations(@PathVariable("projectId") Long projectId,
                                                      @RequestBody(required = false) RelationBatchDTO dto) {
         return R.ok(characterRelationService.batchSave(projectId,
@@ -121,7 +121,7 @@ public class CharacterController {
      *
      * @return 新增后的关系行 VO
      */
-    @PostMapping("/projects/{projectId}/character-relations")
+    @PostMapping("/worlds/{projectId}/character-relations")
     public R<CharacterRelationVO> createRelation(@PathVariable("projectId") Long projectId,
                                                  @RequestBody(required = false) RelationWriteDTO dto) {
         return R.ok(characterRelationService.create(projectId, dto));
@@ -166,7 +166,7 @@ public class CharacterController {
      *
      * @return 精修后的关系行 VO
      */
-    @PostMapping("/projects/{projectId}/character-relations/{id}/ai-refine")
+    @PostMapping("/worlds/{projectId}/character-relations/{id}/ai-refine")
     public R<CharacterRelationVO> aiRefineRelation(@PathVariable("projectId") Long projectId,
                                                    @PathVariable("id") Long id) {
         return R.ok(characterRelationService.aiRefine(projectId, id));
@@ -181,7 +181,7 @@ public class CharacterController {
      *
      * @return 创建后的角色
      */
-    @PostMapping("/projects/{projectId}/characters")
+    @PostMapping("/worlds/{projectId}/characters")
     public R<CharacterVO> create(@PathVariable("projectId") Long projectId, @Valid @RequestBody CharacterDTO dto) {
         return R.ok(characterService.create(projectId, dto));
     }

@@ -125,6 +125,14 @@ public class GrowthDebugController {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.growth.space.SpaceTriggerJudge spaceTriggerJudge;
 
+    /** 开局家族与基因建档编排（手动补齐接口用；字段注入，构造器不变——AGENTS 8.1.2） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.growth.lineage.FamilyGenesisService familyGenesisService;
+
+    /** 当前用户（无登录态时为 null → 建档走确定性推断，不调 AI） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.account.CurrentUserProvider currentUserProvider;
+
     // ==================== 只读观测 ====================
 
     /** 项目全 NPC 的发育阶段/LOD/空间概览。 */
@@ -401,6 +409,38 @@ public class GrowthDebugController {
     @GetMapping("/lineage")
     public Map<String, Object> lineage(@RequestParam Long projectId, @RequestParam String npcRef) {
         return lineageService.familyTree(projectId, npcRef);
+    }
+
+    /**
+     * 开局家族与基因建档（补齐 + 造谱系边 + 基因档案，幂等）。
+     *
+     * <p>给「老存档修复」与「世界里没有家谱时手动补一次」用：应用启动时
+     * {@code FamilyBackfillRunner} 已会自动跑一次，但那条链路没有登录态（不做 AI 精修）。
+     * 手动接口带 userId，可让 AI 精修一次性把性别/年龄判准。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 统计：{@code {profilesFixed, families, marriages, parentEdges, genomes}}
+     */
+    @PostMapping("/family/backfill")
+    public Map<String, Object> familyBackfill(@RequestParam Long projectId) {
+        if (familyGenesisService == null) {
+            return Map.of("error", "FamilyGenesisService 未装配（该部署未启用开局家族建档）");
+        }
+        Long userId = null;
+        try {
+            userId = currentUserProvider.currentUserId();
+        } catch (Exception e) {
+            // 无登录态（脚本直调）→ 走确定性推断，不调 AI
+        }
+        var result = familyGenesisService.ensure(userId, projectId, worldClockService.currentEngineGameSecond(projectId));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("profilesFixed", result.profilesFixed());
+        out.put("families", result.families());
+        out.put("marriages", result.marriages());
+        out.put("parentEdges", result.parentEdges());
+        out.put("genomes", result.genomes());
+        return out;
     }
 
     /** 基因/表观视图。 */

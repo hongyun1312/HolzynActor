@@ -94,10 +94,10 @@
           真实感世界地图与完整关系网）。下面的入口直接打开它，怎么点都不会把数据弄坏——它本来就是给你试的。
         </p>
         <div class="tut-card-foot">
-          <el-button size="small" type="primary" @click="go('/project/1/dashboard')">打开演示项目仪表盘</el-button>
-          <el-button size="small" plain @click="go('/project/1/chat')">和村民对话</el-button>
-          <el-button size="small" plain @click="go('/project/1/sandbox')">看世界地图</el-button>
-          <el-button size="small" plain @click="go('/project/1/timeline')">翻时间线</el-button>
+          <el-button size="small" type="primary" @click="go('/world/1/dashboard')">打开演示项目仪表盘</el-button>
+          <el-button size="small" plain @click="go('/world/1/chat')">和村民对话</el-button>
+          <el-button size="small" plain @click="go('/world/1/sandbox')">看世界地图</el-button>
+          <el-button size="small" plain @click="go('/world/1/timeline')">翻时间线</el-button>
         </div>
       </section>
 
@@ -157,7 +157,7 @@ const chapters = [
       '每个角色有自己的记忆、情绪、生理需求、关系网与长期目标。',
       'AI 成本不是本项目的约束——调用的多少只用来看「世界是否在真实地运转」。'
     ],
-    actions: [{ label: '看项目画廊', route: '/', primary: true }]
+    actions: [{ label: '看世界画廊', route: '/', primary: true }]
   },
   {
     key: 'start',
@@ -170,8 +170,8 @@ const chapters = [
       '时钟默认是「暂停」的，进入项目后按顶部「开始推进」世界才开始跑。'
     ],
     actions: [
-      { label: '新建项目', route: '/project/new', primary: true },
-      { label: '用演示项目跳过这步', route: `/project/${DEMO_PROJECT_ID}/dashboard` }
+      { label: '新建项目', route: '/world/new', primary: true },
+      { label: '用演示项目跳过这步', route: `/world/${DEMO_PROJECT_ID}/dashboard` }
     ]
   },
   {
@@ -188,8 +188,8 @@ const chapters = [
       '置顶的「世界地图」「对话」是最高频入口，任何页面一键可达。'
     ],
     actions: [
-      { label: '去世界详情', route: `/project/${DEMO_PROJECT_ID}/world`, primary: true },
-      { label: '去角色列表', route: `/project/${DEMO_PROJECT_ID}/characters` }
+      { label: '去世界详情', route: `/world/${DEMO_PROJECT_ID}/world`, primary: true },
+      { label: '去角色列表', route: `/world/${DEMO_PROJECT_ID}/characters` }
     ]
   },
   {
@@ -203,8 +203,8 @@ const chapters = [
       '干预：在世界演化 / 仪表盘里推进时间、注入事件，或直接改写世界设定。'
     ],
     actions: [
-      { label: '和村民对话', route: `/project/${DEMO_PROJECT_ID}/chat`, primary: true },
-      { label: '看世界地图', route: `/project/${DEMO_PROJECT_ID}/sandbox` }
+      { label: '和村民对话', route: `/world/${DEMO_PROJECT_ID}/chat`, primary: true },
+      { label: '看世界地图', route: `/world/${DEMO_PROJECT_ID}/sandbox` }
     ]
   },
   {
@@ -218,7 +218,7 @@ const chapters = [
       '调试台（/debug/）是排查用的独立前端：AI Trace 全文、DB 浏览、实时日志、事件流。'
     ],
     actions: [
-      { label: '打开 AI 用量', route: `/project/${DEMO_PROJECT_ID}/settings/usage`, primary: true },
+      { label: '打开 AI 用量', route: `/world/${DEMO_PROJECT_ID}/settings/usage`, primary: true },
       { label: '打开调试台', route: '/debug/' }
     ]
   },
@@ -234,7 +234,7 @@ const chapters = [
       '侧栏宽度可拖拽、「界面与布局」里可改信息密度（三档）、可固定常用面板。'
     ],
     actions: [
-      { label: '打开界面与布局设置', route: `/project/${DEMO_PROJECT_ID}/settings/appearance`, primary: true },
+      { label: '打开界面与布局设置', route: `/world/${DEMO_PROJECT_ID}/settings/appearance`, primary: true },
       { label: '看全部快捷键', drawer: 'help' }
     ]
   }
@@ -323,7 +323,10 @@ async function replayFirstRunGuide() {
 </script>
 
 <style scoped>
-.tutorial-page { display: flex; flex-direction: column; gap: 14px; }
+/* 2026-10 布局审计：本页与「全局设置」同属无侧栏的全局页，但内容列吃到 1440 档
+   （实测 x=24 / w=1384），设置页是 1200 档（x=116 / w=1200），顶栏来回切换会横向跳 92px。
+   统一到 content 档：3 列卡片栅格（minmax 360）在 1200 下仍是 3 列。 */
+.tutorial-page { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: var(--page-w-content, 1200px); margin: 0 auto; }
 
 .tut-progress { display: flex; align-items: center; gap: 12px; }
 .tut-progress :deep(.el-progress) { flex: 1; }

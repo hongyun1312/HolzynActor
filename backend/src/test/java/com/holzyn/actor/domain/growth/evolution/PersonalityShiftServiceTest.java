@@ -2,8 +2,8 @@ package com.holzyn.actor.domain.growth.evolution;
 
 import com.holzyn.actor.ai.AiChatRequest;
 import com.holzyn.actor.ai.AiChatResult;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
 import com.holzyn.actor.ai.spring.AiSpringChatGateway;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
 import com.holzyn.actor.domain.agent.context.AiContextInjector;
@@ -295,26 +295,26 @@ class PersonalityShiftServiceTest {
 
     // ==================== N5 persona_shift 门控（2026-09-26：尖锐采纳否则升 Qwen） ====================
 
-    /** 注入 NanoJev 判定门 mock（字段注入，构造器不变）。 */
-    private NanoJevDecisionGate injectGate() {
-        NanoJevDecisionGate gate = org.mockito.Mockito.mock(NanoJevDecisionGate.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "nanoJevDecisionGate", gate);
+    /** 注入 决策模型 判定门 mock（字段注入，构造器不变）。 */
+    private DecisionGate injectGate() {
+        DecisionGate gate = org.mockito.Mockito.mock(DecisionGate.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "decisionGate", gate);
         return gate;
     }
 
     @Test
-    @DisplayName("N5 persona_shift：NanoJev 尖锐采纳（强度 3 + 正向）→ 三维偏移落账，零 Qwen 调用")
-    void nanoJevAdoptedAppliesShifts() {
-        NanoJevDecisionGate gate = injectGate();
-        when(gate.isEnabled(NanoJevDecisionScenes.PERSONA_SHIFT)).thenReturn(true);
-        when(gate.mixedDecisions(eq(1L), eq(9L), eq(NanoJevDecisionScenes.PERSONA_SHIFT),
+    @DisplayName("N5 persona_shift：决策模型 尖锐采纳（强度 3 + 正向）→ 三维偏移落账，零 Qwen 调用")
+    void decisionAdoptedAppliesShifts() {
+        DecisionGate gate = injectGate();
+        when(gate.isEnabled(DecisionScenes.PERSONA_SHIFT)).thenReturn(true);
+        when(gate.mixedDecisions(eq(1L), eq(9L), eq(DecisionScenes.PERSONA_SHIFT),
                 any(), anyMap())).thenReturn(Map.of(
                 PersonalityShiftService.QID_SHIFT_STRENGTH,
-                new NanoJevDecisionGate.ScoreOutcome(
-                        3, 2.6, true, NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0),
+                new DecisionGate.ScoreOutcome(
+                        3, 2.6, true, DecisionGate.DISP_ADOPTED, null, null, null, 0),
                 PersonalityShiftService.QID_SHIFT_DIRECTION,
-                new NanoJevDecisionGate.ChoiceOutcome(
-                        "positive", true, NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0)));
+                new DecisionGate.ChoiceOutcome(
+                        "positive", true, DecisionGate.DISP_ADOPTED, null, null, null, 0)));
 
         ActorCharacter adult = chWithPersona(9L, GrowthStage.PRIME.name());
         when(characterRepository.findById(9L)).thenReturn(java.util.Optional.of(adult));
@@ -337,18 +337,18 @@ class PersonalityShiftServiceTest {
     }
 
     @Test
-    @DisplayName("N5 persona_shift：NanoJev 采纳但证据弱（强度 1）→ 明确判定无偏移，不记失败指标、零 Qwen")
-    void nanoJevAdoptedWeakEvidenceNoShift() {
-        NanoJevDecisionGate gate = injectGate();
-        when(gate.isEnabled(NanoJevDecisionScenes.PERSONA_SHIFT)).thenReturn(true);
-        when(gate.mixedDecisions(eq(1L), eq(10L), eq(NanoJevDecisionScenes.PERSONA_SHIFT),
+    @DisplayName("N5 persona_shift：决策模型 采纳但证据弱（强度 1）→ 明确判定无偏移，不记失败指标、零 Qwen")
+    void decisionAdoptedWeakEvidenceNoShift() {
+        DecisionGate gate = injectGate();
+        when(gate.isEnabled(DecisionScenes.PERSONA_SHIFT)).thenReturn(true);
+        when(gate.mixedDecisions(eq(1L), eq(10L), eq(DecisionScenes.PERSONA_SHIFT),
                 any(), anyMap())).thenReturn(Map.of(
                 PersonalityShiftService.QID_SHIFT_STRENGTH,
-                new NanoJevDecisionGate.ScoreOutcome(
-                        1, 0.8, true, NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0),
+                new DecisionGate.ScoreOutcome(
+                        1, 0.8, true, DecisionGate.DISP_ADOPTED, null, null, null, 0),
                 PersonalityShiftService.QID_SHIFT_DIRECTION,
-                new NanoJevDecisionGate.ChoiceOutcome(
-                        "unclear", true, NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0)));
+                new DecisionGate.ChoiceOutcome(
+                        "unclear", true, DecisionGate.DISP_ADOPTED, null, null, null, 0)));
 
         ActorCharacter adult = chWithPersona(10L, GrowthStage.PRIME.name());
         when(characterRepository.findById(10L)).thenReturn(java.util.Optional.of(adult));
@@ -359,7 +359,7 @@ class PersonalityShiftServiceTest {
         Map<String, Object> result = service.assess(1L, "npc:10", GrowthShiftLog.TRIGGER_MANUAL, 1_000_000L);
 
         assertNotNull(result);
-        assertEquals("nanojev_no_shift", result.get("fallback"));
+        assertEquals("decision_no_shift", result.get("fallback"));
         assertEquals(List.of(), result.get("shifts"));
         verify(aiChatGateway, never()).chatCompletion(any(), any(), any(), any());
         verify(growthMetrics, never()).recordShiftAssessFail();
@@ -372,17 +372,17 @@ class PersonalityShiftServiceTest {
 
     @Test
     @DisplayName("N5 persona_shift：分布不尖锐（升级）→ 升 Qwen 深度判定（沿既有 AI 路径）")
-    void nanoJevEscalatedFallsThroughToQwen() {
-        NanoJevDecisionGate gate = injectGate();
-        when(gate.isEnabled(NanoJevDecisionScenes.PERSONA_SHIFT)).thenReturn(true);
-        when(gate.mixedDecisions(eq(1L), eq(11L), eq(NanoJevDecisionScenes.PERSONA_SHIFT),
+    void decisionEscalatedFallsThroughToQwen() {
+        DecisionGate gate = injectGate();
+        when(gate.isEnabled(DecisionScenes.PERSONA_SHIFT)).thenReturn(true);
+        when(gate.mixedDecisions(eq(1L), eq(11L), eq(DecisionScenes.PERSONA_SHIFT),
                 any(), anyMap())).thenReturn(Map.of(
                 PersonalityShiftService.QID_SHIFT_STRENGTH,
-                new NanoJevDecisionGate.ScoreOutcome(
-                        -1, 0, false, NanoJevDecisionGate.DISP_ESCALATED, null, null, null, 0),
+                new DecisionGate.ScoreOutcome(
+                        -1, 0, false, DecisionGate.DISP_ESCALATED, null, null, null, 0),
                 PersonalityShiftService.QID_SHIFT_DIRECTION,
-                new NanoJevDecisionGate.ChoiceOutcome(
-                        null, false, NanoJevDecisionGate.DISP_ESCALATED, null, null, null, 0)));
+                new DecisionGate.ChoiceOutcome(
+                        null, false, DecisionGate.DISP_ESCALATED, null, null, null, 0)));
 
         ActorCharacter adult = chWithPersona(11L, GrowthStage.PRIME.name());
         when(characterRepository.findById(11L)).thenReturn(java.util.Optional.of(adult));

@@ -35,12 +35,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * 网关并发限流器（_07 网关并发错峰观察项；前缀 holzyn.actor.ai.gateway-concurrency.*）。
  * <p><b>背景</b>：日边界突发（20 角色决策 + 日级任务：plan_day/reflection/growth_space/world_frame/
  * 编年史/批量巩固）把自托管模型网关（本地 35B 单实例，并发容量有限）打排队 → 大量 chat 调用 120s
- * 读超时失败（_02 实测：growth_space 32 / plan_day 6 / world_frame 4 等失败；NanoJev/embedding
+ * 读超时失败（_02 实测：growth_space 32 / plan_day 6 / world_frame 4 等失败；决策模型/embedding
  * 毫秒级不受影响）。DeepSeek API 主用场景无此问题（官方网关并发容量大）——故<b>默认关闭（0=不限流）</b>，
  * 本地模型测试经 env 开启：超出上限的 chat 调用<b>排队等待空位</b>（而非雪崩式并发），等待超时按
  * 既有失败语义（AiCallException）走业务侧重试/兜底。</p>
  * <p><b>收口位置</b>：本限流器挂在 {@link AiSpringChatGateway}（全部 chat 调用唯一入口：
- * chatCompletion / chatCompletionJson / chatCompletionStream），NanoJev evaluate 与 embedding
+ * chatCompletion / chatCompletionJson / chatCompletionStream），决策模型 evaluate 与 embedding
  * 走独立通道天然不受影响。与 R1 前瞻预热（小时边界决策异步化）叠加削峰。</p>
  * <p><b>观测</b>：inFlight/maxInFlight/totalWaits/waitTimeouts 计数（{@link #stats()}），
  * 供测试冒烟与调试页观测排队而非超时。</p>

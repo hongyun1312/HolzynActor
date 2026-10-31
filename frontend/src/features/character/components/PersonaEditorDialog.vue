@@ -556,7 +556,7 @@ function onClosed() {
 .ped-sub { font-size: 12px; color: var(--text-tertiary, #909399); }
 .ped-empty { padding: 20px 0; }
 .ped-ops { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-.ped-hint { font-size: 11.5px; color: var(--text-tertiary, #909399); }
+.ped-hint { font-size: 13px; color: var(--text-tertiary, #909399); }
 
 .ped-body { display: flex; gap: 12px; min-height: 420px; max-height: 60vh; }
 .ped-nav { flex: 0 0 150px; display: flex; flex-direction: column; gap: 4px; overflow: auto; }
@@ -569,13 +569,13 @@ function onClosed() {
 .ped-nav-item.is-active { color: #fff; background: var(--accent-color, #409eff); }
 .ped-nav-item.is-missing { border-color: var(--el-color-warning, #e6a23c); }
 .ped-nav-no { font-weight: 700; }
-.ped-nav-badge { margin-left: auto; font-size: 10px; color: #fff; background: var(--el-color-warning, #e6a23c); border-radius: 8px; padding: 0 5px; }
+.ped-nav-badge { margin-left: auto; font-size: 12px; color: #fff; background: var(--el-color-warning, #e6a23c); border-radius: 8px; padding: 0 5px; }
 
 .ped-editor { flex: 1; border: 1px solid var(--border-l1, #e4e7ed); border-radius: 8px; overflow: auto; padding: 10px 12px; }
 .ped-editor-empty { color: var(--text-placeholder, #c0c4cc); font-size: 13px; padding: 80px 0; text-align: center; }
 .ped-editor-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .ped-editor-title { font-size: 14px; font-weight: 700; }
-.ped-editor-meta { font-size: 11px; color: var(--text-tertiary, #909399); font-family: var(--font-mono, monospace); }
+.ped-editor-meta { font-size: 12.5px; color: var(--text-tertiary, #909399); font-family: var(--font-mono, monospace); }
 .ped-editor-head .el-button { margin-left: auto; }
 
 .ped-form { display: flex; flex-direction: column; gap: 8px; }
@@ -591,7 +591,7 @@ function onClosed() {
 .ped-kv-v { flex: 1; min-width: 0; }
 .ped-event-row, .ped-trauma-row { display: flex; gap: 6px; align-items: center; }
 
-.ped-json-hint { font-size: 11.5px; color: var(--text-tertiary, #909399); margin-bottom: 6px; }
+.ped-json-hint { font-size: 13px; color: var(--text-tertiary, #909399); margin-bottom: 6px; }
 .ped-json-input :deep(textarea) { font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.6; }
 
 .ped-ver-row { display: flex; align-items: center; gap: 10px; }
@@ -599,7 +599,7 @@ function onClosed() {
 .ped-ver-json {
   margin: 6px 0 0; padding: 8px 10px; background: var(--bg-base, #fafafa);
   border: 1px dashed var(--border-l1, #e4e7ed); border-radius: 6px;
-  font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.5;
+  font-family: var(--font-mono, monospace); font-size: 12.5px; line-height: 1.5;
   color: var(--text-regular, #606266); white-space: pre-wrap; word-break: break-all;
   max-height: 180px; overflow: auto;
 }

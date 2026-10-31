@@ -93,6 +93,37 @@
         type="button" class="wm-tool" title="换一个种子重生成" :disabled="starting"
         @click="regenerate"
       >⟳</button>
+      <button
+        type="button" class="wm-tool" :class="{ on: editState.on }"
+        title="布局编辑：点建筑选中，拖动改位置，按钮旋转改朝向" @click="toggleEdit"
+      >改</button>
+    </div>
+
+    <!-- 布局编辑面板（左对齐；只在编辑态出现） -->
+    <div v-if="!compact && overview && !busy && editState.on" class="wm-edit">
+      <div class="wm-edit-head">
+        <span class="wm-edit-title">布局编辑</span>
+        <span class="wm-edit-count">{{ editState.drafts.length }} 处改动</span>
+      </div>
+      <div v-if="editState.selected" class="wm-edit-sel">
+        <span class="wm-edit-name" :title="editState.selected.code">{{ editState.selected.name }}</span>
+        <button type="button" class="wm-tool" title="逆时针 15°" @click="rotateSel(-15)">⟲</button>
+        <button type="button" class="wm-tool" title="顺时针 15°" @click="rotateSel(15)">⟳</button>
+        <button type="button" class="wm-tool" title="放回原位" @click="resetSel">↺</button>
+      </div>
+      <div v-else class="wm-edit-hint">点一栋房子选中它，拖动即可改位置</div>
+      <div class="wm-edit-actions">
+        <el-button
+          size="small" type="primary" :loading="editBusy"
+          :disabled="!editState.drafts.length || editBusy" @click="saveEdits"
+        >保存{{ editState.drafts.length ? ' ' + editState.drafts.length + ' 项' : '' }}</el-button>
+        <el-button size="small" :disabled="editBusy" @click="discardEdits">取消</el-button>
+      </div>
+      <div v-if="editMsg" class="wm-edit-msg">{{ editMsg }}</div>
+      <ul v-if="editErrors.length" class="wm-edit-errs">
+        <li v-for="(e, i) in editErrors" :key="i">{{ e.code }}：{{ e.reason }}</li>
+      </ul>
+      <div class="wm-edit-tip">位置吸附 0.5 米、朝向吸附 15°；保存时服务端会复校验并整批生效。</div>
     </div>
 
     <!-- 图例：路网等级 + 角色活动（颜色都来自后端 palette / 前端同一份常量） -->
@@ -173,10 +204,13 @@ import { ElButton, ElTag } from 'element-plus'
 import { MapStage } from '../map/mapStage'
 import { ACTIVITY_LEGEND } from '../map/mapRenderCharacters'
 import {
+  fetchLayoutOverrides,
+  fetchMapActors,
   fetchMapBundle,
   fetchMapOverview,
   generateWorldMap,
-  mapStreamUrl
+  mapStreamUrl,
+  saveLayoutEdits
 } from '@/shared/api/worldMapPipeline'
 
 const props = defineProps({
@@ -226,6 +260,14 @@ const roadGrades = ref([3, 2, 1, 0])
 let stage = null
 let source = null
 let disposed = false
+// ---- 布局编辑（拖拽/旋转草稿）----
+const editState = reactive({ on: false, drafts: [], selected: null })
+const editBusy = ref(false)
+const editMsg = ref('')
+const editErrors = ref([])
+const layoutRevision = ref(0)
+// ---- 角色快照轮询（5 秒；世界暂停时不推它也在，接口会带 paused）----
+let actorTimer = null
 
 const overview = computed(() => state.overview)
 const bundle = computed(() => state.bundle)
@@ -320,7 +362,115 @@ async function loadBundle() {
   // M7 之后角色位置由日程（bundle.characters）决定；没有日程才退回旧的仿射投影。
   if (!(data.characters || []).length) projectNpcs()
   ambientText.value = ambientLabel(data.ambient)
+  // 角色坐标与轨迹来自后端（不再是前端按日程插值出来的）——每 5 秒拉一次薄快照
+  startActorPolling()
+  // 布局修订号：保存时的乐观锁，也是「我基于哪一版改的」的凭据
+  try {
+    const ov = await fetchLayoutOverrides(props.projectId)
+    layoutRevision.value = Number(ov?.revision) || 0
+  } catch (e) {
+    layoutRevision.value = 0
+  }
   emit('ready', data.overview || state.overview)
+}
+
+// ==================== 角色快照 ====================
+
+/** 拉一次角色快照并交给舞台（失败静默：轮询失败不该弹窗）。 */
+async function pollActors() {
+  if (!stage || disposed) return
+  try {
+    const data = await fetchMapActors(props.projectId)
+    if (data) stage.applyActorSnapshot(data)
+  } catch (e) {
+    // 网络抖动/后端忙：下一次再试
+  }
+}
+
+/** 启动快照轮询（幂等）。 */
+function startActorPolling() {
+  if (actorTimer) return
+  actorTimer = setInterval(pollActors, 5000)
+  pollActors()
+}
+
+/** 停止轮询（卸载/切项目）。 */
+function stopActorPolling() {
+  if (actorTimer) {
+    clearInterval(actorTimer)
+    actorTimer = null
+  }
+}
+
+// ==================== 布局编辑 ====================
+
+/** 开/关编辑态（关掉会把草稿还原）。 */
+function toggleEdit() {
+  if (!stage) return
+  if (editState.on) {
+    stage.setEditMode(false)
+    editMsg.value = ''
+    editErrors.value = []
+    return
+  }
+  editMsg.value = ''
+  editErrors.value = []
+  stage.setEditMode(true)
+}
+
+/** 旋转选中建筑（度）。 */
+function rotateSel(deg) {
+  stage?.rotateSelected(deg)
+}
+
+/** 选中建筑放回原位。 */
+function resetSel() {
+  stage?.resetSelected()
+}
+
+/** 放弃全部改动并退出编辑态。 */
+function discardEdits() {
+  editMsg.value = ''
+  editErrors.value = []
+  stage?.setEditMode(false)
+}
+
+/**
+ * 保存：整批提交，服务端整批校验。
+ *
+ * <p>失败时把逐条原因展示出来（而不是一句「保存失败」）——用户要知道是哪一栋、为什么。</p>
+ */
+async function saveEdits() {
+  if (!stage) return
+  const edits = stage.draftEdits()
+  if (!edits.length) {
+    editMsg.value = '没有改动'
+    return
+  }
+  editBusy.value = true
+  editMsg.value = ''
+  editErrors.value = []
+  try {
+    const res = await saveLayoutEdits(props.projectId, {
+      baseRevision: layoutRevision.value,
+      edits
+    })
+    if (res && res.ok) {
+      editMsg.value = `已保存 ${(res.applied || []).length} 处改动`
+      layoutRevision.value = Number(res.revision) || layoutRevision.value
+      editState.drafts = []
+      editState.selected = null
+      stage.setEditMode(false)
+      await loadBundle()
+    } else {
+      editErrors.value = res?.rejected || []
+      editMsg.value = res?.error || '保存被拒绝：逐条原因见下'
+    }
+  } catch (e) {
+    editMsg.value = e?.message || '保存失败'
+  } finally {
+    editBusy.value = false
+  }
 }
 
 /** 触发生成（后台任务；种子相同 ⇒ 结果相同）。 */
@@ -540,6 +690,11 @@ onMounted(async () => {
       const next = clockLabel(minute)
       if (next !== clockText.value) clockText.value = next
       if (crossedDay) emit('day-tick')
+    },
+    onEditChange: (snap) => {
+      editState.on = !!snap?.on
+      editState.drafts = snap?.drafts || []
+      editState.selected = snap?.selected || null
     }
   })
   try {
@@ -559,6 +714,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true
+  stopActorPolling()
   closeStream()
   stage?.destroy()
   stage = null
@@ -566,10 +722,14 @@ onBeforeUnmount(() => {
 
 watch(() => props.projectId, () => {
   closeStream()
+  stopActorPolling()
   busy.value = false
   picked.value = null
   state.bundle = null
   state.overview = null
+  editState.on = false
+  editState.drafts = []
+  editState.selected = null
   load()
 })
 
@@ -618,7 +778,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
 }
 .wm-tag {
-  font-size: 11px;
+  font-size: 12.5px;
   padding: 1px 7px;
   border-radius: 999px;
   color: #d8e6ff;
@@ -656,6 +816,49 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
 .wm-tool.on { border-color: rgba(255, 212, 92, 0.65); color: #ffe9a8; }
 .wm-tool:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* 布局编辑面板：层级走 --z-content 令牌（不自定义 z-index，见 AGENTS 8.3） */
+.wm-edit {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 232px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: rgba(9, 16, 28, 0.78);
+  border: 1px solid rgba(255, 212, 92, 0.35);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  z-index: var(--z-content);
+}
+.wm-edit-head { display: flex; align-items: baseline; justify-content: space-between; }
+.wm-edit-title { font-size: 12px; color: #ffe9a8; letter-spacing: 0.5px; }
+.wm-edit-count { font-size: 12.5px; color: #9fb2d0; }
+.wm-edit-sel { display: flex; align-items: center; gap: 5px; }
+.wm-edit-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #e6eeff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wm-edit-hint { font-size: 12.5px; color: #9fb2d0; line-height: 1.5; }
+.wm-edit-actions { display: flex; gap: 6px; }
+.wm-edit-msg { font-size: 12.5px; color: #ffd97a; line-height: 1.5; }
+.wm-edit-errs {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12.5px;
+  color: #ff9c9c;
+  line-height: 1.6;
+  max-height: 120px;
+  overflow: auto;
+}
+.wm-edit-tip { font-size: 12px; color: #7f92ae; line-height: 1.5; }
+
 /* 图例 */
 .wm-legend {
   position: absolute;
@@ -675,7 +878,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12.5px;
   color: #c6d6ef;
 }
 .wm-legend-bar {
@@ -707,7 +910,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
   border: 1px dashed rgba(255, 196, 120, 0.38);
   backdrop-filter: blur(8px);
   color: #d8c9a8;
-  font-size: 11px;
+  font-size: 12.5px;
   z-index: 3;
   overflow: hidden;
 }
@@ -720,7 +923,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
   border: 0;
   background: transparent;
   color: inherit;
-  font-size: 11px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 .wm-road-debug-dot {
@@ -764,7 +967,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
   border: 1px solid rgba(255, 196, 120, 0.35);
   background: rgba(255, 196, 120, 0.08);
   color: #ffd9a8;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 .wm-road-debug-note {
@@ -809,7 +1012,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  font-size: 11px;
+  font-size: 12.5px;
   color: #a8bcda;
 }
 
@@ -844,7 +1047,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
 .wm-stage {
   flex: 1;
   text-align: center;
-  font-size: 11px;
+  font-size: 12.5px;
   padding: 3px 0;
   border-radius: 5px;
   color: #7f93b3;
@@ -866,7 +1069,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
 }
 .wm-mask-sub {
   margin-top: 7px;
-  font-size: 11px;
+  font-size: 12.5px;
   color: #a8bcda;
 }
 .wm-logs {
@@ -876,7 +1079,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
   gap: 3px;
 }
 .wm-log {
-  font-size: 10.5px;
+  font-size: 12px;
   color: #7f93b3;
   white-space: nowrap;
   overflow: hidden;
@@ -922,7 +1125,7 @@ watch(() => props.npcs, () => projectNpcs(), { deep: false })
   max-width: 76%;
   padding: 6px 10px;
   border-radius: 8px;
-  font-size: 11.5px;
+  font-size: 13px;
   color: #ffd7d7;
   background: rgba(90, 20, 20, 0.82);
   border: 1px solid rgba(255, 107, 107, 0.5);

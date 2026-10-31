@@ -56,6 +56,17 @@ contextBridge.exposeInMainWorld('holzynDesktop', {
     setCloseBehavior: (value) => ipcRenderer.invoke('holzyn:desktop:set-close-behavior', value),
   },
   /**
+   * 开发者模式桥（设置页 5 连击解锁后可用）：
+   *  - open：打开独立的开发者控制台窗口（单例；已开则聚焦并切到目标路由）；
+   *  - restartBackend：「保存并重启后端」——优雅停 JVM → 重新拉起 → 两个窗口重载到新端口；
+   *  - close：关闭开发者窗口（页面内「隐藏开发者入口」时可选调用）。
+   */
+  dev: {
+    open: (route) => ipcRenderer.invoke('holzyn:dev:open', route),
+    restartBackend: () => ipcRenderer.invoke('holzyn:dev:restart-backend'),
+    close: () => ipcRenderer.invoke('holzyn:dev:close'),
+  },
+  /**
    * 无边框窗口桥：主窗口是 frame:false（无系统标题栏），
    * 由前端顶栏自绘「最小化 / 最大化切换 / 关闭」三个控件（WindowControls.vue）；
    * 拖拽移动窗口靠顶栏的 `-webkit-app-region: drag`，不需要经过这里。

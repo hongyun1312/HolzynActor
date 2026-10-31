@@ -33,21 +33,50 @@
         <el-button :loading="storyGenStarting" @click="startStoryGen">
           <el-icon><HIcon name="Document" /></el-icon>&nbsp;生成故事规划
         </el-button>
-        <el-button type="primary" @click="$router.push(`/project/${projectId}/world/edit`)">
+        <el-button type="primary" @click="$router.push(`/world/${projectId}/world/edit`)">
           <el-icon><HIcon name="Edit" /></el-icon>&nbsp;修改
         </el-button>
       </template>
     </PageHeader>
 
+    <!-- 世界初始化状态横幅：没初始化完就在最显眼的位置给入口（用户不必自己找「初始化」在哪） -->
+    <div v-if="initStatus && !initComplete" class="init-banner tech-card">
+      <div class="ib-text">
+        <div class="ib-title">
+          这个世界还没初始化完成
+          <el-tag size="small" type="warning" effect="plain">{{ initProgressText }}</el-tag>
+        </div>
+        <div class="ib-desc">{{ initStatus.message || '世界观、角色、地点、关系、世界时间等运行内容需要按顺序生成后，世界才能正常运转。' }}</div>
+      </div>
+      <div class="ib-ops">
+        <el-button size="small" @click="loadInitStatus">刷新状态</el-button>
+        <el-button size="small" type="primary" @click="$router.push(`/world/${projectId}/init`)">
+          <el-icon><HIcon name="VideoPlay" /></el-icon>&nbsp;去完成初始化
+        </el-button>
+      </div>
+    </div>
+
     <!-- 世界观全文区（只读，无输入框） -->
-    <div v-if="!world" class="empty-card tech-card">
+    <!-- 加载失败与「真的没有世界观」必须分开表达：以前把异常也渲染成空态，用户会以为 AI 生成的世界观丢了 -->
+    <div v-if="loadError" class="empty-card tech-card">
+      <EmptyState
+        size="page"
+        tone="warn"
+        icon="ic_public_ring"
+        title="世界观读取失败"
+        :desc="loadError"
+        primary-text="重新加载"
+        @primary="loadAll"
+      />
+    </div>
+    <div v-else-if="!world" class="empty-card tech-card">
       <EmptyState
         size="page"
         icon="ic_public_file"
         title="这个项目还没有世界观设定"
         desc="世界观决定角色会说什么、世界如何运转。可以从一段文字开始写，也可以让 AI 依据题材生成。"
         primary-text="创建世界观"
-        @primary="$router.push(`/project/${projectId}/world/edit`)"
+        @primary="$router.push(`/world/${projectId}/world/edit`)"
       />
     </div>
     <div v-else class="world-body">
@@ -62,13 +91,18 @@
             <el-divider />
             <div class="wc-grid">
               <div class="wc-cell">
-                <div class="wc-label">题材</div>
-                <div class="wc-md-value markdown-body" v-html="renderMarkdown(world.genre || '—')"></div>
+                <div class="wc-label">世界类别</div>
+                <div class="wc-md-value markdown-body" v-html="renderMarkdown(world.genre || '未选择（请到「修改」里从固定八类中选一类）')"></div>
               </div>
               <div class="wc-cell">
                 <div class="wc-label">时代背景</div>
                 <div class="wc-md-value markdown-body" v-html="renderMarkdown(world.era || '—')"></div>
               </div>
+            </div>
+            <el-divider />
+            <div class="wc-section">
+              <div class="wc-label">世界程度 <span class="wc-tone-chip">{{ toneLabel }}</span></div>
+              <div class="wc-text wc-tone-desc">{{ toneDesc }}</div>
             </div>
           </div>
         </el-tab-pane>
@@ -335,14 +369,14 @@
  * <p>职责：完整呈现项目世界观设定（只读全文渲染，不使用输入框）+ 项目级记忆（世界大事记）；
  * 头部提供「修改」入口（跳专属修改页 /world/edit）。保存为覆盖更新（后端不产生历史版本记录），
  * 版本标签 v{version} 仅展示当前版本号；世界观版本化存取留待后续阶段。</p>
- * <p>数据来源：/api/projects/{id}/world-setting、memories。</p>
+ * <p>数据来源：/api/worlds/{id}/world-setting、memories。</p>
  */
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchWorldSetting, fetchMemories, deleteMemory, fetchWorldgenPreview,
-  createWorldgenTask, fetchWorldgenTask, fetchStoryPlans
+  createWorldgenTask, fetchWorldgenTask, fetchStoryPlans, fetchWorldInitStatus
 } from '@/shared/api'
 import WorldLocationTable from '@/shared/components/WorldLocationTable.vue'
 // V2.0 批次二：空态统一走 EmptyState
@@ -359,8 +393,25 @@ const projectId = Number(route.params.id)
 const world = ref(null)
 const projectMemories = ref([])
 const memLoading = ref(false)
+/** 读取失败信息（与「没有世界观」区分：失败给重试，空态给创建入口） */
+const loadError = ref('')
 // 左侧导航当前分块（基本信息/地理设定/地点详情/势力阵营/规则体系/文化风俗/历史背景/完整世界观/项目大事记）
 const activeSection = ref('basic')
+
+/**
+ * 世界程度（控制世界能力与设定边界）：只做展示，真正的边界判定在后端。
+ *
+ * <p>老世界的 {@code tone} 是空的 → 按「标准」解释（与后端 {@code WorldTone.ofCode(null)} 一致），
+ * 这样历史世界不会被悄悄改成休闲档。</p>
+ */
+const TONE_META = {
+  casual: { label: '休闲', desc: '生活向：不出现势力斗争、战争、暗杀、背叛与宏观推演；NPC 目标停在日常与个人，超凡上限低。' },
+  light: { label: '轻度', desc: '允许人情往来与小规模摩擦；不出现战争、政权更替与大规模势力吞并，宏观只保留文化/人口这类轻推演。' },
+  standard: { label: '标准', desc: '按题材本身的世界尺度正常推进：该有的冲突、势力与宏观变化都可以发生。' },
+  hard: { label: '硬核', desc: '势力博弈、战争、灾变、政权更替与经济周期都可以发生，后果要落到具体的人身上。' }
+}
+const toneLabel = computed(() => (TONE_META[world.value?.tone] || TONE_META.standard).label)
+const toneDesc = computed(() => (TONE_META[world.value?.tone] || TONE_META.standard).desc)
 
 // =====：worldgen 来源标记回看（只读预览弹窗） =====
 const wgDialog = ref(false)
@@ -404,7 +455,14 @@ const wgSections = computed(() => {
 
 /** 加载世界观全文 + 项目级记忆 + 故事规划 */
 async function loadAll() {
-  try { world.value = await fetchWorldSetting(projectId) } catch (_) { world.value = null }
+  loadError.value = ''
+  try {
+    world.value = await fetchWorldSetting(projectId)
+  } catch (e) {
+    // 区分「没有世界观（后端返回 null）」与「读取失败」：后者要给重试入口，不能伪装成空态
+    world.value = null
+    loadError.value = e?.message || '读取世界观时发生未知错误，请重试'
+  }
   memLoading.value = true
   try {
     const page = await fetchMemories(projectId, { page: 1, size: 100 })
@@ -412,6 +470,29 @@ async function loadAll() {
   } catch (_) { projectMemories.value = [] }
   finally { memLoading.value = false }
   loadStoryPlans()
+  loadInitStatus()
+}
+
+// ==================== 世界初始化状态（横幅） ====================
+const initStatus = ref(null)
+const initComplete = computed(() => {
+  const s = initStatus.value
+  if (!s) return true
+  return !!s.complete
+})
+const initProgressText = computed(() => {
+  const s = initStatus.value
+  if (!s) return ''
+  return `必需 ${s.requiredDoneCount}/${s.requiredTotalCount} · 全部 ${s.doneCount}/${s.totalCount}`
+})
+
+/** 读初始化状态（失败静默：横幅是增益信息，不能因为它把详情页顶掉） */
+async function loadInitStatus() {
+  try {
+    initStatus.value = await fetchWorldInitStatus(projectId)
+  } catch (_) {
+    initStatus.value = null
+  }
 }
 
 /** 删除项目级记忆（软删） */
@@ -510,7 +591,7 @@ async function refreshCharTask(taskId) {
 function goWorldInit() {
   stopCharPolling()
   charGenDialog.value = false
-  router.push(`/project/${projectId}/init`)
+  router.push(`/world/${projectId}/init`)
 }
 
 /** 节点徽标 */
@@ -568,7 +649,7 @@ const storyGenStatusTag = computed(() => {
   return 'primary'
 })
 
-/** 加载故事规划版本链（GET /api/worldgen/projects/{id}/story-plans） */
+/** 加载故事规划版本链（GET /api/worldgen/worlds/{id}/story-plans） */
 async function loadStoryPlans() {
   storyLoading.value = true
   try {
@@ -709,6 +790,10 @@ onBeforeUnmount(() => { stopCharPolling(); stopStoryPolling() })
 .wc-label { font-size: 0.78rem; color: var(--text-secondary); font-weight: 600; margin-bottom: 6px; }
 .wc-value { font-size: 0.95rem; color: var(--text-primary); font-weight: 600; }
 .wc-text { font-size: 0.92rem; color: var(--text-regular); line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+/* 世界程度：标签与档位说明（说明比标签长，独占一行保证可读） */
+.wc-tone-chip { margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 0.74rem; font-weight: 600;
+  color: #1f6feb; background: #e8f1ff; border: 1px solid #cfe0ff; }
+.wc-tone-desc { font-size: 0.88rem; color: var(--text-regular); }
 /* 世界观设定 Markdown 渲染：复用全局 .markdown-body 排版；去掉 pre-wrap（换行由 MarkdownIt breaks 处理） */
 .wc-md { font-size: 0.92rem; color: var(--text-regular); line-height: 1.8; word-break: break-word; }
 .wc-md :deep(h1) { font-size: 1.25rem; }
@@ -778,5 +863,23 @@ onBeforeUnmount(() => { stopCharPolling(); stopStoryPolling() })
 .story-md :deep(ul), .story-md :deep(ol) { padding-left: 20px; margin: 4px 0; }
 .story-md :deep(p) { margin: 6px 0; }
 .story-atm { line-height: 1.7; font-size: 0.9rem; color: var(--text-primary); white-space: pre-wrap; }
+
+/* ===== 世界初始化状态横幅 ===== */
+.init-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--el-color-warning, #e6a23c);
+}
+.ib-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ib-title { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 700; color: var(--text-primary); }
+.ib-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6; }
+.ib-ops { display: flex; gap: 8px; flex-shrink: 0; }
+@media (max-width: 900px) {
+  .init-banner { flex-direction: column; align-items: flex-start; }
+}
 @keyframes wg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 </style>

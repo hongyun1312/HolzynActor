@@ -73,7 +73,7 @@ public final class AiCallContext {
     /**
      * 主动记忆检索（proactive_retrieval）结果段：决策循环自问环节组装出的
      * 【主动想起】段文本，经 ThreadLocal 传递给决策组件（AI 深思 {{proactive_memory}}
-     * 占位符 / NanoJev 快判情境文本注入）。随当前业务动作线程生命周期存在，
+     * 占位符 / 决策模型 快判情境文本注入）。随当前业务动作线程生命周期存在，
      * 由调用方在决策生成完成后 {@link #clearProactiveSegment()} 清理（防线程复用泄漏）。
      */
     private static final ThreadLocal<String> PROACTIVE_SEGMENT = new ThreadLocal<>();
@@ -81,7 +81,7 @@ public final class AiCallContext {
     /**
      * MUSE 策略切换（muse_strategy）结果段：决策策略链内 FamiliarityStrategy
      * 计算出的【策略偏好】段文本（保守/激进），经 ThreadLocal 传递给决策组件
-     * （AI 深思 {{strategy_preference}} 占位符 / NanoJev 快判情境文本首部注入）。
+     * （AI 深思 {{strategy_preference}} 占位符 / 决策模型 快判情境文本首部注入）。
      * 链内 priority=85 先于 SpaceChoice(80)/Deliberate(60) 执行保证双通道可读；
      * 随当前业务动作线程生命周期存在，由调用方在决策生成完成后
      * {@link #clearStrategyPreference()} 清理（防线程复用泄漏）。

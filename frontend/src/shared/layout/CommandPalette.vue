@@ -145,7 +145,7 @@ const grouped = computed(() => {
 
 /** 当前项目 ID（无项目上下文时不做服务端搜索——接口按项目聚合） */
 const projectId = computed(() => {
-  const m = route.path.match(/^\/project\/(\d+)/)
+  const m = route.path.match(/^\/world\/(\d+)/)
   return m ? m[1] : null
 })
 

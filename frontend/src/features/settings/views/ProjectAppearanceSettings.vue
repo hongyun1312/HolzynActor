@@ -158,7 +158,7 @@
  *
  * <p>职责：把 layout store 的全部偏好暴露为可视化控件，并提供「恢复默认」与「重看导览」。
  * 本页**不含任何业务数据请求**——偏好全部在本地，因此项目内外可共用同一组件
- * （路由：`/project/:id/settings/appearance` 与 `/settings/appearance`）。</p>
+ * （路由：`/world/:id/settings/appearance` 与 `/settings/appearance`）。</p>
  */
 import { computed } from 'vue'
 import {

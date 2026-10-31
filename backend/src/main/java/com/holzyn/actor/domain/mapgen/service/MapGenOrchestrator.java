@@ -33,6 +33,8 @@ import com.holzyn.actor.domain.mapgen.model.MapAmbient;
 import com.holzyn.actor.domain.mapgen.model.MapAssetCatalog;
 import com.holzyn.actor.domain.mapgen.model.MapAssetType;
 import com.holzyn.actor.domain.mapgen.model.MapProfile;
+import com.holzyn.actor.domain.mapnav.algo.NavGrid;
+import com.holzyn.actor.domain.mapnav.algo.NavGridCodec;
 import com.holzyn.actor.domain.world.entity.ActorWorldClock;
 import com.holzyn.actor.domain.world.repository.ActorWorldClockRepository;
 import lombok.RequiredArgsConstructor;
@@ -100,16 +102,71 @@ public class MapGenOrchestrator {
     private final MapRoutineService routineService;
     private final ActorWorldClockRepository clockRepository;
 
+    /**
+     * 导航缓存失效钩子（地图可编辑布局 · M2）：S4 重跑后道路/建筑就变了，
+     * 运行期还在用旧代价场会让 NPC 绕着「已经不在那儿的房子」走。
+     * 非必装配（单测直接 new 出来时为 null，跳过）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcNavigationService npcNavigationService;
+
+    /**
+     * 角色坐标清理钩子（同理）：整图重生成后，旧坐标指向的是上一张图的位置，
+     * 留着会让所有人第一帧站在水里。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcPositionService npcPositionService;
+
+    /**
+     * 轨迹清理钩子（同理）：旧轨迹的折线属于旧布局。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.repository.ActorNpcPathRepository npcPathRepository;
+
+    /**
+     * 手改重放钩子（地图可编辑布局 · M4）：S4 落位把要素整张重建了，
+     * 这里立刻把用户的覆盖层按 {@code feature_code} 贴回去——重跑一次不该抹掉手改。
+     * null=未装配[单测]跳过。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.LayoutOverrideService layoutOverrideService;
+
+    /**
+     * 地图行仓储（种子复用）：没有显式种子、用户也没点「重掷」时，沿用上一张图的种子——
+     * 这样重生成得到的是<b>同一张</b>地形，布局覆盖层按 {@code feature_code} 重放才有意义。
+     * 每次重掷换种子会把 {@code f_house_stone_4} 挪到别处，手改只能被丢弃。
+     * null=未装配[单测]时退回"每次重掷"的旧行为。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapgen.repository.ActorWorldMapRepository mapRepository;
+
     // ==================== 对外入口 ====================
 
     /**
      * 启动一次完整生成（建行 + 异步跑，立刻返回）。
      *
+     * <p><b>种子语义（地图可编辑布局 · M4）</b>：不传种子且不要求重掷时，沿用上一张图的种子。
+     * 原因不是省事——布局覆盖层是按 {@code feature_code} 重放的（决策 #7），种子一变，
+     * {@code f_house_stone_4} 就落到另一块地上，重放只能全部丢弃，用户的编辑等于白做。
+     * 想换一座岛就显式传种子或 {@code reroll=true}。</p>
+     *
      * @param projectId 项目 ID
-     * @param seed      种子（null=由项目 ID 与当前时间派生，即「重掷」；给了就是复现某张图）
+     * @param seed      种子（null=沿用上一张图的种子；没有上一张图才派生）
      * @return 地图 ID
      */
     public Long generate(Long projectId, Long seed) {
+        return generate(projectId, seed, false);
+    }
+
+    /**
+     * 启动一次完整生成（可要求重掷种子）。
+     *
+     * @param projectId 项目 ID
+     * @param seed      种子（null=沿用上一张图的种子；{@code reroll=true} 时忽略并重新派生）
+     * @param reroll    是否重掷种子（换一座岛；会让布局覆盖层因 {@code feature_code} 对不上而丢弃）
+     * @return 地图 ID
+     */
+    public Long generate(Long projectId, Long seed, boolean reroll) {
         if (!props.isEnabled()) {
             throw new BizException(400, "地图生成已关闭（holzyn.actor.mapgen.enabled=false）");
         }
@@ -119,13 +176,49 @@ public class MapGenOrchestrator {
                     current == null ? null : current.getId());
             return current == null ? null : current.getId();
         }
-        long useSeed = seed != null ? seed : deriveSeed(projectId);
+        long useSeed = resolveSeed(projectId, seed, reroll);
+        if (reroll && layoutOverrideService != null) {
+            // 换岛：layout 覆盖按 feature_code 重放，code 会落到别的建筑上——明确丢弃并告知
+            int dropped = layoutOverrideService.clearAll(projectId);
+            if (dropped > 0) {
+                log.info("[mapgen] 重掷种子：丢弃 {} 条布局手改（换图后 code 不再指向同一栋建筑）", dropped);
+                hub.log(projectId, "[S0] 重掷地图，已丢弃 " + dropped + " 条布局手改");
+            }
+        }
         ActorWorldMap map = persist.createRun(projectId, useSeed, props.getPipelineVersion(),
                 props.getSize(), props.getMetersPerCell(), null);
         hub.beginRun(projectId);
-        hub.log(projectId, "[S0] 开始生成地图（seed=" + useSeed + "）");
+        hub.log(projectId, "[S0] 开始生成地图（seed=" + useSeed + (seed == null && !reroll ? "，沿用上一张" : "") + "）");
         submit(map.getId(), projectId, 0);
         return map.getId();
+    }
+
+    /**
+     * 决定本次生成用哪个种子。
+     *
+     * @param projectId 项目 ID
+     * @param seed      显式种子（非空即用）
+     * @param reroll    是否强制重掷
+     * @return 实际种子
+     */
+    private long resolveSeed(Long projectId, Long seed, boolean reroll) {
+        if (seed != null) {
+            return seed;
+        }
+        if (!reroll && mapRepository != null) {
+            try {
+                Long last = mapRepository.findFirstByProjectIdOrderByIdDesc(projectId)
+                        .map(ActorWorldMap::getSeed)
+                        .orElse(null);
+                if (last != null && last != 0L) {
+                    return last;
+                }
+            } catch (RuntimeException e) {
+                // 查不到就重掷，不能因为种子复用把生成挡死
+                log.warn("[mapgen] 读取上次种子失败（project={}），改为重掷：{}", projectId, e.getMessage());
+            }
+        }
+        return deriveSeed(projectId);
     }
 
     /**
@@ -234,6 +327,15 @@ public class MapGenOrchestrator {
             int regionCount = TerrainSemantics.apply(profile.params(), brief);
             TerrainData terrain = TerrainGenerator.generate(profile.params());
             String terrainPath = artifacts.writeTerrain(mapId, TerrainPainter.render(terrain));
+            // 导航栅格（运行期寻路用）：S1 生成期把「水/坡/林/海拔」切成一份 nav.bin，
+            // 之后角色走路直接读它，不必为了寻路重跑侵蚀。写失败不阻断出图——
+            // 地图仍然可看，只是运行期第一次寻路时会按 seed 重算一次（见 NpcNavigationService）。
+            try {
+                byte[] nav = NavGridCodec.encode(NavGrid.fromTerrain(terrain, seed));
+                artifacts.writeNavGrid(mapId, nav);
+            } catch (Exception e) {
+                log.warn("[mapgen] 写导航栅格失败（运行期将按需重建）：{}", e.getMessage());
+            }
             Map<String, Object> terrainStats = terrainStats(terrain);
             persist.saveTerrain(mapId, terrainPath, terrainStats);
             hub.log(projectId, String.format(
@@ -285,6 +387,18 @@ public class MapGenOrchestrator {
             MapPlacer.Result placed = MapPlacer.place(terrain, profile.params(), seed * 31 + 7,
                     specs, plan.roads(), allSites, brief);
             persist.savePlacement(mapId, placed);
+            // 手改重放：S4 刚刚重建了全部要素，把覆盖层按 feature_code 贴回去
+            if (layoutOverrideService != null) {
+                try {
+                    var replay = layoutOverrideService.replay(mapId);
+                    if (replay.applied() > 0 || replay.missed() > 0) {
+                        hub.log(projectId, String.format("[S4] 手改重放：应用 %d / 失配 %d",
+                                replay.applied(), replay.missed()));
+                    }
+                } catch (Exception e) {
+                    log.warn("[mapgen] 手改重放失败（不影响出图）：{}", e.getMessage());
+                }
+            }
             int buildings = countKind(placed, "building");
             // 人口口径（P0-3）：actor_map_feature.residency 语义是「户」，人口 = 户数 × 户均。
             // 两者分开落库，前端与报告都不再把「户数」当「人口」展示（旧图 255 户显示成 255 人）。
@@ -340,6 +454,8 @@ public class MapGenOrchestrator {
             }
             finalStats.put("elapsedMs", System.currentTimeMillis() - t0);
             persist.markReady(mapId, finalStats);
+            // 新图就位：旧导航/旧坐标/旧轨迹全部作废（它们的几何属于上一张图）
+            resetRuntimeState(projectId, mapId);
             hub.log(projectId, String.format("[S5] 完成，总耗时 %d ms", System.currentTimeMillis() - t0));
             hub.complete(projectId, query.overview(projectId));
             log.info("[mapgen] 生成完成：map={}, project={}, 总耗时 {}ms", mapId, projectId,
@@ -353,6 +469,38 @@ public class MapGenOrchestrator {
     }
 
     // ==================== 内部工具 ====================
+
+    /**
+     * 清掉上一张图留下的运行期状态：导航缓存、角色坐标、移动轨迹。
+     *
+     * <p>失败隔离：这三件事清了只为「第一帧别站错地方」，清不掉也不该让整张图判 failed。</p>
+     *
+     * @param projectId 项目
+     * @param mapId     地图
+     */
+    private void resetRuntimeState(Long projectId, Long mapId) {
+        if (npcNavigationService != null) {
+            try {
+                npcNavigationService.invalidate(projectId);
+            } catch (Exception e) {
+                log.warn("[mapgen] 失效导航缓存失败：{}", e.getMessage());
+            }
+        }
+        if (npcPositionService != null) {
+            try {
+                npcPositionService.clear(projectId, mapId);
+            } catch (Exception e) {
+                log.warn("[mapgen] 清理角色坐标失败：{}", e.getMessage());
+            }
+        }
+        if (npcPathRepository != null) {
+            try {
+                npcPathRepository.deleteByMapId(mapId);
+            } catch (Exception e) {
+                log.warn("[mapgen] 清理移动轨迹失败：{}", e.getMessage());
+            }
+        }
+    }
 
     /** 广播阶段开始并把进度落库（页面刷新后靠 DB 里的 stage/progress 恢复）。 */
     private void beginStage(Long projectId, Long mapId, String stage) {

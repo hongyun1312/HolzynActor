@@ -71,7 +71,7 @@ public class DecisionCoordinationController {
      *
      * @return 前瞻记录 VO 列表
      */
-    @GetMapping("/projects/{projectId}/decision/foresight")
+    @GetMapping("/worlds/{projectId}/decision/foresight")
     public R<List<ForesightRecordVO>> foresightList(@PathVariable Long projectId,
                                                     @RequestParam(required = false) String npcRef,
                                                     @RequestParam(required = false) Integer limit) {
@@ -97,7 +97,7 @@ public class DecisionCoordinationController {
      *
      * @return 预览结果（triggered/reason/section/阈值）
      */
-    @GetMapping("/projects/{projectId}/decision/foresight/preview")
+    @GetMapping("/worlds/{projectId}/decision/foresight/preview")
     public R<Map<String, Object>> foresightPreview(@PathVariable Long projectId,
                                                    @RequestParam(required = false) String stimulusText,
                                                    @RequestParam(required = false) Integer importance,
@@ -119,7 +119,7 @@ public class DecisionCoordinationController {
      *
      * @return delta VO 列表
      */
-    @GetMapping("/projects/{projectId}/decision/state-deltas")
+    @GetMapping("/worlds/{projectId}/decision/state-deltas")
     public R<List<StateDeltaVO>> stateDeltaList(@PathVariable Long projectId,
                                                 @RequestParam(required = false) String npcRef,
                                                 @RequestParam(required = false) Integer limit) {
@@ -136,7 +136,7 @@ public class DecisionCoordinationController {
     /**
      * 冲突检测记录列表（npcRef 可空=全项目）。
      */
-    @GetMapping("/projects/{projectId}/decision/conflicts")
+    @GetMapping("/worlds/{projectId}/decision/conflicts")
     public R<List<ConflictRecordVO>> conflictList(@PathVariable Long projectId,
                                                   @RequestParam(required = false) String npcRef,
                                                   @RequestParam(required = false) Integer limit) {
@@ -150,7 +150,7 @@ public class DecisionCoordinationController {
     /**
      * 资源占用登记列表（全项目）。
      */
-    @GetMapping("/projects/{projectId}/decision/occupancy")
+    @GetMapping("/worlds/{projectId}/decision/occupancy")
     public R<List<ResourceOccupancyVO>> occupancyList(@PathVariable Long projectId,
                                                       @RequestParam(required = false) Integer limit) {
         List<ResourceOccupancyVO> out = new ArrayList<>();
@@ -169,7 +169,7 @@ public class DecisionCoordinationController {
      *
      * @return 档位与标签
      */
-    @GetMapping("/projects/{projectId}/decision/tom")
+    @GetMapping("/worlds/{projectId}/decision/tom")
     public R<Map<String, Object>> tomPreview(@PathVariable Long projectId,
                                              @RequestParam(required = false) String personaJson) {
         String tier = TomInference.tierOf(personaJson);

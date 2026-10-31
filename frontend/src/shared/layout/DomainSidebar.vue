@@ -20,6 +20,19 @@
       ③ 右侧带拖拽手柄，双击复原默认宽度。
   -->
   <aside class="domain-sidebar" :class="{ 'is-icon-only': isIconOnly }">
+    <!-- 侧栏头部：折叠/展开控制就放在侧栏自己身上（不再占用顶栏最左侧的位置） -->
+    <div class="side-headbar" :class="{ 'is-icon-only': isIconOnly }">
+      <span v-if="!isIconOnly" class="side-headbar-title">导航</span>
+      <button
+        type="button"
+        class="side-collapse-btn"
+        :title="isIconOnly ? '展开侧栏（Ctrl+B）' : '收起侧栏（Ctrl+B）'"
+        @click="toggleSidebar"
+      >
+        <el-icon :size="16"><HIcon :name="isIconOnly ? 'Expand' : 'Fold'" /></el-icon>
+      </button>
+    </div>
+
     <SideNav
       :pinned="pinnedItems"
       :sections="sections"
@@ -87,7 +100,7 @@ const props = defineProps({
 
 const route = useRoute()
 const router = useRouter()
-const { startResize, resetWidth, layout } = useShellLayout()
+const { startResize, resetWidth, toggleSidebar, layout } = useShellLayout()
 
 const isDialogue = computed(() => props.interfaceKey === 'dialogue')
 
@@ -193,7 +206,7 @@ function statusType(s) {
 <style scoped>
 /* 悬浮岛侧栏：圆角卡片 + 留白 + 柔和阴影；宽度由 --shell-side-w 驱动（可拖拽记忆） */
 .domain-sidebar {
-  width: var(--shell-side-w, 264px);
+  width: var(--shell-side-w, 210px);
   flex-shrink: 0;
   margin: var(--shell-side-margin, 12px) 0 var(--shell-side-margin, 12px) var(--shell-side-margin, 12px);
   background: var(--bg-nav);
@@ -208,6 +221,39 @@ function statusType(s) {
 }
 /* 拖拽过程中禁用宽度过渡，避免跟手感变差 */
 :global(body.is-resizing) .domain-sidebar { transition: none; }
+
+/* 侧栏头部：左侧「导航」小标题 + 右侧折叠按钮；收起为图标栏时只留居中按钮 */
+.side-headbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 8px 0 12px;
+}
+.side-headbar.is-icon-only { justify-content: center; padding: 0; }
+.side-headbar-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: .08em;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+.side-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm, 8px);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background .15s var(--dsw-ease), color .15s var(--dsw-ease);
+}
+.side-collapse-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 /* 宽度拖拽手柄（贴在右缘的 6px 热区） */
 .side-resize {

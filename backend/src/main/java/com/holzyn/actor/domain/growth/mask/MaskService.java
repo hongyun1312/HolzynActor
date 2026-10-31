@@ -94,7 +94,7 @@ public class MaskService {
     private final WorldSandboxSseHub sandboxSseHub;
 
     /**
-     * 空间重算触发判定（面具情境切换检测点——情境码变化 → NanoJev boolean 确认
+     * 空间重算触发判定（面具情境切换检测点——情境码变化 → 决策模型 boolean 确认
      * 触发空间重算 MASK_CONTEXT_CHANGE；异步提交零阻断；字段注入保持构造器不变）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -165,7 +165,7 @@ public class MaskService {
             }
             List<String> contexts = resolveContexts(projectId, selfRef, partnerRefs, gameSecond);
             // 事件驱动重算触发：面具情境切换检测点——主情境码较上次变化 →
-            // 异步提交判定（NanoJev boolean 确认 + 程序化兜底 → 空间重算 MASK_CONTEXT_CHANGE；
+            // 异步提交判定（决策模型 boolean 确认 + 程序化兜底 → 空间重算 MASK_CONTEXT_CHANGE；
             // 内存去重防高频对话重复评估；零阻断）
             if (spaceTriggerJudge != null && !contexts.isEmpty()) {
                 try {

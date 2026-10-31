@@ -51,7 +51,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}/world-memory")
+@RequestMapping("/api/worlds/{projectId}/world-memory")
 @RequiredArgsConstructor
 public class WorldMemoryController {
 

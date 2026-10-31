@@ -18,11 +18,11 @@
 
 package com.holzyn.actor.domain.growth.space;
 
-import com.holzyn.actor.ai.nanojev.NanoJevQuestion;
-import com.holzyn.actor.ai.nanojev.NanoJevState;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionTemplates;
+import com.holzyn.actor.ai.decision.DecisionQuestion;
+import com.holzyn.actor.ai.decision.DecisionState;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
+import com.holzyn.actor.ai.decision.gate.DecisionTemplates;
 import com.holzyn.actor.common.NpcRefs;
 import com.holzyn.actor.domain.growth.config.GrowthProperties;
 import com.holzyn.actor.domain.npc.state.entity.ActorNpcState;
@@ -42,14 +42,14 @@ import java.util.concurrent.Executors;
  * <p><b>定位</b>：把
  * 已声明但<b>零调用方</b>的三个空间重算触发码（{@link GrowthSpaceTrigger#EMOTION_SHIFT} /
  * 接线到真实检测点——情绪评估写回 / 关系状态机跨档 / 面具情境切换。检测到<b>程序化变化信号</b>
- * 后，由 NanoJev（space_trigger 场景，boolean「这次变化是否值得重新审视空间」）语义确认，
+ * 后，由 决策模型（space_trigger 场景，boolean「这次变化是否值得重新审视空间」）语义确认，
  * 失败/未启用 → 程序化阈值兜底（变化显著即触发）；触发
  * {@link GrowthSpaceService#triggerRegenerate}（带既有同码去重窗口，失败零阻断）。</p>
  * <p><b>关系变化量（演化判定四项之一）</b>：{@link #evaluateRelationDeltaAsync}——世界事件
  * 参与角色两两评估影响幅度（score 4 档）与方向（choice 增进/恶化/无变化），按幅度×方向
- * 对好感做平滑更新（替代固定增量 event-delta），NanoJev 失败/未启用 → 回退固定增量。</p>
+ * 对好感做平滑更新（替代固定增量 event-delta），决策模型 失败/未启用 → 回退固定增量。</p>
  * <p><b>执行模型</b>：所有判定异步虚拟线程执行（检测点可能在事务内——更新关系是
- * {@code @Transactional}，情绪写回也在异步线程；含 NanoJev 调用，<b>不带
+ * {@code @Transactional}，情绪写回也在异步线程；含 决策模型 调用，<b>不带
  * {@code @Transactional}</b>，AiCallOutsideTransactionTest 反射守护）。任何失败零阻断。</p>
  */
 @Slf4j
@@ -93,9 +93,9 @@ public class SpaceTriggerJudge {
         return out;
     }
 
-    /** NanoJev 判定门 */
+    /** 决策模型 判定门 */
     @Autowired(required = false)
-    private NanoJevDecisionGate nanoJevDecisionGate;
+    private DecisionGate decisionGate;
 
     /**
      * 此刻可发生空间（触发重算消费方；null=未装配跳过）。
@@ -119,8 +119,8 @@ public class SpaceTriggerJudge {
 
     /**
      * 情绪漂移检测点（挂在 {@code NpcStateService.doEvaluateEmotion} 情绪 AI 评估写回后，
-     * 异步线程内）：情绪标签/强度较上次显著变化 → NanoJev boolean 确认 → 空间重算
-     * EMOTION_SHIFT；NanoJev 失败/未启用 → 程序化阈值（标签变化即触发）兜底。
+     * 异步线程内）：情绪标签/强度较上次显著变化 → 决策模型 boolean 确认 → 空间重算
+     * EMOTION_SHIFT；决策模型 失败/未启用 → 程序化阈值（标签变化即触发）兜底。
      *
      * @param projectId 项目 ID
      *
@@ -159,7 +159,7 @@ public class SpaceTriggerJudge {
 
     /**
      * 关系跨档检测点（挂在 {@code RelationDynamicsService.updateRelation} 状态机重算后——
-     * 调用方在事务内，本方法仅异步提交）：关系状态码变化 → NanoJev boolean 确认 →
+     * 调用方在事务内，本方法仅异步提交）：关系状态码变化 → 决策模型 boolean 确认 →
      * 空间重算 RELATION_JUMP。
      *
      * @param projectId 项目 ID
@@ -191,7 +191,7 @@ public class SpaceTriggerJudge {
 
     /**
      * 面具情境切换检测点（挂在 {@code MaskService.resolveContexts} 结果变化后——调用方高频，
-     * 本方法按「上次情境码」内存去重，变化才异步提交）：情境码变化 → NanoJev boolean 确认 →
+     * 本方法按「上次情境码」内存去重，变化才异步提交）：情境码变化 → 决策模型 boolean 确认 →
      * 空间重算 MASK_CONTEXT_CHANGE。
      *
      * @param projectId 项目 ID
@@ -217,7 +217,7 @@ public class SpaceTriggerJudge {
 
     /**
      * 关系变化量评估（演化判定四项之一，挂在 {@code LearningRelationEventSubscriber} 世界事件
-     * 参与角色两两挂钩后，异步执行）：NanoJev（relation_delta 场景：幅度 score + 方向 choice
+     * 参与角色两两挂钩后，异步执行）：决策模型（relation_delta 场景：幅度 score + 方向 choice
      * 同 state 一次前向）→ 幅度×方向平滑更新好感；失败/未启用 → 回退固定增量（event-delta）。
      * 注意：不重复发世界事件（好感更新本身已由 RelationDynamicsService 内部处理）。
      *
@@ -242,10 +242,10 @@ public class SpaceTriggerJudge {
             return;
         }
         // 调用风暴抓修（2026-10-07 实测）：一次群聊收尾事件可产生 120+ 对两两评估，全部
-        // 异步提交会让 NanoJev 排队到 60s 超时雪崩（同事件 360 次调用 260 次超时失败）。
+        // 异步提交会让 决策模型 排队到 60s 超时雪崩（同事件 360 次调用 260 次超时失败）。
         // 关系评估是「幅度×方向」的平滑细化，并发超过上限时直接回退固定增量
-        // （fallbackDelta）——失败语义与 NanoJev 调用失败一致（零阻断、不丢关系更新），
-        // 只是不再排队等待；限流只约束「在途 NanoJev 评估数」，不丢任务也不阻塞调用方。
+        // （fallbackDelta）——失败语义与 决策模型 调用失败一致（零阻断、不丢关系更新），
+        // 只是不再排队等待；限流只约束「在途 决策模型 评估数」，不丢任务也不阻塞调用方。
         if (!relationDeltaGate.tryAcquire()) {
             log.debug("[空间触发] 关系变化量评估并发已满（限流回退固定增量）: project={} {}↔{} delta={}",
                     projectId, refA, refB, fallbackDelta);
@@ -275,9 +275,9 @@ public class SpaceTriggerJudge {
     }
 
     /**
-     * 关系变化量评估并发闸（在途 NanoJev 评估数上限；默认 4）。
+     * 关系变化量评估并发闸（在途 决策模型 评估数上限；默认 4）。
      * <p>超过上限的评估请求不回退排队、不阻塞提交方——直接走固定增量（{@link #applyFallbackDelta}），
-     * 与 NanoJev 调用失败的回退语义一致，但避免「无限并发 → 排队 → 60s 超时 → 雪崩」。</p>
+     * 与 决策模型 调用失败的回退语义一致，但避免「无限并发 → 排队 → 60s 超时 → 雪崩」。</p>
      */
     private static final int RELATION_DELTA_MAX_IN_FLIGHT = 4;
 
@@ -299,7 +299,7 @@ public class SpaceTriggerJudge {
         return RELATION_DELTA_MAX_IN_FLIGHT;
     }
 
-    /** 回退固定增量（关系更新本体；与 NanoJev 失败路径同语义，不丢更新）。 */
+    /** 回退固定增量（关系更新本体；与 决策模型 失败路径同语义，不丢更新）。 */
     private void applyFallbackDelta(Long projectId, String refA, String refB,
                                     String eventTitle, int fallbackDelta, Long gameSecond) {
         if (relationDynamics == null) {
@@ -316,14 +316,14 @@ public class SpaceTriggerJudge {
 
     // ==================== 内部实现 ====================
 
-    /** 提交触发判定（异步虚拟线程：NanoJev boolean + 程序化阈值兜底 → 空间重算）。 */
+    /** 提交触发判定（异步虚拟线程：决策模型 boolean + 程序化阈值兜底 → 空间重算）。 */
     private void submitTriggerCheck(Long projectId, String npcRef, String qid, String changeText,
                                     Long gameSecond, GrowthSpaceTrigger trigger) {
         executor.submit(() -> {
             try {
                 boolean worth = decideTrigger(projectId, npcRef, qid, changeText, gameSecond);
                 // 内存观测：触发判定轨迹（调试「重算触发卡」）
-                pushTrigger(trigger, npcRef, qid, worth, gameSecond, isNanoJevActive());
+                pushTrigger(trigger, npcRef, qid, worth, gameSecond, isDecisionActive());
                 if (worth) {
                     triggerRegenerateSafe(projectId, npcRef, trigger, gameSecond);
                 } else {
@@ -336,19 +336,19 @@ public class SpaceTriggerJudge {
         });
     }
 
-    /** NanoJev 场景是否活跃（用于轨迹标注：true=语义判定，false=程序化兜底）。 */
-    private boolean isNanoJevActive() {
-        return nanoJevDecisionGate != null
-                && nanoJevDecisionGate.isEnabled(NanoJevDecisionScenes.SPACE_TRIGGER);
+    /** 决策模型 场景是否活跃（用于轨迹标注：true=语义判定，false=程序化兜底）。 */
+    private boolean isDecisionActive() {
+        return decisionGate != null
+                && decisionGate.isEnabled(DecisionScenes.SPACE_TRIGGER);
     }
 
     /** 触发轨迹写（满上限丢最旧）。 */
     private void pushTrigger(GrowthSpaceTrigger trigger, String npcRef, String qid, boolean worth,
-                             Long gameSecond, boolean nanoJevActive) {
+                             Long gameSecond, boolean decisionActive) {
         try {
             triggerStats.addLast(Map.of(
                     "trigger", trigger.code(), "label", trigger.label(), "qid", qid,
-                    "npcRef", npcRef, "worth", worth, "nanoJevActive", nanoJevActive,
+                    "npcRef", npcRef, "worth", worth, "decisionActive", decisionActive,
                     "gameSecond", gameSecond, "at", java.time.LocalDateTime.now().toString()));
             while (triggerStats.size() > TRIGGER_CAP) {
                 triggerStats.pollFirst();
@@ -359,21 +359,21 @@ public class SpaceTriggerJudge {
     }
 
     /**
-     * 触发判定（NanoJev boolean 语义确认 + 程序化阈值兜底）：
+     * 触发判定（决策模型 boolean 语义确认 + 程序化阈值兜底）：
      * 场景未启用/调用失败/升级 → 程序化阈值兜底（变化信号已由调用方确认，默认触发）；
-     * NanoJev 采纳 false → 不触发（模型认为琐碎变化不值得重算）。
+     * 决策模型 采纳 false → 不触发（模型认为琐碎变化不值得重算）。
      */
     private boolean decideTrigger(Long projectId, String npcRef, String qid, String changeText,
                                   Long gameSecond) {
-        if (nanoJevDecisionGate == null
-                || !nanoJevDecisionGate.isEnabled(NanoJevDecisionScenes.SPACE_TRIGGER)) {
+        if (decisionGate == null
+                || !decisionGate.isEnabled(DecisionScenes.SPACE_TRIGGER)) {
             return true; // 场景未启用 → 程序化阈值兜底（变化信号存在即触发）
         }
-        Map<String, NanoJevQuestion> questions = NanoJevState.newQuestions();
-        questions.put(qid, NanoJevDecisionTemplates.spaceTriggerQuestion(changeText));
-        NanoJevState state = NanoJevState.text(npcRef, truncate(changeText, 200), questions);
-        NanoJevDecisionGate.BooleanOutcome out = nanoJevDecisionGate.booleanDecision(
-                projectId, NpcRefs.idOf(npcRef), NanoJevDecisionScenes.SPACE_TRIGGER, state, qid);
+        Map<String, DecisionQuestion> questions = DecisionState.newQuestions();
+        questions.put(qid, DecisionTemplates.spaceTriggerQuestion(changeText));
+        DecisionState state = DecisionState.text(npcRef, truncate(changeText, 200), questions);
+        DecisionGate.BooleanOutcome out = decisionGate.booleanDecision(
+                projectId, NpcRefs.idOf(npcRef), DecisionScenes.SPACE_TRIGGER, state, qid);
         if (!out.adopted()) {
             return true; // 失败/升级 → 程序化阈值兜底
         }
@@ -403,22 +403,22 @@ public class SpaceTriggerJudge {
                                            String eventTitle, String eventContent,
                                            int fallbackDelta, Long gameSecond) {
         int delta = fallbackDelta;
-        if (nanoJevDecisionGate != null
-                && nanoJevDecisionGate.isEnabled(NanoJevDecisionScenes.RELATION_DELTA)) {
+        if (decisionGate != null
+                && decisionGate.isEnabled(DecisionScenes.RELATION_DELTA)) {
             String stateText = "角色A与角色B 共同经历了事件：「" + truncate(eventTitle, 60)
                     + "」。" + truncate(eventContent == null ? "" : eventContent, 180);
-            Map<String, NanoJevQuestion> questions = NanoJevState.newQuestions();
-            questions.put(QID_DELTA_MAGNITUDE, NanoJevDecisionTemplates.relationDeltaMagnitudeQuestion());
-            questions.put(QID_DELTA_DIRECTION, NanoJevDecisionTemplates.relationDeltaDirectionQuestion());
-            NanoJevState state = NanoJevState.text(refA + "|" + refB, stateText, questions);
-            Map<String, Object> results = nanoJevDecisionGate.mixedDecisions(
-                    projectId, NpcRefs.idOf(refA), NanoJevDecisionScenes.RELATION_DELTA, state,
-                    Map.of(QID_DELTA_MAGNITUDE, NanoJevQuestion.TYPE_SCORE,
-                            QID_DELTA_DIRECTION, NanoJevQuestion.TYPE_CHOICE));
+            Map<String, DecisionQuestion> questions = DecisionState.newQuestions();
+            questions.put(QID_DELTA_MAGNITUDE, DecisionTemplates.relationDeltaMagnitudeQuestion());
+            questions.put(QID_DELTA_DIRECTION, DecisionTemplates.relationDeltaDirectionQuestion());
+            DecisionState state = DecisionState.text(refA + "|" + refB, stateText, questions);
+            Map<String, Object> results = decisionGate.mixedDecisions(
+                    projectId, NpcRefs.idOf(refA), DecisionScenes.RELATION_DELTA, state,
+                    Map.of(QID_DELTA_MAGNITUDE, DecisionQuestion.TYPE_SCORE,
+                            QID_DELTA_DIRECTION, DecisionQuestion.TYPE_CHOICE));
             Object mag = results.get(QID_DELTA_MAGNITUDE);
             Object dir = results.get(QID_DELTA_DIRECTION);
-            if (mag instanceof NanoJevDecisionGate.ScoreOutcome so && so.adopted()
-                    && dir instanceof NanoJevDecisionGate.ChoiceOutcome co && co.adopted()) {
+            if (mag instanceof DecisionGate.ScoreOutcome so && so.adopted()
+                    && dir instanceof DecisionGate.ChoiceOutcome co && co.adopted()) {
                 int scale = so.level() >= 0 && so.level() < DELTA_SCALE.length
                         ? DELTA_SCALE[so.level()] : fallbackDelta;
                 delta = switch (co.chosen() == null ? "" : co.chosen()) {

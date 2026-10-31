@@ -38,8 +38,10 @@
     </PageShell>
   </AppShell>
 
-  <!-- 项目模式：外壳已由 ProjectLayout 提供，这里同样渲染页内标签 + 子页 -->
-  <PageShell v-else width="content" class="settings-page">
+  <!-- 项目模式：外壳已由 ProjectLayout 提供，这里同样渲染页内标签 + 子页。
+       宽度档位按场景区分：全局设置仍走 content（1200，表单与说明文更好读）；
+       项目设置升 wide（1440）——它与其它项目页共用侧栏，1920 屏下留在 1200 会让切页左右跳 120px。 -->
+  <PageShell v-else width="wide" class="settings-page">
     <PageTabs
       :model-value="activeKey"
       position="top"
@@ -79,8 +81,8 @@ const isDialogueSettings = computed(() => route.path.includes('/dialogue/setting
 const base = computed(() => {
   if (!projectId.value) return '/settings'
   return isDialogueSettings.value
-    ? `/project/${projectId.value}/dialogue/settings`
-    : `/project/${projectId.value}/settings`
+    ? `/world/${projectId.value}/dialogue/settings`
+    : `/world/${projectId.value}/settings`
 })
 
 /** 设置子页标签清单（与 navModel 同源；对谈子树去掉 player-profile 避免死链） */

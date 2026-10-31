@@ -49,7 +49,7 @@ import java.util.List;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}/world-graph")
+@RequestMapping("/api/worlds/{projectId}/world-graph")
 @RequiredArgsConstructor
 public class WorldGraphController {
 

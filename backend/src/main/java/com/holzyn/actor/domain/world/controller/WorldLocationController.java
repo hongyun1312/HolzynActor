@@ -41,7 +41,7 @@ import java.util.Map;
  * 归属一律以项目维度（本地单用户）。</p>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}/world-locations")
+@RequestMapping("/api/worlds/{projectId}/world-locations")
 @Slf4j
 @RequiredArgsConstructor
 public class WorldLocationController {

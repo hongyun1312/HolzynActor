@@ -663,6 +663,109 @@ public class MapPersistService {
         log.info("[mapgen] 单阶段重跑 {}：已失效下游数据（map={}）", stage, mapId);
     }
 
+    // ==================== 布局手改：派生数据回写 ====================
+
+    /**
+     * 应用一次手改布局（要素本体几何 + 门位）。
+     *
+     * <p>为什么写入口放在这里而不是 {@code LayoutEditService} 里直接 {@code save}：
+     * {@code actor_map_feature} 的唯一写入口是 MapPersistService（AGENTS.md 8.1 第 4 条）。
+     * 手改只是「又一个写入者」，不该绕过这条约定另开一处 save——否则以后查「谁改了这栋房子」
+     * 要翻两个类。</p>
+     *
+     * @param featureId 要素主键
+     * @param x         新中心 X（米）
+     * @param z         新中心 Z（米）
+     * @param rotation  新朝向（度）
+     * @param doorX     新门 X（米）
+     * @param doorZ     新门 Z（米）
+     * @param doorDir   新门朝向（度）
+     * @return 是否写入
+     */
+    @Transactional
+    public boolean applyLayoutGeometry(Long featureId, double x, double z, double rotation,
+                                       double doorX, double doorZ, double doorDir) {
+        ActorMapFeature f = featureRepository.findById(featureId).orElse(null);
+        if (f == null) {
+            return false;
+        }
+        double w = f.getSizeW() == null ? 6.0 : f.getSizeW();
+        double d = f.getSizeD() == null ? 6.0 : f.getSizeD();
+        f.setPosX(x);
+        f.setPosZ(z);
+        f.setRotation(rotation);
+        f.setDoorX(doorX);
+        f.setDoorZ(doorZ);
+        f.setDoorDir(doorDir);
+        // 轮廓与占地矩形用同一套「中心 + 尺寸 + 朝向」重算（与前端 rectCorners 同约定）
+        double[][] corners = com.holzyn.actor.domain.mapnav.algo.LayoutEditValidator
+                .corners(x, z, w, d, rotation);
+        f.setPolygonJson(json(corners));
+        f.setFootprintJson("{\"w\":" + w + ",\"d\":" + d + ",\"rot\":" + rotation + "}");
+        featureRepository.save(f);
+        return true;
+    }
+
+    /**
+     * 日程落点跟随（要素被挪走时，用它的人该去新门口）。
+     *
+     * @param mapId       地图 ID
+     * @param featureCode 要素 code
+     * @param x           新落点 X（米）
+     * @param z           新落点 Z（米）
+     * @return 受影响段数
+     */
+    @Transactional
+    public int updateRoutineAnchor(Long mapId, String featureCode, double x, double z) {
+        if (featureCode == null || featureCode.isBlank()) {
+            return 0;
+        }
+        int changed = 0;
+        try {
+            for (ActorNpcRoutine r : routineRepository.findByMapIdOrderByNpcRefAscSeqAsc(mapId)) {
+                if (featureCode.equals(r.getFeatureCode())) {
+                    r.setPosX(x);
+                    r.setPosZ(z);
+                    routineRepository.save(r);
+                    changed++;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[mapgen] 日程落点跟随失败：{}", e.getMessage());
+        }
+        return changed;
+    }
+
+    /**
+     * 住所坐标跟随（主屋被挪走后，住户的「家」指向新位置）。
+     *
+     * @param homeRef 住所引用（{@code actor_npc_home.id} 的字符串）
+     * @param x       新中心 X（米）
+     * @param z       新中心 Z（米）
+     * @param doorX   新门 X（米）
+     * @param doorZ   新门 Z（米）
+     */
+    @Transactional
+    public void updateHomeAnchor(String homeRef, double x, double z, double doorX, double doorZ) {
+        if (homeRef == null || homeRef.isBlank()) {
+            return;
+        }
+        try {
+            Long id = Long.valueOf(homeRef.trim());
+            homeRepository.findById(id).ifPresent(h -> {
+                h.setPosX(x);
+                h.setPosZ(z);
+                h.setDoorX(doorX);
+                h.setDoorZ(doorZ);
+                homeRepository.save(h);
+            });
+        } catch (NumberFormatException e) {
+            log.debug("[mapgen] 住所引用不是数字，跳过坐标跟随：{}", homeRef);
+        } catch (Exception e) {
+            log.warn("[mapgen] 住所坐标跟随失败：{}", e.getMessage());
+        }
+    }
+
     // ==================== M6：住所坐标回写 ====================
 
     /**

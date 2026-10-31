@@ -52,12 +52,29 @@ public class LocationBackfillRunner implements ApplicationRunner {
     private final LocationNormalizationService locationNormalizationService;
 
     /**
+     * 世界闸门（V1.1.2-beta.1 M4）：本 Runner 会遍历 {@code actor_profile} / {@code actor_dialogue}
+     * 并 <b>save()</b> 回写 location_id——世界未挂载时这些表在目录库里不存在，既报错又白跑。
+     * 未挂载直接跳过（迁移已把 location_id 原样搬进世界库）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.WorldGate worldGate;
+
+    /**
      * 启动时执行存量位置归一（幂等）。
      *
      * @param args 启动参数（未使用）
      */
     @Override
     public void run(ApplicationArguments args) {
+        if (worldGate == null) {
+            backfillNow();
+        } else {
+            worldGate.tryMaintenance("LocationBackfillRunner.run", this::backfillNow);
+        }
+    }
+
+    /** 补行实体（世界未挂载时不会进入） */
+    private void backfillNow() {
         try {
             int filled = backfill();
             log.info("[位置归一] 启动补行完成：{} 处存量位置已归一到地点表", filled);

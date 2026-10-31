@@ -24,7 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 世界地图只读 VO（GET /api/projects/{id}/world-map）。
+ * 世界地图只读 VO（GET /api/worlds/{id}/world-map）。
  * <p>数据源：actor_sandbox_scene.layout_json（regions/roads/placements）+ actor_npc_home/
  * actor_home_member（住所与住户）+ actor_world_location（地点坐标区）。供新首页 2D 地图 / 图谱消费。</p>
  */

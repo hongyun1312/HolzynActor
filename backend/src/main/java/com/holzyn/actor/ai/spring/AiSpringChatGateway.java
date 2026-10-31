@@ -126,11 +126,11 @@ public class AiSpringChatGateway {
     private final GuardRailTracker guardTracker;
 
     /**
-     * NanoJev 护栏语义复核（默认关场景；开启且装配时对非流式输出做 boolean 越界复核，
+     * 决策模型 护栏语义复核（默认关场景；开启且装配时对非流式输出做 boolean 越界复核，
      * 越界按护栏失败处置；字段注入保持构造器不变，null=未装配[单测]跳过零开销）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevGuardSemanticCheck nanoJevGuardSemanticCheck;
+    private com.holzyn.actor.ai.decision.gate.GuardSemanticJudge decisionGuardSemanticCheck;
 
     /**
      * 网关并发限流器（_07 网关并发错峰观察项；max-concurrent>0 时对全部 chat 调用收口
@@ -442,7 +442,8 @@ public class AiSpringChatGateway {
         SceneRouter.Route route = routeOf();
         AiChatRequest effective = sceneRouter != null ? sceneRouter.applyToRequest(request, route) : request;
         Long effProviderId = sceneRouter != null ? sceneRouter.effectiveProviderId(providerId, route) : providerId;
-        ProviderConfig config = modelApiService.resolveProviderConfig(userId, projectId, effProviderId);
+        ProviderConfig config = modelApiService.resolveProviderConfig(userId, projectId, effProviderId,
+                modelRoleOf(route));
         return chatCompletionCached(userId, projectId, config, effective);
     }
 
@@ -466,7 +467,8 @@ public class AiSpringChatGateway {
         SceneRouter.Route route = routeOf();
         AiChatRequest effective = sceneRouter != null ? sceneRouter.applyToRequest(jsonRequest, route) : jsonRequest;
         Long effProviderId = sceneRouter != null ? sceneRouter.effectiveProviderId(providerId, route) : providerId;
-        ProviderConfig config = modelApiService.resolveProviderConfig(userId, projectId, effProviderId);
+        ProviderConfig config = modelApiService.resolveProviderConfig(userId, projectId, effProviderId,
+                modelRoleOf(route));
         return chatCompletionCached(userId, projectId, config, effective);
     }
 
@@ -491,8 +493,25 @@ public class AiSpringChatGateway {
         SceneRouter.Route route = routeOf();
         AiChatRequest effective = sceneRouter != null ? sceneRouter.applyToRequest(request, route) : request;
         Long effProviderId = sceneRouter != null ? sceneRouter.effectiveProviderId(providerId, route) : providerId;
-        ProviderConfig config = modelApiService.resolveProviderConfig(userId, projectId, effProviderId);
+        ProviderConfig config = modelApiService.resolveProviderConfig(userId, projectId, effProviderId,
+                modelRoleOf(route));
         chatCompletionStream(projectId, config, effective, onToken, onUsage);
+    }
+
+    /**
+     * 当前场景对应的模型角色：决策类场景用决策模型，其余用文本模型。
+     *
+     * <p>判定依据是 {@code routing.category-map} 里已登记的 decision 类别（action / plan_day /
+     * goal_gen / npc_crowd_decision / npc_emotion_eval 等）——这样"哪些调用算决策"只有一份清单，
+     * 与温度/长度档位同源，不会出现两套场景表。</p>
+     *
+     * @param route 场景路由（可空=路由关闭/未启用）
+     *
+     * @return {@link ModelApiService#ROLE_DECISION} 或 {@link ModelApiService#ROLE_TEXT}
+     */
+    private static String modelRoleOf(SceneRouter.Route route) {
+        return route != null && "decision".equals(route.category())
+                ? ModelApiService.ROLE_DECISION : ModelApiService.ROLE_TEXT;
     }
 
     /**
@@ -508,7 +527,8 @@ public class AiSpringChatGateway {
      * @return 测试结果 Map（connected/method/status/message/latencyMs）
      */
     public Map<String, Object> testProvider(Long userId, Long projectId, Long providerId) {
-        ProviderConfig config = modelApiService.resolveProviderConfig(userId, projectId, providerId);
+        ProviderConfig config = modelApiService.resolveProviderConfig(userId, projectId, providerId,
+                ModelApiService.ROLE_TEXT);
         return chatModelProbe.testConnection(config);
     }
 
@@ -1147,25 +1167,25 @@ public class AiSpringChatGateway {
             }
             throw new AiCallException("AI 输出重复（护栏拦截）：模型输出陷入复读，已按失败处置");
         }
-        // 护栏语义复核（guard_semantic 默认关）：NanoJev boolean「输出是否越界」
+        // 护栏语义复核（guard_semantic 默认关）：决策模型 boolean「输出是否越界」
         // （空泛/复读/答非所问/违背任务要求）→ 越界按失败处置走程序化兜底（与空/复读同语义）
-        if (nanoJevGuardSemanticCheck != null) {
+        if (decisionGuardSemanticCheck != null) {
             try {
-                Boolean outOfBounds = nanoJevGuardSemanticCheck.check(
+                Boolean outOfBounds = decisionGuardSemanticCheck.check(
                         trace == null ? null : trace.getProjectId(), scene, content);
                 if (Boolean.TRUE.equals(outOfBounds)) {
                     guardTracker.recordDegraded(scene);
                     guardTracker.alert(scene, "semantic_guard",
-                            "AI 输出语义越界（NanoJev 护栏复核拦截）：空泛/复读/答非所问，按失败处置");
+                            "AI 输出语义越界（决策模型 护栏复核拦截）：空泛/复读/答非所问，按失败处置");
                     if (promptMetrics != null) {
-                        promptMetrics.recordJsonFail(scene, "AI 输出语义越界（NanoJev 护栏复核）");
+                        promptMetrics.recordJsonFail(scene, "AI 输出语义越界（决策模型 护栏复核）");
                     }
-                    throw new AiCallException("AI 输出语义越界（NanoJev 护栏复核）：内容空泛/答非所问，请重试");
+                    throw new AiCallException("AI 输出语义越界（决策模型 护栏复核）：内容空泛/答非所问，请重试");
                 }
             } catch (com.holzyn.actor.ai.AiCallException e) {
                 throw e;
             } catch (Exception e) {
-                log.warn("[护栏] NanoJev 语义复核异常（放行，零阻断）: scene={} : {}", scene, e.getMessage());
+                log.warn("[护栏] 决策模型 语义复核异常（放行，零阻断）: scene={} : {}", scene, e.getMessage());
             }
         }
     }

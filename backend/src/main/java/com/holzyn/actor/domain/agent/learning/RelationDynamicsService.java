@@ -87,7 +87,7 @@ public class RelationDynamicsService {
 
     /**
      * 空间重算触发判定（关系跨档检测点——状态机重算后状态码变化 →
-     * NanoJev boolean 确认触发空间重算 RELATION_JUMP；异步提交零阻断；字段注入保持构造器不变）
+     * 决策模型 boolean 确认触发空间重算 RELATION_JUMP；异步提交零阻断；字段注入保持构造器不变）
      */
     @org.springframework.context.annotation.Lazy
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -159,7 +159,7 @@ public class RelationDynamicsService {
         relationRepository.save(rel);
         // 事件驱动重算触发：关系跨档检测点——状态机重算后状态码变化 →
         // 异步提交判定（本方法在事务内，AI 判定在虚拟线程执行，不占本事务连接；
-        // NanoJev boolean 确认 + 程序化兜底 → 空间重算 RELATION_JUMP；零阻断）
+        // 决策模型 boolean 确认 + 程序化兜底 → 空间重算 RELATION_JUMP；零阻断）
         if (spaceTriggerJudge != null && oldState != null && !oldState.equals(newState)) {
             try {
                 spaceTriggerJudge.onRelationJump(projectId, from, oldState, newState,
@@ -327,7 +327,7 @@ public class RelationDynamicsService {
      * 发布「关系被人工改动」事件（kind=relation，源=manual）。
      *
      * <p><b>为什么补这一条</b>：关系拓扑工作台的实时刷新订阅的是世界事件流
-     * （{@code /api/projects/{id}/world-events/stream}，按 {@code kind=relation} 过滤），
+     * （{@code /api/worlds/{id}/world-events/stream}，按 {@code kind=relation} 过滤），
      * 而此前只有 AI 互动引起的动态变化会发事件——手动新增/编辑/删除关系时，
      * 另一个标签页（或另一位协作者）的画布不会更新，"实时"看起来是坏的。
      * 这里把手动路径也接上同一条总线：<b>纯新增</b>，不改任何既有字段语义，

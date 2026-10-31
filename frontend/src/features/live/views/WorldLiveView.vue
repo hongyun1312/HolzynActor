@@ -21,10 +21,10 @@
     聚合为一页，作为侧栏置顶第 3 项。
 
   数据来源（全部复用既有端点，不新增后端接口）：
-    · 沙盘总览  GET /api/projects/:id/sandbox/overview   → 角色当前状态快照（states[]）
-    · 沙盘实时流 GET /api/projects/:id/sandbox/stream     → 13 类事件（SSE，与沙盘同一契约）
-    · 世界时钟  GET /api/projects/:id/world-clock         → 时间锚点（前端每秒自行推算）
-    · 宏观状态  GET /api/projects/:id/macro/state         → 人口/粮价/民怨/季节收成
+    · 沙盘总览  GET /api/worlds/:id/sandbox/overview   → 角色当前状态快照（states[]）
+    · 沙盘实时流 GET /api/worlds/:id/sandbox/stream     → 13 类事件（SSE，与沙盘同一契约）
+    · 世界时钟  GET /api/worlds/:id/world-clock         → 时间锚点（前端每秒自行推算）
+    · 宏观状态  GET /api/worlds/:id/macro/state         → 人口/粮价/民怨/季节收成
 
   设计取舍：
     · 本页**只读观测 + 两个时间控制**（开始推进 / 推进一轮），不做干预注入——干预属于沙盘页的职责，
@@ -271,7 +271,7 @@ const actorTotal = computed(() => Object.keys(statesMap).length)
 
 // ==================== 数据加载 ====================
 
-function go(path) { router.push(`/project/${projectId}${path}`) }
+function go(path) { router.push(`/world/${projectId}${path}`) }
 
 /** 世界时间锚点 → 前端每秒推算 */
 function applyClockPayload(data) {

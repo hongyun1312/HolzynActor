@@ -1,7 +1,7 @@
 # ============================================================
 # HolzynActor 系统底层配置（application.yml 主文件）
 # 用途：项目运行基础底座 —— 服务端口 / 版本 / 数据源 / 上传 / JPA / Jackson /
-#      项目基础目录与密钥 / AI 接入层（网关·超时·思考·检索·缓存·护栏·路由·NanoJev）/
+#      项目基础目录与密钥 / AI 接入层（网关·超时·思考·检索·缓存·护栏·路由·决策模型）/
 #      embedding / H2 TCP / CORS / 日志级别。
 # 加载：顶部 spring.config.import 引入 application-actor.yml（功能业务配置）。
 #      优先级：本文件 > application-actor.yml > application-{profile}.yml 之上——
@@ -64,36 +64,49 @@ spring:
     timeout-per-shutdown-phase: ${HOLZYN_ACTOR_SHUTDOWN_TIMEOUT:3s}
   # 数据源：本地 H2 文件库（MySQL 兼容模式，支持 LONGTEXT/JSON/DATETIME 等语法）
   datasource:
+    # ⚠️ V1.1.2-beta.1 起本项是**兜底**，不再是运行期权威：
+    # 目录库的真实位置由 com.holzyn.actor.domain.worldstore.WorldPaths#registryDbUrl() 单一派生
+    # （= <holzyn.actor.data-dir>/<world-store.registry-file>），目录库与世界库都走程序化 Flyway。
+    # 保留本行是为了：① remote/遗留 profile 仍按老方式读它；② 出问题时能一眼看出"默认目录库在哪"。
+    # 环境变量刻意与 holzyn.actor.data-dir 同名——写不同名是历史上"世界在 A 目录、索引库在 B 目录"的根因。
     # LOCK_TIMEOUT=10000ms：并发写热点表时让竞争者排队而非立即失败（AI 结果不因锁超时丢弃）
-    url: ${HOLOZYN_ACTOR_DB_URL:jdbc:h2:file:${HOLOZYN_ACTOR_DATA_DIR:./data}/holzyn-actor;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;LOCK_TIMEOUT=10000}
+    url: ${HOLOZYN_ACTOR_DB_URL:jdbc:h2:file:${HOLOZYN_ACTOR_DATA_DIR:./data}/holzyn-registry;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;LOCK_TIMEOUT=10000}
     username: ${HOLOZYN_DB_USER:sa}
     password: ${HOLOZYN_DB_PASSWORD:}
     driver-class-name: org.h2.Driver
   servlet:
     multipart:
-      # 文件上传限制（头像/图片：单文件 5MB、请求 20MB）
-      max-file-size: 5MB
-      max-request-size: 20MB
+      # 文件上传限制：单文件 2GB、请求 2GB（V1.1.2-beta.1 M6 调整）。
+      # 原值 5MB/20MB 只考虑了头像与图片；存档包（.holzyn = 世界目录 zip）动辄几十 MB 到几 GB
+      # （含世界库 + 向量库 + 地图图块），实测 5MB 上限下导入直接 500 "Maximum upload size exceeded"。
+      # 上限取 2GB 而不是 -1（不限）：容器/内嵌 Tomcat 对超大 multipart 会把临时文件写到磁盘，
+      # 留一个明确的边界比"无上限"更容易排查。
+      max-file-size: 2GB
+      max-request-size: 2GB
   jpa:
     hibernate:
-      # U3（2026-10-15）：schema 演进由 Flyway 版本化迁移接管（db/migration/*.sql），
+      # U3（2026-10-15）：schema 演进由 Flyway 版本化迁移接管（V1~V7），
       # ddl-auto 收敛为 none（以迁移为准）：既有库经 baseline-on-migrate 标记为 V1 后原样运行，
       # 全新库由 V1__baseline.sql 建全表；JPA 不再自动改表，避免「validate 误伤历史库 → 启动失败 → 回滚」。
       ddl-auto: none
     show-sql: false
     open-in-view: false
-  # U3（2026-10-15）：Flyway 版本化迁移（H2 主库；remote=MySQL profile 已在 application-remote.yml 关闭）
-  flyway:
-    enabled: true
-    # 既有库（由历史 ddl-auto=update 建出、无 flyway_schema_history）自动打基线到 V1，
-    # 不执行 V1__baseline.sql；仅后续 V2+ 迁移在其上执行 → 玩家数据 0 风险、绝不因基线重建而丢库
-    baseline-on-migrate: true
-    baseline-version: 1
-    locations: classpath:db/migration
     properties:
       hibernate:
         # 本地 H2 方言（远程 MySQL 由 application-remote.yml 覆盖为 MySQLDialect）
         dialect: org.hibernate.dialect.H2Dialect
+  # U3（2026-10-15）：Flyway 版本化迁移。
+  # ⚠️ V1.1.2-beta.1 M3 起 **关闭自动装配**，两库都改程序化迁移（同一套做法）：
+  #   目录库 = RegistrySchema（classpath:db/migration/global，建池时立刻执行）
+  #   世界库 = WorldDataSourceFactory（classpath:db/migration/world，挂载时执行）
+  # 原因有两个，都是实测结论：
+  #   ① 自动装配只认 spring.datasource.url，而"目录库在哪"必须由 WorldPaths 单一派生；
+  #      实测两者会分叉（data-dir 有两处独立解析），造出"世界在 A 目录、索引库在 B 目录"。
+  #   ② V100 是**空库基线**（create table / create index 都不是 if not exists），
+  #      在旧单体库上跑会撞 "Index idx_* already exists" 直接启动失败（真实库副本实测复现）。
+  #      基线只允许在全新的 holzyn-registry 上跑，而"全新"这件事只有程序化路径能保证。
+  flyway:
+    enabled: false
   jackson:
     default-property-inclusion: non_null
     date-format: yyyy-MM-dd HH:mm:ss
@@ -108,6 +121,33 @@ holzyn:
     api-key-secret: ${HOLOZYN_ACTOR_API_KEY_SECRET:local-dev-secret-change-me}
     # 上传文件根目录（头像等）
     upload-dir: ${HOLOZYN_ACTOR_UPLOAD_DIR:./uploads}
+    # ---- 世界存档存储（V1.1.2-beta.1：一世界一库 + 一张目录库）----
+    # 目标：每个世界的数据独立落在 data/worlds/<uid>/ 下，像存档一样可整目录搬走；
+    # 目录库 data/holzyn-registry.mv.db 只存世界索引与全局配置，不含任何世界内容。
+    world-store:
+      # 世界根目录。留空 = 派生自 data-dir 下的 worlds/（默认 ./data/worlds）。
+      # 一旦写成绝对路径，存档目录就与机器绑定，搬移会失效，故默认派生。
+      root-dir: ${HOLOZYN_ACTOR_WORLD_ROOT:}
+      # 目录库文件名（相对 data-dir，不带 .mv.db 后缀；实际文件为 <name>.mv.db）
+      registry-file: holzyn-registry
+      # 同时只允许挂载一个世界（单活动世界模型：其余世界严格冻结）。
+      # 固定 false，启动期断言兜底；改成 true 会让"丢上下文也不会写错库"的安全前提失效。
+      allow-multi-mount: false
+      # 每次 open 时从目录库重建 12 张全局只读镜像表（模型/提示词/账户等），
+      # 使"全局配置改动在重开世界时生效"，并让搬来的存档自动跟随本机配置。
+      mirror-refresh-on-open: true
+      # 世界库连接池上限（单活动世界：一个世界库 + 一个目录库，池子不宜大）
+      pool-size: 4
+      # 关世界时执行 SHUTDOWN COMPACT：H2 默认只压缩约 200ms，不显式压缩则 .mv.db 不回收空间
+      compact-on-close: true
+      # 旧单库自动迁移开关（M3 新增）：目录库为空且 data/ 下存在旧的 holzyn-actor.mv.db 时，
+      # 启动期自动"先归档、再拆成一个世界一个库"，并逐世界逐表校验 + 出报告。
+      # 设 false 只用于"想先看迁移报告/手工演练"的排障场景（关掉后旧世界在列表里看不到，旧库文件仍在）。
+      migrate-legacy: ${HOLOZYN_ACTOR_WORLD_MIGRATE_LEGACY:true}
+      # 归档根目录（M3 新增）。留空 = 派生 <data-dir>/archive；里面放迁移前的旧库整份拷贝
+      # （pre-worldsplit-<ts>/）与归档删除的世界目录（deleted-worlds/<uid>-<ts>/）。
+      # 一旦写成别的盘，就会出现"世界在 A 盘、备份在 B 盘"，换机只搬走一半。
+      archive-dir: ${HOLOZYN_ACTOR_WORLD_ARCHIVE_DIR:}
     # 应用日志落盘：AI 接入层日志（additivity=false）只进此文件不进控制台，
     # 世界运行测试须把本项指到绝对路径的证据文件
     log:
@@ -128,7 +168,7 @@ holzyn:
           # 定时维护间隔（毫秒，默认 6 小时，对齐记忆归档/知识生命周期维护周期；
           # fixedDelay 首次执行在应用启动后立即触发一次，升级后首启即收口历史超期数据）
           maintenance-interval-ms: ${HOLOZYN_ACTOR_DEBUG_AI_LOG_RETENTION_INTERVAL_MS:21600000}
-    # ---- AI 接入层（对话/检索/向量/缓存/护栏/路由/NanoJev）----
+    # ---- AI 接入层（对话/检索/向量/缓存/护栏/路由/决策模型）----
     ai:
       # 向量库文件根目录（默认空=数据目录下 <data-dir>/vector-store/<projectId>/embeddings.json）
       vector-store-dir: ${HOLOZYN_ACTOR_VECTOR_STORE_DIR:}
@@ -168,7 +208,7 @@ holzyn:
       # 网关并发限流（2026-09-29_07 网关并发错峰观察项）：自托管模型网关（本地 35B 单实例）并发
       # 排队 → chat 调用 120s 超时；DeepSeek API 主用场景无此问题（官方网关并发容量大）→ 默认关闭
       # （0=不限流）。max-concurrent>0 启用：超出上限的 chat 调用排队等待空位（与 R1 异步化叠加削峰），
-      # 等待超时按既有失败语义重试/兜底。收口=AiSpringChatGateway（NanoJev/embedding 独立通道不受影响）
+      # 等待超时按既有失败语义重试/兜底。收口=AiSpringChatGateway（决策模型/embedding 独立通道不受影响）
       gateway-concurrency:
         max-concurrent: ${HOLOZYN_ACTOR_AI_GATEWAY_CONCURRENCY_MAX_CONCURRENT:0}
         wait-timeout-seconds: ${HOLOZYN_ACTOR_AI_GATEWAY_CONCURRENCY_WAIT_TIMEOUT_SECONDS:45}
@@ -276,14 +316,14 @@ holzyn:
           growth_fertility_decision: { temperature: 0.4, max-tokens: 2048 }
           growth_newborn_persona: { temperature: 0.6, max-tokens: 2048 }
           growth_wedding_narrative: { temperature: 0.8, max-tokens: 2048 }
-          # 运行时活跃场景显式登记（未登记会静默回退 default-tier 且调试表不可见；多为短 JSON 判定或走 NanoJev）
+          # 运行时活跃场景显式登记（未登记会静默回退 default-tier 且调试表不可见；多为短 JSON 判定或走 决策模型）
           agent_decision: { temperature: 0.5, max-tokens: 2048 }
           agent_learning: { temperature: 0.5, max-tokens: 2048 }
           attention: { temperature: 0.5, max-tokens: 2048 }
           growth_space_generate: { temperature: 0.5, max-tokens: 4096 }
           mask_breach: { temperature: 0.5, max-tokens: 2048 }
           micro_decision: { temperature: 0.5, max-tokens: 2048 }
-          nanojev_sample: { temperature: 0.5, max-tokens: 2048 }
+          decision_sample: { temperature: 0.5, max-tokens: 2048 }
           relation_delta: { temperature: 0.5, max-tokens: 2048 }
           social_willingness: { temperature: 0.5, max-tokens: 2048 }
           space_decision: { temperature: 0.5, max-tokens: 2048 }
@@ -297,131 +337,157 @@ holzyn:
           dialogue_group_reply: { temperature: 0.7, max-tokens: 300 }
           dialogue_summary: { temperature: 0.4, max-tokens: 300 }
           dialogue_consolidation: { temperature: 0.3, max-tokens: 512 }
-      # NanoJev 并行决策模型（System One 判定层：输入 state+questions、输出完整概率分布、零解码）
-      # ⚠️ 唯一可用入口 = POST /v1/nanojev/evaluate；chat/completions 传 model=nanojev 会静默回退 35B
-      nanojev:
-        # 判定调用总开关（默认 false：未配置 base-url 前一律禁用，调用方回退 Qwen/程序化，fail-closed）
-        enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_ENABLED:false}
-        # evaluate 网关 Base URL（已含 /v1；外网=https://llm.mbfsr.com:14443/v1，内网=http://127.0.0.1:9100/v1）
-        base-url: ${HOLOZYN_ACTOR_AI_NANOJEV_BASE_URL:}
-        # NanoJev 专用 API Key（空=沿用当前 chat provider Key；非空=专用。env 正确形态 HOLOZYN_ACTOR_AI_NANOJEV_APIKEY）
-        api-key: ${HOLOZYN_ACTOR_AI_NANOJEV_API_KEY:}
+      # 决策模型（System One 判定层：输入 state+questions、输出完整概率分布、零解码）
+      # 三家可选：adapter=nanojev | strands-decider-2b | laya（线协议不同，由适配器 + 协议层抹平）
+      # ⚠️ 决策模型不是 chat 模型：走各家 evaluate/systemone 专用端点；把决策模型名传给
+      #    /chat/completions 会静默回退到文本模型，判定层拿不到概率分布
+      decision:
+        # 判定调用总开关（默认 false：未配置端点前一律禁用，调用方回退文本模型/程序化，fail-closed）
+        enabled: ${HOLOZYN_ACTOR_AI_DECISION_ENABLED:false}
+        # 运行形态：api=远端/自托管网关；local=本机托管的模型进程（设置页「决策模型本地部署」一键装）
+        mode: ${HOLOZYN_ACTOR_AI_DECISION_MODE:api}
+        # 适配器 ID（空=默认 nanojev；可选 nanojev / strands-decider-2b / laya）
+        adapter: ${HOLOZYN_ACTOR_AI_DECISION_ADAPTER:}
+        # 模型标识（写入 trace/用量日志；空=取适配器默认）
+        model-id: ${HOLOZYN_ACTOR_AI_DECISION_MODEL_ID:}
+        # evaluate 路径覆盖（空=取适配器默认；如 /evaluate、/systemone）
+        evaluate-path: ${HOLOZYN_ACTOR_AI_DECISION_EVALUATE_PATH:}
+        # 网关 Base URL（已含前缀如 /v1；自托管示例 https://llm.example.com:14443/v1、http://127.0.0.1:9100/v1）
+        base-url: ${HOLOZYN_ACTOR_AI_DECISION_BASE_URL:}
+        # 决策模型 专用 API Key（空=沿用当前 chat provider Key；非空=专用）
+        api-key: ${HOLOZYN_ACTOR_AI_DECISION_API_KEY:}
         # 建连超时（秒）
-        timeout-connect-seconds: ${HOLOZYN_ACTOR_AI_NANOJEV_TIMEOUT_CONNECT_SECONDS:10}
+        timeout-connect-seconds: ${HOLOZYN_ACTOR_AI_DECISION_TIMEOUT_CONNECT_SECONDS:10}
         # 读超时（秒；单次前向数十 ms 级，30s 足够宽松）
-        timeout-read-seconds: ${HOLOZYN_ACTOR_AI_NANOJEV_TIMEOUT_READ_SECONDS:30}
+        timeout-read-seconds: ${HOLOZYN_ACTOR_AI_DECISION_TIMEOUT_READ_SECONDS:30}
         # 单次请求总时长上限（秒；硬性兜底防悬挂）
-        timeout-request-seconds: ${HOLOZYN_ACTOR_AI_NANOJEV_TIMEOUT_REQUEST_SECONDS:60}
+        timeout-request-seconds: ${HOLOZYN_ACTOR_AI_DECISION_TIMEOUT_REQUEST_SECONDS:60}
         # 失败重试次数（总计最多尝试 N+1 次；仍失败 fail-closed 返回 null）
-        max-retries: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_RETRIES:1}
+        max-retries: ${HOLOZYN_ACTOR_AI_DECISION_MAX_RETRIES:1}
         # 官方契约批上限（states≤32 / questions≤96 / 候选路径≤256 / 请求体≤2MB）
-        max-states-per-request: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_STATES:32}
-        max-questions-per-request: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_QUESTIONS:96}
-        max-paths-per-request: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_PATHS:256}
-        max-body-bytes: ${HOLOZYN_ACTOR_AI_NANOJEV_MAX_BODY_BYTES:2097152}
+        max-states-per-request: ${HOLOZYN_ACTOR_AI_DECISION_MAX_STATES:32}
+        max-questions-per-request: ${HOLOZYN_ACTOR_AI_DECISION_MAX_QUESTIONS:96}
+        max-paths-per-request: ${HOLOZYN_ACTOR_AI_DECISION_MAX_PATHS:256}
+        max-body-bytes: ${HOLOZYN_ACTOR_AI_DECISION_MAX_BODY_BYTES:2097152}
         # 采样：sample=按完整概率分布加权随机（真实优先/行为多样）；argmax=取概率最大项（测试与回放确定性）
         sampling:
-          mode: ${HOLOZYN_ACTOR_AI_NANOJEV_SAMPLING_MODE:sample}
+          mode: ${HOLOZYN_ACTOR_AI_DECISION_SAMPLING_MODE:sample}
           # 固定随机种子（空=每次随机；注入后采样可复现，供测试/回放）
-          seed: ${HOLOZYN_ACTOR_AI_NANOJEV_SAMPLING_SEED:}
-        # NanoJev A/B 质量评估（离线批跑设施，不影响世界运行）
+          seed: ${HOLOZYN_ACTOR_AI_DECISION_SAMPLING_SEED:}
+        # 决策模型 A/B 质量评估（离线批跑设施，不影响世界运行）
         ab:
           # A/B 评估总开关（显式开启后才可批跑）
-          enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_ENABLED:false}
+          enabled: ${HOLOZYN_ACTOR_AI_DECISION_AB_ENABLED:false}
           # 异步批跑并发路数
-          concurrency: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_CONCURRENCY:4}
+          concurrency: ${HOLOZYN_ACTOR_AI_DECISION_AB_CONCURRENCY:4}
           # 三类场景样本配额（情绪 75 / 候选选择 75 / 社交意愿 50）
           sample-quotas:
-            emotion_eval: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QUOTA_EMOTION:75}
-            crowd_decision: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QUOTA_CROWD:75}
-            social_willingness: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QUOTA_SOCIAL:50}
+            emotion_eval: ${HOLOZYN_ACTOR_AI_DECISION_AB_QUOTA_EMOTION:75}
+            crowd_decision: ${HOLOZYN_ACTOR_AI_DECISION_AB_QUOTA_CROWD:75}
+            social_willingness: ${HOLOZYN_ACTOR_AI_DECISION_AB_QUOTA_SOCIAL:50}
           # Qwen 同题型重问（对照基线）
           qwen:
-            scene: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QWEN_SCENE:nanojev_ab_qwen}
-            temperature: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QWEN_TEMPERATURE:0.3}
-            max-tokens: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_QWEN_MAX_TOKENS:512}
+            scene: ${HOLOZYN_ACTOR_AI_DECISION_AB_QWEN_SCENE:decision_ab_qwen}
+            temperature: ${HOLOZYN_ACTOR_AI_DECISION_AB_QWEN_TEMPERATURE:0.3}
+            max-tokens: ${HOLOZYN_ACTOR_AI_DECISION_AB_QWEN_MAX_TOKENS:512}
           # Judge 四维合理性评分（复用 LLM-as-Judge）
           judge:
-            scene: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_JUDGE_SCENE:nanojev_ab_judge}
-            max-input-chars: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_JUDGE_MAX_INPUT_CHARS:4000}
+            scene: ${HOLOZYN_ACTOR_AI_DECISION_AB_JUDGE_SCENE:decision_ab_judge}
+            max-input-chars: ${HOLOZYN_ACTOR_AI_DECISION_AB_JUDGE_MAX_INPUT_CHARS:4000}
           # 置信度升级阈值（分布不尖锐 → 升 Qwen 同题重问；键=emotion_eval/crowd_decision/social_willingness）
           escalation:
-            enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_AB_ESCALATION_ENABLED:false}
+            enabled: ${HOLOZYN_ACTOR_AI_DECISION_AB_ESCALATION_ENABLED:false}
             # ⚠️ 省略配置 → 字段保持 Java 默认空 Map（勿写空 {}——Spring Boot 4.x 宽松绑定会报
             # ConverterNotFoundException）
         # 判定类落地统一框架（全部判定场景走「开关 + 回退 + 采样/argmax」；未配置场景=代码默认关）
-        decision:
-          # 判定层总开关（场景级 + NanoJev client 双重门控后的第三重总闸）
-          enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_ENABLED:true}
+        gate:
+          # 判定层总开关（场景级 + 决策模型 client 双重门控后的第三重总闸）
+          enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_ENABLED:true}
           scenes:
             # 社交意愿门控：默认开；top-1 < 阈值升 Qwen 同题重问
             social_willingness:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SOCIAL:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SOCIAL_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_SOCIAL:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_SOCIAL_SAMPLING:sample}
               escalation:
-                enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SOCIAL_ESCALATION:true}
-                top1-prob: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SOCIAL_TOP1:0.5}
+                enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_SOCIAL_ESCALATION:true}
+                top1-prob: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_SOCIAL_TOP1:0.5}
             # 普通 NPC 行动选择：默认开；程序化候选集 + sample 直接采纳（不设升级阈值）
             crowd_decision:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_CROWD:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_CROWD_SAMPLING:sample}
-            # 空间候选选择：特殊 NPC action 决策在空间候选集内由 NanoJev 选择（sample 直接采纳）
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_CROWD:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_CROWD_SAMPLING:sample}
+            # 空间候选选择：特殊 NPC action 决策在空间候选集内由 决策模型 选择（sample 直接采纳）
             space_decision:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SPACE:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SPACE_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_SPACE:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_SPACE_SAMPLING:sample}
             # 婚育三插拔点（实现就绪、未过 A/B 评估 → 默认关）
             romance_attract:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ROMANCE:false}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ROMANCE_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_ROMANCE:false}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_ROMANCE_SAMPLING:sample}
             proposal:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PROPOSAL:false}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PROPOSAL_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_PROPOSAL:false}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_PROPOSAL_SAMPLING:sample}
             fertility:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_FERTILITY:false}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_FERTILITY_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_FERTILITY:false}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_FERTILITY_SAMPLING:sample}
             # 面具情境判定（实现就绪、未过 A/B 评估 → 默认关）
             mask_context:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MASK_CONTEXT:false}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MASK_CONTEXT_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_MASK_CONTEXT:false}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_MASK_CONTEXT_SAMPLING:sample}
             # 面具破绽判定（boolean 门控容错高 + 失败回退程序化 → 默认开）
             mask_breach:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MASK_BREACH:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MASK_BREACH_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_MASK_BREACH:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_MASK_BREACH_SAMPLING:sample}
             # 打断仲裁（未过 A/B 评估 → 默认关）
             negotiate:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_NEGOTIATE:false}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_NEGOTIATE_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_NEGOTIATE:false}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_NEGOTIATE_SAMPLING:sample}
             # 护栏语义复核（未过 A/B 评估 → 默认关）
             guard_semantic:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_GUARD:false}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_GUARD_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_GUARD:false}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_GUARD_SAMPLING:sample}
             # 认知注意力（每 tick 全 NPC 注意力状态批量 + 事件相关度批量）——默认开
             attention:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ATTENTION:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ATTENTION_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_ATTENTION:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_ATTENTION_SAMPLING:sample}
             # 高频微决策（choice 即时意向：继续当下事/放空/张望/小动作/搭话/起身活动）——默认开
             micro_decision:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MICRO:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_MICRO_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_MICRO:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_MICRO_SAMPLING:sample}
             # 事件驱动重算触发判定（情绪漂移/关系跨档/面具情境切换）——默认开
             space_trigger:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SPACE_TRIGGER:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_SPACE_TRIGGER_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_SPACE_TRIGGER:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_SPACE_TRIGGER_SAMPLING:sample}
             # 人格偏移评估（证据强度 + 偏移方向）——默认开，分布尖锐才采纳否则升 Qwen
             persona_shift:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PERSONA_SHIFT:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PERSONA_SHIFT_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_PERSONA_SHIFT:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_PERSONA_SHIFT_SAMPLING:sample}
               escalation:
-                enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PERSONA_SHIFT_ESCALATION:true}
-                top1-prob: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_PERSONA_SHIFT_TOP1:0.6}
+                enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_PERSONA_SHIFT_ESCALATION:true}
+                top1-prob: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_PERSONA_SHIFT_TOP1:0.6}
             # 关系变化量（幅度 + 方向）——默认开，好感/信任平滑更新
             relation_delta:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_RELATION_DELTA:true}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_RELATION_DELTA_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_RELATION_DELTA:true}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_RELATION_DELTA_SAMPLING:sample}
             # 意外事件（boolean 低概率采样）——默认关（涉及健康影响/世界事件，仅调试开关开启时生效）
             accident:
-              enabled: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ACCIDENT:false}
-              sampling: ${HOLOZYN_ACTOR_AI_NANOJEV_DECISION_SCENE_ACCIDENT_SAMPLING:sample}
+              enabled: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_ACCIDENT:false}
+              sampling: ${HOLOZYN_ACTOR_AI_DECISION_GATE_SCENE_ACCIDENT_SAMPLING:sample}
+        # 决策模型本地部署（mode=local 时生效；设置页「决策模型」页签负责下载/安装/启动）
+        local:
+          # 本地部署总开关（关闭后设置页只读，服务端拒绝安装/启动请求）
+          enabled: ${HOLOZYN_ACTOR_AI_DECISION_LOCAL_ENABLED:true}
+          # 模型目录（空=数据目录下 decision-models；桌面端不要在安装目录里放 GB 级文件）
+          dir: ${HOLOZYN_ACTOR_AI_DECISION_LOCAL_DIR:}
+          # 默认下载源：hf-mirror=国内镜像站；huggingface=官方站（设置页两个按钮可临时覆盖）
+          source: ${HOLOZYN_ACTOR_AI_DECISION_LOCAL_SOURCE:hf-mirror}
+          # 期望的 Python 版本（找不到时依次尝试 python3/python/py）
+          python-version: ${HOLOZYN_ACTOR_AI_DECISION_LOCAL_PYTHON_VERSION:3.12}
+          # 应用启动时若用户选的是本地形态且已安装 → 自动拉起进程
+          auto-start: ${HOLOZYN_ACTOR_AI_DECISION_LOCAL_AUTO_START:true}
+          # 下载并发文件数（默认 2：单连接已吃满多数家庭带宽，并发过高反而抢带宽）
+          download-parallelism: ${HOLOZYN_ACTOR_AI_DECISION_LOCAL_DOWNLOAD_PARALLELISM:2}
+          # 空闲多少分钟自动卸载进程（0=不自动停；桌面端默认常驻，避免每次判定冷启动）
+          idle-stop-minutes: ${HOLOZYN_ACTOR_AI_DECISION_LOCAL_IDLE_STOP_MINUTES:0}
     # embedding 单次请求最多 input 条数（供应商限制；超出自动拆分多次调用）
     embedding:
       batch-size: ${HOLOZYN_ACTOR_EMBEDDING_BATCH_SIZE:10}
@@ -492,7 +558,7 @@ holzyn:
         # 反思窗口（近 N 游戏日内有反思才校验；陈旧反思不参与）
         reflection-window-game-days: ${HOLOZYN_ACTOR_SELF_CHECK_REFLECTION_WINDOW_GAME_DAYS:1}
     # 主动记忆检索（ProactAgent「Ask Only When Needed」，P1 ②-1，2026-10-03）：
-    # 决策全局（含 SpaceChoice/NanoJev 快判；programmatic 档 0 AI 除外）+ 反思双入口，
+    # 决策全局（含 SpaceChoice/决策模型 快判；programmatic 档 0 AI 除外）+ 反思双入口，
     # AI 按情境判定「是否需要主动想起/查证」→ 定向检索三源（角色记忆+世界大事记+知识卡）
     # → 独立【主动想起】段注入（决策 {{proactive_memory}} / 快判情境文本 / 反思 {{proactive_memory}}）。
     # 失败降级 fail-open 零阻断；need=true 后冷却期内不再自问（间歇性回忆）。
@@ -512,7 +578,7 @@ holzyn:
     # 潜在世界预测注入（P1 ③-2，2026-10-03）：
     # 角色「脑内预演世界走向」——程序化趋势摘要（历史快照环比：粮价/民怨/势力/议题方向）
     # + AI 预测【未来一天世界走向】段（按游戏日缓存，同日不重复 AI）。
-    # 三通道注入：AI 深思 action_gen {{world_outlook}} / NanoJev 快判情境首部（仅程序化趋势，
+    # 三通道注入：AI 深思 action_gen {{world_outlook}} / 决策模型 快判情境首部（仅程序化趋势，
     # 零 AI）/ 前瞻推演宏观段升级（【当下时局】+【未来一天世界走向】）。
     # 失败降级 fail-open：AI 失败回退趋势摘要；未装配/无数据省略段零阻断。
     world-outlook:
@@ -527,7 +593,10 @@ holzyn:
         # 总开关
         enabled: ${HOLOZYN_ACTOR_KNOWLEDGE_BRIDGE_ENABLED:true}
     # H2 TCP Server：应用运行中外部工具（DataGrip 等）直连同一库实例
-    # 连接 URL：jdbc:h2:tcp://localhost:{tcp-port}/holzyn-actor;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE
+    # ⚠️ V1.1.2-beta.1 起 TCP 只暴露**目录库**（16 张索引/全局表），库名从 holzyn-actor 改为
+    # holzyn-registry；世界库（worlds/<uid>/world）刻意不暴露（设计 U5）：需要只读查看时先关世界、
+    # 停应用，再把 worlds/<uid>/world.mv.db 复制出来用 H2 Shell 打开（避免与应用抢文件锁）。
+    # 连接 URL：jdbc:h2:tcp://localhost:{tcp-port}/holzyn-registry;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE
     # 同 JVM 复用已打开的库实例（不产生第二个文件锁）；应用停止后 TCP 自动关闭
     h2:
       tcp-enabled: ${HOLOZYN_ACTOR_H2_TCP_ENABLED:true}

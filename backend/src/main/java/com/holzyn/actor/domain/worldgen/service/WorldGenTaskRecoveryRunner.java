@@ -60,12 +60,28 @@ public class WorldGenTaskRecoveryRunner implements ApplicationRunner {
     private final WorldGenTaskRunner taskRunner;
 
     /**
+     * 世界闸门（V1.1.2-beta.1 M4）：{@code actor_worldgen_task} 是世界表；启动时通常没有挂载世界，
+     * 未挂载就跳过（否则每启动一次刷一遍 "Table not found"，而断点续跑本来也只能在挂载后才有意义）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.WorldGate worldGate;
+
+    /**
      * 启动时扫描并恢复遗留 running 任务。
      *
      * @param args 启动参数（未使用）
      */
     @Override
     public void run(ApplicationArguments args) {
+        if (worldGate == null) {
+            recoverNow();
+        } else {
+            worldGate.tryMaintenance("WorldGenTaskRecoveryRunner.run", this::recoverNow);
+        }
+    }
+
+    /** 恢复实体（世界未挂载时不会进入） */
+    private void recoverNow() {
         try {
             List<ActorWorldgenTask> running = taskRepository.findByStatusOrderByIdAsc(WorldGenStatus.RUNNING);
             if (running.isEmpty()) {

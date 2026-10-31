@@ -47,7 +47,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 世界沙盘 SSE 广播中心（世界沙盘 S2，domain/sandbox/service）——项目级聚合订阅 Hub。
  * <p>职责（主开发方案 §6.2/§10.1 S2）：维护「项目 → SSE 订阅者」集合（{@code GET
- * /api/projects/{id}/sandbox/stream}，订阅型长连接：无超时 + 15s 心跳 + 终止自动移除），
+ * /api/worlds/{id}/sandbox/stream}，订阅型长连接：无超时 + 15s 心跳 + 终止自动移除），
  * 把沙盘相关的实时变化<b>合并为一条流</b>推送：</p>
  * <ul>
  * <li><b>10 事件契约</b>：{@code sandbox:init}（订阅后回放全量快照）/ {@code npc:moved} /
@@ -208,7 +208,7 @@ public class WorldSandboxSseHub implements WorldEventSubscriber {
     }
 
     /**
-     * 订阅项目沙盘实时流（GET /api/projects/{id}/sandbox/stream 使用）。
+     * 订阅项目沙盘实时流（GET /api/worlds/{id}/sandbox/stream 使用）。
      * <p>订阅即推送 {@code connected} 确认 + {@code sandbox:init} 全量快照（场景 + 全部 NPC 状态 +
      * 时钟），前端据此渲染初始态，后续经 10 事件增量更新。</p>
      *

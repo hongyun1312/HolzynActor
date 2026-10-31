@@ -46,14 +46,14 @@
         </div>
         <div v-loading="loading" class="table-card">
           <el-table :data="filteredDocs" empty-text="还没有知识文档，新建或上传 txt/md 开始建立知识库">
-            <el-table-column label="标题" min-width="180" show-overflow-tooltip>
+            <el-table-column label="标题" min-width="160" show-overflow-tooltip>
               <template #default="{ row }">
                 <SpotlightPill :text="row.title" :keyword="docKeyword" />
               </template>
             </el-table-column>
             <!-- 摘要列：默认显示正文开头；输入筛选词后**以命中为中心**截取窗口，
                  这样"为什么这份文档被筛出来"在列表里直接可见（不用点开详情翻全文） -->
-            <el-table-column label="摘要" min-width="280">
+            <el-table-column label="摘要" min-width="220">
               <template #default="{ row }">
                 <SpotlightPill class="doc-abstract" :text="row.content" :keyword="docKeyword" :max-length="96" />
               </template>
@@ -68,7 +68,7 @@
             <el-table-column label="字数" width="90" align="right">
               <template #default="{ row }">{{ (row.content || '').length }}</template>
             </el-table-column>
-            <el-table-column label="向量化" width="180">
+            <el-table-column label="向量化" width="130">
               <template #default="{ row }">
                 <!-- 四态 storeState（VECTORIZED/NOT_CONFIGURED/FAILED/EMPTY，后端向量库判定） -->
                 <el-tag v-if="row.storeState === 'VECTORIZED'" size="small" type="success" effect="light">
@@ -86,10 +86,10 @@
                 <el-tag v-else size="small" type="info" effect="plain">未向量化</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="updatedAt" label="更新时间" width="160">
+            <el-table-column prop="updatedAt" label="更新时间" width="140">
               <template #default="{ row }">{{ formatTime(row.updatedAt) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="200" fixed="right">
+            <el-table-column label="操作" width="170" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openView(row)">查看</el-button>
                 <el-button link type="primary" @click="doReindex(row)">重新向量化</el-button>
@@ -221,7 +221,7 @@
  * ① 知识文档：文档列表（归属/字数/向量化状态/更新时间/操作）+ 新建/上传；
  * ② 检索预览：检索输入 + 角色级过滤 + RAG 命中片段（向量/文本降级标记）；
  * ③ 项目大事记：项目级长期记忆集中展示（与世界详情页项目级记忆同源）。</p>
- * <p>数据来源：/api/projects/{id}/knowledge-docs、memories 系列接口。</p>
+ * <p>数据来源：/api/worlds/{id}/knowledge-docs、memories 系列接口。</p>
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
@@ -313,11 +313,16 @@ async function loadCharacters() {
   }
 }
 
-/** 探测是否配置了 embedding 供应商（项目级优先/用户级回退） */
+/** 探测是否配置了可用的向量模型（新结构看 models 角色，旧结构回退 embeddingEnabled/embeddingModel） */
 async function loadVectorAvailable() {
   try {
     const apis = await fetchModelApis(projectId)
-    vectorAvailable.value = apis.some((a) => a.embeddingEnabled === 1 && a.embeddingModel)
+    vectorAvailable.value = apis.some((a) => {
+      if (Array.isArray(a.models)) {
+        return a.models.some((m) => m.role === 'embedding' && m.enabled !== 0)
+      }
+      return a.embeddingEnabled === 1 && !!a.embeddingModel
+    })
   } catch (_) {
     vectorAvailable.value = false
   }

@@ -1330,7 +1330,7 @@ class NpcStateServiceTest {
     }
 
     /**
-     * 普通 NPC 链式责任（P2-3）：危险未命中 + 快选择未命中（NanoJev/AI 未装配）→
+     * 普通 NPC 链式责任（P2-3）：危险未命中 + 快选择未命中（决策模型/AI 未装配）→
      * 概率化层产出需求满足行动（Sims 模型）。
      */
     @Test
@@ -1393,15 +1393,15 @@ class NpcStateServiceTest {
         CrowdDecisionParse.CrowdAction drive =
                 service.decideCrowdAction(10L, npc, 1000L, "天色骤变，大雨将至");
 
-        // 环境刺激 → 阶段门控让路；无 NanoJev/AI 装配 → 链空 null（调用方状态机兜底）
+        // 环境刺激 → 阶段门控让路；无 决策模型/AI 装配 → 链空 null（调用方状态机兜底）
         assertNull(drive, "环境刺激让路：不产出阶段行为模板，交还既有链");
     }
 
-    /** router 未装配（单测基线）→ 既有内联管线（NanoJev/AI 未装配 → null）。 */
+    /** router 未装配（单测基线）→ 既有内联管线（决策模型/AI 未装配 → null）。 */
     @Test
     void decideCrowdAction_legacyPathWithoutRouter() {
         assertNull(service.decideCrowdAction(10L, commonNpc(), 1000L),
-                "legacy 内联管线：NanoJev/AI 未装配 → null（调用方回退概率化/状态机）");
+                "legacy 内联管线：决策模型/AI 未装配 → null（调用方回退概率化/状态机）");
     }
 
     /** dangerDrive（普通 NPC 危险强制公开委托点）：危险区强制，恢复常态后 null。 */
@@ -1419,11 +1419,11 @@ class NpcStateServiceTest {
         assertNull(service.dangerDrive(10L, commonNpc(), 1000L), "恢复常态 → 无危险 → null");
     }
 
-    /** crowdChoiceDrive（普通 NPC 快选择公开委托点）：NanoJev/AI 未装配 → null（链继续）。 */
+    /** crowdChoiceDrive（普通 NPC 快选择公开委托点）：决策模型/AI 未装配 → null（链继续）。 */
     @Test
     void crowdChoiceDrive_fallsBackNullWhenUnwired() {
         assertNull(service.crowdChoiceDrive(10L, commonNpc(), 1000L, null),
-                "NanoJev/AI 未装配 → null（链继续到概率化）");
+                "决策模型/AI 未装配 → null（链继续到概率化）");
     }
 
     // ==================== characterInfoLine 上下文注入（2026-10-07 根治） ====================

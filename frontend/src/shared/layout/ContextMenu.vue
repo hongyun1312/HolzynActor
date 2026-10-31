@@ -201,7 +201,7 @@ watch(() => menu.open, async (v) => {
   white-space: nowrap;
 }
 .ctx-hint {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   flex: none;
 }

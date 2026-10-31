@@ -99,8 +99,8 @@ function goTutorial() {
 /** 打开「界面与布局」设置（项目内优先项目级设置，否则全局设置） */
 function goAppearance() {
   layout.closeDrawer('help')
-  const m = route.path.match(/^\/project\/(\d+)/)
-  router.push(m ? `/project/${m[1]}/settings/appearance` : '/settings/appearance')
+  const m = route.path.match(/^\/world\/(\d+)/)
+  router.push(m ? `/world/${m[1]}/settings/appearance` : '/settings/appearance')
 }
 </script>
 

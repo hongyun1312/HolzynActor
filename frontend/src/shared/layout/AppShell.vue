@@ -34,7 +34,8 @@
       :interface-key="interfaceKey"
       :brand-label="brandLabel"
       :show-back="showBack"
-      :show-sidebar-toggle="showSidebar"
+      :back-title="backTitle"
+      :show-sidebar-toggle="showSidebar && shellMode === 'overlay' && !sidebarIsOverlay"
       :sidebar-collapsed="effectiveSidebarWidth <= 60"
       @back="onBack"
       @toggle-sidebar="toggleSidebar"
@@ -157,11 +158,19 @@ const props = defineProps({
   /** 是否显示返回画廊按钮 */
   showBack: { type: Boolean, default: true },
   /**
-   * 返回按钮的目标路由（默认回项目画廊）。
+   * 返回按钮的目标路由（默认回世界画廊）。
    * <p>用 `replace` 而非 `push`：避免「返回后浏览器后退又回到本页」——
    * 对会自动开始执行的页面（如世界初始化 `onMounted(start)`）尤其重要。</p>
    */
   backTo: { type: String, default: '' },
+  /** 返回按钮 tooltip 文案（默认「返回世界画廊」） */
+  backTitle: { type: String, default: '返回世界画廊' },
+  /**
+   * 自定义返回动作：给了就由宿主完全接管返回（不再走 backTo/画廊兜底）。
+   * <p>开发者模式用它把「返回」变成「退出开发者模式」——桌面端要关掉独立开发者窗口，
+   * 否则该窗口会被路由带去当前世界，与主窗口形成两个一模一样的世界界面。</p>
+   */
+  backCustom: { type: Function, default: null },
   /** 内容区是否全屏（沙盘 3D） */
   fullbleed: { type: Boolean, default: false },
   /**
@@ -266,14 +275,18 @@ const shellVars = computed(() => ({
 /** 侧栏是否以覆盖方式呈现（窄屏滑入：内容区不为它让位） */
 const sidebarIsOverlay = computed(() => shellMode.value === 'overlay' && layout.overlaySidebarOpen)
 
-/** 返回项目画廊 */
+/** 返回世界画廊 */
 function goGallery() { router.push('/') }
 
 /**
  * 顶栏返回按钮：宿主给了 `backTo` 就回宿主指定位置（replace，避免回退又落回本页），
- * 否则回项目画廊。
+ * 否则回世界画廊。
  */
 function onBack() {
+  if (typeof props.backCustom === 'function') {
+    props.backCustom()
+    return
+  }
   if (props.backTo) router.replace(props.backTo)
   else goGallery()
 }

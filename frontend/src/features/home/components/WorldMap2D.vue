@@ -788,13 +788,13 @@ const visibleLabels = computed(() => {
   padding: 4px 8px; border-radius: 999px;
   background: var(--hm-panel); backdrop-filter: blur(6px);
   border: 1px solid var(--hm-border);
-  font-size: 11px; color: var(--hm-text-dim);
+  font-size: 12.5px; color: var(--hm-text-dim);
   pointer-events: auto;
 }
 .hm-bar-sep { width: 1px; height: 14px; margin: 0 2px; background: var(--hm-border); }
 .hm-chip {
   border: 1px solid transparent; background: transparent; cursor: pointer;
-  color: var(--hm-text-faint); font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  color: var(--hm-text-faint); font-size: 12.5px; padding: 2px 8px; border-radius: 999px;
   transition: all .15s var(--dsw-ease);
 }
 .hm-chip:hover { color: var(--hm-text); background: var(--bg-hover); }
@@ -805,7 +805,7 @@ const visibleLabels = computed(() => {
   display: inline-flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1;
 }
 .hm-zoom:hover { color: var(--hm-text); background: var(--bg-hover); }
-.hm-zoom.is-text { width: auto; padding: 0 7px; font-size: 11px; }
+.hm-zoom.is-text { width: auto; padding: 0 7px; font-size: 12.5px; }
 .hm-zoom-val { font-variant-numeric: tabular-nums; min-width: 34px; text-align: center; color: var(--hm-text-dim); }
 .hm-ctl-pill .hm-lg { display: inline-flex; align-items: center; gap: 4px; }
 .hm-lg .lg-dot, .hm-lg .lg-home { display: inline-block; }
@@ -821,11 +821,11 @@ const visibleLabels = computed(() => {
   padding: 4px 8px; border-radius: 8px;
   background: var(--hm-panel); backdrop-filter: blur(4px);
   border: 1px solid var(--hm-border);
-  font-size: 11px; color: var(--hm-text-faint);
+  font-size: 12.5px; color: var(--hm-text-faint);
 }
 .hm-hint-close {
   border: none; background: transparent; cursor: pointer;
-  color: var(--hm-text-faint); font-size: 11px; padding: 0 2px;
+  color: var(--hm-text-faint); font-size: 12.5px; padding: 0 2px;
 }
 .hm-hint-close:hover { color: var(--hm-text); }
 </style>

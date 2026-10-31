@@ -35,8 +35,8 @@ import java.util.Set;
  * 推断 actionType=move_to，执行链零改动（与空间候选带目标地点的既有路径完全同构）；</li>
  * <li>措辞按中心类型分化（赶集/喝茶听闲话/串门唠嗑），贴合真人语感；</li>
  * <li>权重作「（倾向 x%）」情境描述进 choice 候选文本（同 {@link SpaceDecisionCandidates} 口径），
- * 最终分布仍由 NanoJev 决定（不硬编码行为）；</li>
- * <li>无 precondition（恒可发生区）——「此刻去不去」交给 NanoJev 判定，不做程序化硬约束。</li>
+ * 最终分布仍由 决策模型 决定（不硬编码行为）；</li>
+ * <li>无 precondition（恒可发生区）——「此刻去不去」交给 决策模型 判定，不做程序化硬约束。</li>
  * </ul>
  * <p><b>触发门（真人常识约束，防全村同时涌向茶馆）</b>：</p>
  * <ol>

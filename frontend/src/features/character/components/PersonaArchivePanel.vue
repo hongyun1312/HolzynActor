@@ -220,7 +220,7 @@ async function copyRenderText() {
 }
 .pa-dim-no { font-size: 13px; font-weight: 700; color: var(--accent-text); }
 .pa-dim-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
-.pa-dim-meta { margin-left: auto; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); cursor: help; }
+.pa-dim-meta { margin-left: auto; font-size: 12.5px; color: var(--text-tertiary); font-family: var(--font-mono); cursor: help; }
 .pa-dim-body { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 5px; }
 
 .pa-line { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.75; }
@@ -243,7 +243,7 @@ async function copyRenderText() {
 }
 .pa-pre-raw { max-height: 520px; }
 .pa-raw-dim { margin-top: 4px; }
-.pa-raw-dim summary { cursor: pointer; font-size: 11.5px; color: var(--text-tertiary); margin-bottom: 4px; }
+.pa-raw-dim summary { cursor: pointer; font-size: 13px; color: var(--text-tertiary); margin-bottom: 4px; }
 .pa-raw-dim .pa-pre { max-height: 240px; }
 
 /* ===== 紧凑模式（版本历史对话框等窄容器） ===== */
@@ -252,5 +252,5 @@ async function copyRenderText() {
 .is-compact .pa-dim-head { padding: 6px 10px; }
 .is-compact .pa-dim-body { padding: 6px 10px 8px; }
 .is-compact .pa-line { font-size: 12px; line-height: 1.7; }
-.is-compact .pa-line-label { min-width: 56px; font-size: 11.5px; }
+.is-compact .pa-line-label { min-width: 56px; font-size: 13px; }
 </style>

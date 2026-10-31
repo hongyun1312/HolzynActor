@@ -219,7 +219,9 @@ class WorldGenPersistServiceTest {
         verify(projectService).saveWorldSetting(eq(5L), dtoCaptor.capture(), eq(10L));
         WorldSettingDTO dto = dtoCaptor.getValue();
         assertEquals("废土纪元", dto.name());
-        assertEquals("科幻末世", dto.genre());
+        // 题材落库前收敛到固定八类："科幻末世"命中「末世」关键字（最具体优先），归一为「末世」。
+        // 提示词预览里的原文不受影响——上面 sections.get("genre") 仍断言"科幻末世"。
+        assertEquals("末世", dto.genre());
         assertEquals("玄黄纪", dto.era());
         assertTrue(dto.magicSystem().contains("四阶修炼体系"));
         assertTrue(dto.geography().contains("九洲分立"));

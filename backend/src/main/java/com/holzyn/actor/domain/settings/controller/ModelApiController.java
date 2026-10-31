@@ -21,6 +21,7 @@ package com.holzyn.actor.domain.settings.controller;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
 import com.holzyn.actor.common.R;
 import com.holzyn.actor.domain.settings.dto.ModelApiDTO;
+import com.holzyn.actor.domain.settings.dto.ProviderModelDTO;
 import com.holzyn.actor.domain.settings.vo.ModelApiVO;
 import com.holzyn.actor.domain.settings.service.ModelApiService;
 import jakarta.validation.Valid;
@@ -35,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -57,6 +59,23 @@ public class ModelApiController {
 
     /** 当前用户解析器（会话优先 + 演示模式兜底） */
     private final CurrentUserProvider currentUserProvider;
+
+    /**
+     * 全域 AI 就绪状态（世界画廊「还没接上模型」横幅的判据）。
+     *
+     * <p>为什么单开一个端点而不让前端自己调列表判断：判定要合并「用户级 + 全部世界的项目级」
+     * 供应商，并逐条校验启用状态/模型角色；前端拉一遍 {@code /api/model-apis} 只能看到用户级，
+     * 在世界里配好模型的人会一直看到「未接模型」的假提示。</p>
+     *
+     * @return {@code {configured: true|false}}
+     */
+    @GetMapping("/ready")
+    public R<Map<String, Object>> ready() {
+        Long userId = currentUserProvider.currentUserId();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("configured", modelApiService.isAiReady(userId));
+        return R.ok(out);
+    }
 
     /**
      * 某归属的 API 列表（脱敏）；projectId 不传=用户级。
@@ -177,5 +196,133 @@ public class ModelApiController {
                                             @PathVariable("id") Long id) {
         Long userId = currentUserProvider.currentUserId();
         return R.ok(modelApiService.testConnection(userId, projectId, id));
+    }
+
+    // ==================== 供应商下的模型（文本 / 向量 / 决策） ====================
+
+    /**
+     * 在供应商下新增模型。
+     *
+     * @param projectId 项目 ID（可空=用户级）
+     *
+     * @param id 供应商主键
+     *
+     * @param dto 模型请求体（name/role/isDefault/enabled/remark）
+     *
+     * @return 更新后的供应商视图（含全部模型）
+     */
+    @PostMapping("/{id}/models")
+    public R<ModelApiVO> addModel(@RequestParam(name = "projectId", required = false) Long projectId,
+                                  @PathVariable("id") Long id,
+                                  @Valid @RequestBody ProviderModelDTO dto) {
+        Long userId = currentUserProvider.currentUserId();
+        return R.ok(modelApiService.addModel(userId, projectId, id, dto));
+    }
+
+    /**
+     * 修改供应商下的模型（改名 / 改角色 / 启停 / 改默认）。
+     *
+     * @param projectId 项目 ID（可空=用户级）
+     *
+     * @param id 供应商主键
+     *
+     * @param modelId 模型条目 id
+     *
+     * @param dto 模型请求体
+     *
+     * @return 更新后的供应商视图（含全部模型）
+     */
+    @PutMapping("/{id}/models/{modelId}")
+    public R<ModelApiVO> updateModel(@RequestParam(name = "projectId", required = false) Long projectId,
+                                     @PathVariable("id") Long id,
+                                     @PathVariable("modelId") String modelId,
+                                     @Valid @RequestBody ProviderModelDTO dto) {
+        Long userId = currentUserProvider.currentUserId();
+        return R.ok(modelApiService.updateModel(userId, projectId, id, modelId, dto));
+    }
+
+    /**
+     * 删除供应商下的模型。
+     *
+     * @param projectId 项目 ID（可空=用户级）
+     *
+     * @param id 供应商主键
+     *
+     * @param modelId 模型条目 id
+     *
+     * @return 更新后的供应商视图（含全部模型）
+     */
+    @DeleteMapping("/{id}/models/{modelId}")
+    public R<ModelApiVO> deleteModel(@RequestParam(name = "projectId", required = false) Long projectId,
+                                     @PathVariable("id") Long id,
+                                     @PathVariable("modelId") String modelId) {
+        Long userId = currentUserProvider.currentUserId();
+        return R.ok(modelApiService.deleteModel(userId, projectId, id, modelId));
+    }
+
+    /**
+     * 把模型设为它所属角色的默认模型。
+     *
+     * @param projectId 项目 ID（可空=用户级）
+     *
+     * @param id 供应商主键
+     *
+     * @param modelId 模型条目 id
+     *
+     * @return 更新后的供应商视图（含全部模型）
+     */
+    @PutMapping("/{id}/models/{modelId}/default")
+    public R<ModelApiVO> setDefaultModel(@RequestParam(name = "projectId", required = false) Long projectId,
+                                         @PathVariable("id") Long id,
+                                         @PathVariable("modelId") String modelId) {
+        Long userId = currentUserProvider.currentUserId();
+        return R.ok(modelApiService.setDefaultModel(userId, projectId, id, modelId));
+    }
+
+    /**
+     * 拉取该供应商接口上的全部模型（用已保存的 Key 调 {@code GET {baseUrl}/models}）。
+     *
+     * @param projectId 项目 ID（可空=用户级）
+     *
+     * @param id 供应商主键
+     *
+     * @return 模型 ID 列表（排序去重）
+     */
+    @GetMapping("/{id}/models/remote")
+    public R<List<String>> remoteModels(@RequestParam(name = "projectId", required = false) Long projectId,
+                                        @PathVariable("id") Long id) {
+        Long userId = currentUserProvider.currentUserId();
+        return R.ok(modelApiService.fetchRemoteModels(userId, projectId, id));
+    }
+
+    /**
+     * 拉取模型清单（供应商尚未保存时用：body 传 baseUrl + apiKey）。
+     *
+     * @param body 请求体：{@code {"baseUrl":"...","apiKey":"..."}}
+     *
+     * @return 模型 ID 列表（排序去重）
+     */
+    @PostMapping("/models/remote")
+    public R<List<String>> previewRemoteModels(@RequestBody Map<String, String> body) {
+        return R.ok(modelApiService.fetchRemoteModels(body.get("baseUrl"), body.get("apiKey")));
+    }
+
+    /**
+     * 测试供应商下某个具体模型（不是默认文本模型）。
+     *
+     * @param projectId 项目 ID（可空=用户级）
+     *
+     * @param id 供应商主键
+     *
+     * @param modelId 模型条目 id
+     *
+     * @return 探测结果 Map（connected/method/status/message/latencyMs）
+     */
+    @PostMapping("/{id}/models/{modelId}/test")
+    public R<Map<String, Object>> testModel(@RequestParam(name = "projectId", required = false) Long projectId,
+                                            @PathVariable("id") Long id,
+                                            @PathVariable("modelId") String modelId) {
+        Long userId = currentUserProvider.currentUserId();
+        return R.ok(modelApiService.testProviderModel(userId, projectId, id, modelId));
     }
 }

@@ -29,7 +29,18 @@ http.interceptors.response.use(
     }
     return body
   },
-  (err) => Promise.reject(err)
+  (err) => {
+    // HTTP 非 2xx：后端统一返回 { code, message, data }，但 axios 只会给出
+    // "Request failed with status code 409" 这类英文状态码文案。这里把后端的人话
+    // 换进 err.message（如「已有其它世界挂载…（WORLD_BUSY）」），同时保留
+    // err.response / err.status，既有读 e.response.data.message 的调用点不受影响。
+    const body = err && err.response && err.response.data
+    if (body && typeof body === 'object' && typeof body.message === 'string' && body.message) {
+      err.message = body.message
+      if (body.code != null) err.bizCode = body.code
+    }
+    return Promise.reject(err)
+  }
 )
 
 export default http

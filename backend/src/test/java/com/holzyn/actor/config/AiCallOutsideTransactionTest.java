@@ -204,53 +204,53 @@ class AiCallOutsideTransactionTest {
     }
 
     /**
-     * N 轨道 N1（2026-09-22）追加入网：NanoJev 判定调用同样是 AI 调用（HTTP 秒级/毫秒级网络等待），
+     * N 轨道 N1（2026-09-22）追加入网：决策模型 判定调用同样是 AI 调用（HTTP 秒级/毫秒级网络等待），
      * 任何含它的公开方法不得带 @Transactional——否则判定调用在事务内同样长期持 actor_state 行锁，
      * 违反 2026-09-21 固化的架构不变量（含 AI 调用的方法一律无事务，AiCallOutsideTransactionTest 守护）。
      */
     @Test
-    @DisplayName("N1 NanoJev 判定客户端不得带 @Transactional（NanoJev 调用同样是 AI 调用）")
-    void nanoJevClientIsNotTransactional() throws Exception {
-        Class<?> nanojev = Class.forName("com.holzyn.actor.ai.nanojev.NanoJevEvaluateClient");
-        assertNoTransaction(nanojev, "evaluate",
+    @DisplayName("N1 决策模型 判定客户端不得带 @Transactional（决策模型 调用同样是 AI 调用）")
+    void decisionClientIsNotTransactional() throws Exception {
+        Class<?> decisionClient = Class.forName("com.holzyn.actor.ai.decision.DecisionCallClient");
+        assertNoTransaction(decisionClient, "evaluate",
                 Long.class, Long.class, Long.class, String.class, Class.forName("java.util.List"));
-        assertNoTransaction(nanojev, "evaluateOnce",
+        assertNoTransaction(decisionClient, "evaluateOnce",
                 Long.class, Long.class, Long.class, String.class, Class.forName("java.util.List"));
-        assertNoTransaction(nanojev, "healthCheck", Long.class, Long.class);
+        assertNoTransaction(decisionClient, "healthCheck", Long.class, Long.class);
     }
 
     /**
-     * N 轨道 N2（2026-09-22）追加入网：NanoJev A/B 批跑编排（runBatch 内含 NanoJev evaluate +
+     * N 轨道 N2（2026-09-22）追加入网：决策模型 A/B 批跑编排（runBatch 内含 决策模型 evaluate +
      * Qwen 同题型重问 + Judge 评分三路 AI 调用）与 Qwen 重问客户端（chat 网关调用）——
      * 一律不得带 @Transactional；落库由仓库短事务各自承担（compareOne/judgeOne 内逐样本 save）。
      */
     @Test
-    @DisplayName("N2 NanoJev A/B 批跑与 Qwen 重问不得带 @Transactional（三路 AI 调用在事务外）")
-    void nanoJevAbBatchIsNotTransactional() throws Exception {
-        Class<?> abRunner = Class.forName("com.holzyn.actor.ai.nanojev.ab.NanoJevAbBatchRunner");
+    @DisplayName("N2 决策模型 A/B 批跑与 Qwen 重问不得带 @Transactional（三路 AI 调用在事务外）")
+    void decisionAbBatchIsNotTransactional() throws Exception {
+        Class<?> abRunner = Class.forName("com.holzyn.actor.ai.decision.ab.DecisionAbBatchRunner");
         assertNoTransaction(abRunner, "runBatch", Long.class, String.class);
-        Class<?> qwen = Class.forName("com.holzyn.actor.ai.nanojev.ab.QwenBaselineClient");
+        Class<?> qwen = Class.forName("com.holzyn.actor.ai.decision.ab.QwenBaselineClient");
         assertNoTransaction(qwen, "ask",
                 Long.class, Long.class, Long.class, String.class, String.class, String.class,
-                Class.forName("com.holzyn.actor.ai.nanojev.NanoJevQuestion"));
+                Class.forName("com.holzyn.actor.ai.decision.DecisionQuestion"));
     }
 
     /**
-     * N 轨道 N3（2026-09-24）追加入网：判定类落地统一框架（ai/nanojev/decision）——
-     * 判定门三题型/批量（NanoJev evaluate 调用）、社交意愿门控（NanoJev + 升级 Qwen 双 AI 调用）、
+     * N 轨道 N3（2026-09-24）追加入网：判定类落地统一框架（ai/decision/decision）——
+     * 判定门三题型/批量（决策模型 evaluate 调用）、社交意愿门控（决策模型 + 升级 Qwen 双 AI 调用）、
      * 拒绝连锁（情绪异步评估 AI 路径）、G4 三插拔点 + G3 面具两点 + 仲裁 + 护栏判定类
      * （全部经判定门走 AI）一律不得带 @Transactional；落库由各仓储短事务承担。
      */
     @Test
-    @DisplayName("N3 判定类落地全链路不得带 @Transactional（NanoJev 判定 + 升级 Qwen + 拒绝连锁）")
-    void nanoJevDecisionLayerIsNotTransactional() throws Exception {
-        Class<?> gate = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate");
+    @DisplayName("N3 判定类落地全链路不得带 @Transactional（决策模型 判定 + 升级 Qwen + 拒绝连锁）")
+    void decisionJudgeLayerIsNotTransactional() throws Exception {
+        Class<?> gate = Class.forName("com.holzyn.actor.ai.decision.gate.DecisionGate");
         assertNoTransaction(gate, "booleanDecision", Long.class, Long.class, String.class,
-                Class.forName("com.holzyn.actor.ai.nanojev.NanoJevState"), String.class);
+                Class.forName("com.holzyn.actor.ai.decision.DecisionState"), String.class);
         assertNoTransaction(gate, "choiceDecision", Long.class, Long.class, String.class,
-                Class.forName("com.holzyn.actor.ai.nanojev.NanoJevState"), String.class);
+                Class.forName("com.holzyn.actor.ai.decision.DecisionState"), String.class);
         assertNoTransaction(gate, "scoreDecision", Long.class, Long.class, String.class,
-                Class.forName("com.holzyn.actor.ai.nanojev.NanoJevState"), String.class);
+                Class.forName("com.holzyn.actor.ai.decision.DecisionState"), String.class);
         assertNoTransaction(gate, "booleanDecisions", Long.class, String.class, Class.forName("java.util.Map"),
                 String.class);
         Class<?> social = Class.forName("com.holzyn.actor.domain.agent.roleplay.SocialWillingnessGate");
@@ -259,31 +259,31 @@ class AiCallOutsideTransactionTest {
         Class<?> denial = Class.forName("com.holzyn.actor.domain.agent.roleplay.SocialDenialService");
         assertNoTransaction(denial, "onDenial", Long.class, String.class, String.class, String.class,
                 String.class, String.class, Long.class);
-        Class<?> escalation = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevEscalationClient");
+        Class<?> escalation = Class.forName("com.holzyn.actor.ai.decision.gate.DecisionEscalationClient");
         assertNoTransaction(escalation, "ask", Long.class, Long.class, String.class, String.class,
-                String.class, Class.forName("com.holzyn.actor.ai.nanojev.NanoJevQuestion"));
+                String.class, Class.forName("com.holzyn.actor.ai.decision.DecisionQuestion"));
         // G4 三插拔点判定类
-        Class<?> romance = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevRomanceAttractionDecision");
+        Class<?> romance = Class.forName("com.holzyn.actor.ai.decision.gate.RomanceAttractionJudge");
         assertNoTransaction(romance, "decide",
                 Class.forName("com.holzyn.actor.domain.growth.romance.RomanceDecisions$AttractionContext"));
-        Class<?> proposal = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevProposalDecision");
+        Class<?> proposal = Class.forName("com.holzyn.actor.ai.decision.gate.ProposalJudge");
         assertNoTransaction(proposal, "decide",
                 Class.forName("com.holzyn.actor.domain.growth.romance.RomanceDecisions$ProposalContext"));
-        Class<?> fertility = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevFertilityDecision");
+        Class<?> fertility = Class.forName("com.holzyn.actor.ai.decision.gate.FertilityJudge");
         assertNoTransaction(fertility, "decide",
                 Class.forName("com.holzyn.actor.domain.growth.romance.RomanceDecisions$FertilityContext"));
         // G3 面具两点判定类
-        Class<?> maskCtx = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevMaskContextDecision");
+        Class<?> maskCtx = Class.forName("com.holzyn.actor.ai.decision.gate.MaskContextJudge");
         assertNoTransaction(maskCtx, "decide", Long.class, String.class, String.class, String.class);
-        Class<?> maskBreach = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevMaskBreachDecision");
+        Class<?> maskBreach = Class.forName("com.holzyn.actor.ai.decision.gate.MaskBreachJudge");
         assertNoTransaction(maskBreach, "detect", Long.class, String.class, String.class, String.class,
                 String.class);
         // 仲裁 + 护栏
-        Class<?> negotiate = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevNegotiateDecision");
+        Class<?> negotiate = Class.forName("com.holzyn.actor.ai.decision.gate.NegotiateJudge");
         assertNoTransaction(negotiate, "decide", Long.class, Long.class, String.class);
-        Class<?> guard = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevGuardSemanticCheck");
+        Class<?> guard = Class.forName("com.holzyn.actor.ai.decision.gate.GuardSemanticJudge");
         assertNoTransaction(guard, "check", Long.class, String.class, String.class);
-        // 既有实现类委托入口（NanoJev 判定 + Qwen 判定都在内）
+        // 既有实现类委托入口（决策模型 判定 + Qwen 判定都在内）
         Class<?> aiRomance = Class.forName("com.holzyn.actor.domain.growth.romance.AiRomanceDecisionSource");
         assertNoTransaction(aiRomance, "decide",
                 Class.forName("com.holzyn.actor.domain.growth.romance.RomanceDecisions$AttractionContext"));
@@ -291,19 +291,19 @@ class AiCallOutsideTransactionTest {
 
     /**
      * N 轨道 N4（2026-09-25）追加入网：空间候选选择链路——判定编排（SpaceDecisionServiceUtils.decide
-     * 内含 precondition 语义 boolean 批量 + 行动 choice 一次前向 = NanoJev 调用）与判定门混合批量
+     * 内含 precondition 语义 boolean 批量 + 行动 choice 一次前向 = 决策模型 调用）与判定门混合批量
      * （mixedDecisions）一律不得带 @Transactional；NpcStateService.decideCrowdAction 与
      * DecisionService.generateDecision 既有断言已覆盖两个接入点的公开入口。
      */
     @Test
-    @DisplayName("N4 空间候选选择链路不得带 @Transactional（混合批量一次前向 = NanoJev 调用）")
-    void nanoJevSpaceDecisionIsNotTransactional() throws Exception {
-        Class<?> gate = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate");
+    @DisplayName("N4 空间候选选择链路不得带 @Transactional（混合批量一次前向 = 决策模型 调用）")
+    void decisionSpaceDecisionIsNotTransactional() throws Exception {
+        Class<?> gate = Class.forName("com.holzyn.actor.ai.decision.gate.DecisionGate");
         assertNoTransaction(gate, "mixedDecisions", Long.class, Long.class, String.class,
-                Class.forName("com.holzyn.actor.ai.nanojev.NanoJevState"), Class.forName("java.util.Map"));
+                Class.forName("com.holzyn.actor.ai.decision.DecisionState"), Class.forName("java.util.Map"));
         Class<?> utils = Class.forName("com.holzyn.actor.domain.growth.space.SpaceDecisionServiceUtils");
         assertNoTransaction(utils, "decide",
-                Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate"),
+                Class.forName("com.holzyn.actor.ai.decision.gate.DecisionGate"),
                 Long.class, Long.class, Class.forName("java.util.List"),
                 Class.forName("com.holzyn.actor.domain.growth.space.SpacePreconditionEvaluator$Context"),
                 String.class);
@@ -311,7 +311,7 @@ class AiCallOutsideTransactionTest {
 
     /**
      * N 轨道 N5（2026-09-26）追加入网：认知注意力 + 高频微决策全链路——每 tick 全 NPC 批量
-     * （tickAsync 内含 NanoJev 判定门 mixedBatchDecisions 两次前向）、事件×NPC 相关度批量
+     * （tickAsync 内含 决策模型 判定门 mixedBatchDecisions 两次前向）、事件×NPC 相关度批量
      * （eventRelevanceAsync）、事件驱动重算触发（SpaceTriggerJudge 三检测点 + 关系变化量评估，
      * 检测点可能从 @Transactional 栈内异步提交）、意外事件判定（AccidentJudge.onEvent，accident
      * 场景默认关仅调试开）、persona_shift 初判（PersonalityShiftService.assess 已有断言，补
@@ -320,8 +320,8 @@ class AiCallOutsideTransactionTest {
      */
     @Test
     @DisplayName("N5 认知 LOD + 高频微决策 + 事件驱动重算全链路不得带 @Transactional")
-    void nanoJevN5AiMethodsAreNotTransactional() throws Exception {
-        Class<?> gate = Class.forName("com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate");
+    void decisionN5AiMethodsAreNotTransactional() throws Exception {
+        Class<?> gate = Class.forName("com.holzyn.actor.ai.decision.gate.DecisionGate");
         assertNoTransaction(gate, "mixedBatchDecisions", Long.class, String.class,
                 Class.forName("java.util.Map"), Class.forName("java.util.Map"));
         Class<?> attention = Class.forName("com.holzyn.actor.domain.growth.attention.CognitiveAttentionService");
@@ -430,6 +430,24 @@ class AiCallOutsideTransactionTest {
         Class<?> svc = Class.forName("com.holzyn.actor.domain.world.service.WorldCommonKnowledgeService");
         assertNoTransaction(svc, "generate", Long.class, Long.class);
         assertNoTransaction(svc, "scanAndBackfill");
+    }
+
+    /**
+     * 世界初始化重构（2026-10-20）入网：初始化向导的单步执行
+     * （{@code WorldInitService.runStep} 内含角色卡/普通NPC/关系/世界时间等 AI 调用）
+     * 与一键链路 {@code runInit} 一样，一律不得带 {@code @Transactional}；
+     * 世界名/简介建议（{@code WorldMetaSuggestService.suggest}，scene=world_meta_suggest）
+     * 同样不得带事务——落库由 {@code ProjectService.applyWorldMeta} 的短事务承担。
+     */
+    @Test
+    @DisplayName("世界初始化单步执行与世界名生成不得带 @Transactional（AI 在事务外，落库分层）")
+    void worldInitStepsAreNotTransactional() throws Exception {
+        Class<?> init = Class.forName("com.holzyn.actor.domain.project.service.WorldInitService");
+        Class<?> wf = Class.forName("com.holzyn.actor.domain.project.service.WorkflowLog");
+        assertNoTransaction(init, "runInit", Long.class, Long.class, boolean.class, wf);
+        assertNoTransaction(init, "runStep", Long.class, Long.class, String.class, boolean.class, wf);
+        Class<?> meta = Class.forName("com.holzyn.actor.domain.project.service.WorldMetaSuggestService");
+        assertNoTransaction(meta, "suggest", Long.class, Long.class);
     }
 
     /**

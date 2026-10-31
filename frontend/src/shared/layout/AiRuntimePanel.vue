@@ -240,8 +240,8 @@ function shortTime(v) {
 /** 前往 AI 用量页（项目内优先） */
 function goUsage() {
   layout.closeDrawer('ai-runtime')
-  const m = route.path.match(/^\/project\/(\d+)/)
-  router.push(m ? `/project/${m[1]}/settings/usage` : '/settings/appearance')
+  const m = route.path.match(/^\/world\/(\d+)/)
+  router.push(m ? `/world/${m[1]}/settings/usage` : '/settings/appearance')
 }
 
 /** 打开调试台（新标签页；调试台独立打包在 /debug/） */

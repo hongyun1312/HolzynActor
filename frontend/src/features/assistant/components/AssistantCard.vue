@@ -70,7 +70,7 @@ const fields = computed(() => (props.card?.fields || []).filter((f) => f && f.la
   border-bottom: 1px solid var(--border-l1, #eef1f6);
 }
 .assistant-card-type {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--color-primary, #4f6ef7);
   background: color-mix(in srgb, var(--color-primary, #4f6ef7) 14%, transparent);
   border-radius: 999px;

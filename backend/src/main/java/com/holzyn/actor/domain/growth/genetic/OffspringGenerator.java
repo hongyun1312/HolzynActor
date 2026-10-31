@@ -116,6 +116,17 @@ public class OffspringGenerator {
     private final CurrentUserProvider currentUserProvider;
     private final AiDecisionSourceSupport aiSupport;
 
+    /**
+     * 基因档案唯一写入口（{@link GenomeService}）。
+     *
+     * <p>装配方式刻意用<b>字段注入 + required=false</b>：本类构造器由
+     * {@code @RequiredArgsConstructor} 生成，AGENTS 8.1.2 明令不得改既有服务构造器签名
+     * （会打断既有测试的构造点）。Spring 运行期该字段必然注入；单测里直接 {@code new} 时为 null，
+     * 两个调用点都有 {@code if (genomeService != null)} 回退到本类原有实现，行为不变。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private GenomeService genomeService;
+
     //
     // 公开入口
     //
@@ -265,6 +276,13 @@ public class OffspringGenerator {
 
     /** 取角色基因组（无基因行 → 按既有 OCEAN 程序化推断并落库——任何角色都可成为父母）。 */
     private GenomeData genomeOf(Long projectId, ActorCharacter ch) {
+        // 写入口收敛：装配了 GenomeService 就交给它（开局家族建档与出生共用一套口径）
+        if (genomeService != null) {
+            GenomeData delegated = genomeService.genomeOf(projectId, ch);
+            if (delegated != null) {
+                return delegated;
+            }
+        }
         ActorGrowthGenome row = genomeRepository.findByProjectIdAndNpcRef(projectId, ch.npcRef()).orElse(null);
         if (row != null && row.getGeneLociJson() != null && !row.getGeneLociJson().isBlank()) {
             try {
@@ -417,12 +435,18 @@ public class OffspringGenerator {
             child.setStatus(1);
             child.setCurrentActivity("襁褓中安睡");
             ActorCharacter saved = characterRepository.save(child);
-            // 基因行落库（parent 引用 + inherited）
-            genome.setNpcRef(saved.npcRef());
-            genome.setSourceParentA(mother.getId());
-            genome.setSourceParentB(father == null ? null : father.getId());
-            genome.setSource("inherited");
-            genomeRepository.save(genome);
+            // 基因行落库（parent 引用 + inherited）——统一走 GenomeService（基因表唯一写入口）；
+            // 单测里未装配该服务时回退原有直接落库，行为不变
+            if (genomeService != null) {
+                genomeService.saveRow(projectId, saved.npcRef(), genomeService.parse(genome), GenomeService.SOURCE_INHERITED,
+                        mother.getId(), father == null ? null : father.getId());
+            } else {
+                genome.setNpcRef(saved.npcRef());
+                genome.setSourceParentA(mother.getId());
+                genome.setSourceParentB(father == null ? null : father.getId());
+                genome.setSource("inherited");
+                genomeRepository.save(genome);
+            }
             // 11 维档案
             writeBirthPersona(saved, mother, father, naming, childOcean, gameSecond);
             return saved;

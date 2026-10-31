@@ -49,17 +49,23 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 文件导入建项目控制器。
- * <p>职责：提供上传解析（multipart 多文件 txt/md）、AI 自动生成角色、确认创建三类接口；
+ * 文件解析建世界控制器（上传 txt/md → AI 解析 → 预览 → 确认创建）。
+ *
+ * <p><b>路径为什么是 {@code /api/worlds/parse} 而不是 {@code /import}（V1.1.2-beta.1 M6）</b>：
+ * {@code /api/worlds/import} 已被"导入 {@code .holzyn} 存档包"占用（{@code WorldLifecycleController}）。
+ * 两者语义完全不同——一个是"从零建一个新世界"，一个是"把别人的存档搬过来"——共用前缀会让
+ * 请求上下文判定（{@code WorldRequestContextFilter}）必须为每条子路径开例外，最终没人说得清哪条走目录库。</p>
+ *
+ * <p>职责：上传解析（multipart 多文件 txt/md）、AI 自动生成角色、确认创建三类接口；
  * 文件仅读取文本内存解析，不落盘存储；归属一律以当前会话用户为准。</p>
  */
 @RestController
-@RequestMapping("/api/projects/import")
+@RequestMapping("/api/worlds/parse")
 @Slf4j
 @RequiredArgsConstructor
 public class ProjectImportController {
 
-    /** 导入服务 */
+    /** 解析建世界服务 */
     private final ProjectImportService importService;
 
     /** 当前用户解析器 */

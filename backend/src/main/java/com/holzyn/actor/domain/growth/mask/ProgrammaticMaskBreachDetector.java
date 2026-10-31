@@ -42,7 +42,7 @@ import java.util.List;
  * <li>降幅求和钳制 [0, 0.8]（不出现抑制被压成负数）。</li>
  * </ul>
  * <p>判定点设计（N 轨道预留）：本类被 {@link MaskService} 经 {@link MaskBreachDecision} 接口调用；
- * 之后 NanoJev 接入只替换实现，不重改面具主流程。</p>
+ * 之后 决策模型 接入只替换实现，不重改面具主流程。</p>
  */
 @Slf4j
 @Component
@@ -59,11 +59,11 @@ public class ProgrammaticMaskBreachDetector implements MaskBreachDecision {
     private final ActorCharacterRepository characterRepository;
 
     /**
-     * NanoJev 面具破绽判定（默认关场景；开启且采纳时优先，失败/升级回退本程序化实现；
+     * 决策模型 面具破绽判定（默认关场景；开启且采纳时优先，失败/升级回退本程序化实现；
      * 字段注入保持构造器不变，null=未装配[单测]直接走程序化）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevMaskBreachDecision nanoJevDecision;
+    private com.holzyn.actor.ai.decision.gate.MaskBreachJudge decisionJudge;
 
     @Override
     public BreachResult detect(Long projectId, String npcRef, String contextText, Long gameSecond) {
@@ -75,16 +75,16 @@ public class ProgrammaticMaskBreachDetector implements MaskBreachDecision {
             if (ch == null) {
                 return BreachResult.none();
             }
-            // ：NanoJev 破绽判定优先（默认关场景；采纳即用，否则回退程序化）
-            if (nanoJevDecision != null) {
+            // ：决策模型 破绽判定优先（默认关场景；采纳即用，否则回退程序化）
+            if (decisionJudge != null) {
                 try {
-                    BreachResult nano = nanoJevDecision.detect(projectId, npcRef, ch.getName(),
+                    BreachResult nano = decisionJudge.detect(projectId, npcRef, ch.getName(),
                             contextText, buildTriggerSummary(ch, contextText));
                     if (nano != null) {
                         return nano;
                     }
                 } catch (Exception e) {
-                    log.warn("[面具] NanoJev 破绽判定异常（回退程序化）: ref={} : {}", npcRef, e.getMessage());
+                    log.warn("[面具] 决策模型 破绽判定异常（回退程序化）: ref={} : {}", npcRef, e.getMessage());
                 }
             }
             double totalDrop = 0;
@@ -154,7 +154,7 @@ public class ProgrammaticMaskBreachDetector implements MaskBreachDecision {
     }
 
     /**
-     * 触发物摘要（NanoJev 判定输入：档案 ⑪ breaches + ⑨ traumas triggers + 酒精状态；
+     * 触发物摘要（决策模型 判定输入：档案 ⑪ breaches + ⑨ traumas triggers + 酒精状态；
      * 无触发物返回 null）。
      */
     private String buildTriggerSummary(ActorCharacter ch, String contextText) {

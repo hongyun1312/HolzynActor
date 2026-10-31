@@ -24,7 +24,7 @@ import http from './http'
  *
  * @param {number|string} projectId 项目 ID
  */
-export const fetchSandboxOverview = (projectId) => http.get(`/api/projects/${projectId}/sandbox/overview`)
+export const fetchSandboxOverview = (projectId) => http.get(`/api/worlds/${projectId}/sandbox/overview`)
 
 /**
  * 记录「上次所在项目」（应用启动直达上次项目；只写不清，返回画廊不清空）。
@@ -41,7 +41,7 @@ export const setLastProject = (projectId) => http.post('/api/local-account/last-
  *
  * @param {number|string} projectId 项目 ID
  */
-export const sandboxStreamUrl = (projectId) => `/api/projects/${projectId}/sandbox/stream`
+export const sandboxStreamUrl = (projectId) => `/api/worlds/${projectId}/sandbox/stream`
 
 // ==================== S2：干预（统一委托后端既有能力） ====================
 
@@ -53,7 +53,7 @@ export const sandboxStreamUrl = (projectId) => `/api/projects/${projectId}/sandb
  * @param {{npcRef: string, content: string}} data 插话请求
  */
 export const sandboxInterveneTalk = (projectId, data) =>
-  http.post(`/api/projects/${projectId}/sandbox/intervene/talk`, data, { timeout: 20000 })
+  http.post(`/api/worlds/${projectId}/sandbox/intervene/talk`, data, { timeout: 20000 })
 
 /**
  * 干预-触发行动：手动触发特殊角色一轮思考决策 + 行动（AI 不可用时程序化兜底；人群不支持）。
@@ -63,7 +63,7 @@ export const sandboxInterveneTalk = (projectId, data) =>
  * @param {{npcRef: string, reason?: string}} data 触发请求（npcRef 统一身份引用，形如 npc:{id}）
  */
 export const sandboxInterveneAction = (projectId, data) =>
-  http.post(`/api/projects/${projectId}/sandbox/intervene/action`, data, { timeout: 30000 })
+  http.post(`/api/worlds/${projectId}/sandbox/intervene/action`, data, { timeout: 30000 })
 
 /**
  * 干预-手动事件：向世界注入一条事件（持久化 + 事件总线广播，沙盘经 scene:event 实时可视化）。
@@ -75,7 +75,7 @@ export const sandboxInterveneAction = (projectId, data) =>
  * @returns {Promise<object>} 新增事件视图（同时间线接口）
  */
 export const sandboxInterveneEvent = (projectId, data) =>
-  http.post(`/api/projects/${projectId}/sandbox/intervene/event`, data)
+  http.post(`/api/worlds/${projectId}/sandbox/intervene/event`, data)
 
 /**
  * 干预-时间控制：更新世界时钟（rate/paused/worldRunning）或手动补推一轮（advance=true）。
@@ -87,7 +87,7 @@ export const sandboxInterveneEvent = (projectId, data) =>
  * @returns {Promise<object>} advance=false → { clock }；advance=true → 推进结果 Map
  */
 export const sandboxInterveneClock = (projectId, data) =>
-  http.post(`/api/projects/${projectId}/sandbox/intervene/clock`, data, { timeout: 30000 })
+  http.post(`/api/worlds/${projectId}/sandbox/intervene/clock`, data, { timeout: 30000 })
 
 // ==================== S4：天气切换 ====================
 
@@ -100,7 +100,7 @@ export const sandboxInterveneClock = (projectId, data) =>
  * @param {string} condition 天气条件（晴 / 雨 / 雪 / 阴）
  */
 export const sandboxSwitchWeather = (projectId, condition) =>
-  http.post(`/api/projects/${projectId}/sandbox/weather`, { condition })
+  http.post(`/api/worlds/${projectId}/sandbox/weather`, { condition })
 
 // ====================：NPC 内部状态（actor_npc_state 读接口） ====================
 
@@ -114,14 +114,14 @@ export const sandboxSwitchWeather = (projectId, condition) =>
  * @returns {Promise<object>} NpcStateVO（需求/心情/情绪/urgency + fatigue + needLabels）
  */
 export const fetchNpcState = (projectId, npcRef) =>
-  http.get(`/api/projects/${projectId}/npc-state/${encodeURIComponent(npcRef)}`)
+  http.get(`/api/worlds/${projectId}/npc-state/${encodeURIComponent(npcRef)}`)
 
 /**
  * 项目全部 NPC 内部状态（调试/批量展示）。
  *
  * @param {number|string} projectId 项目 ID
  */
-export const fetchAllNpcStates = (projectId) => http.get(`/api/projects/${projectId}/npc-state`)
+export const fetchAllNpcStates = (projectId) => http.get(`/api/worlds/${projectId}/npc-state`)
 
 /**
  * 单 NPC 状态历史快照。
@@ -133,6 +133,6 @@ export const fetchAllNpcStates = (projectId) => http.get(`/api/projects/${projec
  * @param {number} [limit] 返回条数上限（可空=全部，默认对齐保留上限）
  */
 export const fetchNpcStateHistory = (projectId, npcRef, limit) =>
-  http.get(`/api/projects/${projectId}/npc-state/history`, {
+  http.get(`/api/worlds/${projectId}/npc-state/history`, {
     params: { npcRef, limit }
   })

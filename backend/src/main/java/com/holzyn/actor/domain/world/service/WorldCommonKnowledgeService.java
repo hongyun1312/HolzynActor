@@ -85,6 +85,24 @@ public class WorldCommonKnowledgeService {
     private UsageLogService usageLogService;
 
     /**
+     * 世界闸门（V1.1.2-beta.1 M4）：世界未挂载时定期扫描必须<b>零 DB 写入、零 AI 调用</b>（AC12）。
+     *
+     * <p>本服务是这条纪律里最贵的一个：{@link #scanAndBackfillNow()} 会对"世界观变过"的项目
+     * 直接调 chat 网关生成常识——未挂载时跑一趟就是在没有世界的情况下白烧 token。</p>
+     */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.WorldGate worldGate;
+
+    /** 经世界闸门执行；未装配闸门（单测）时直接执行 */
+    private void gated(String name, Runnable body) {
+        if (worldGate == null) {
+            body.run();
+        } else {
+            worldGate.tryMaintenance(name, body);
+        }
+    }
+
+    /**
      * 依最新世界观生成/更新某项目的世界常识摘要（同步调用，含 AI）。
      * <p>幂等语义：世界观未变化（updatedAt 不晚于常识生成时间）→ 跳过；AI 输出
      * 过短/空 → 保留旧值并 WARN；AI 失败 → 保留旧值并 WARN（fail-open 零阻断）。</p>
@@ -132,6 +150,11 @@ public class WorldCommonKnowledgeService {
      */
     @Scheduled(fixedDelayString = "${holzyn.actor.world.common-knowledge.scan-interval-ms:21600000}")
     public void scanAndBackfill() {
+        gated("WorldCommonKnowledgeService.scanAndBackfill", this::scanAndBackfillNow);
+    }
+
+    /** 扫描体（经世界闸门之后才允许扫库/调用 AI） */
+    private void scanAndBackfillNow() {
         List<ActorWorldSetting> all;
         try {
             all = worldSettingRepository.findAll();

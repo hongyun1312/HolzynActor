@@ -25,7 +25,7 @@
  *
  * <p>设计要点：</p>
  * <ul>
- *   <li>只描述**相对路径**（不含 /project/:id 前缀），由 {@link itemPath} 拼装，项目切换自动跟随。</li>
+ *   <li>只描述**相对路径**（不含 /world/:id 前缀），由 {@link itemPath} 拼装，项目切换自动跟随。</li>
  *   <li>`aliases` 用于「同域合并入口」：旧路由（如 world/edit）仍可直接访问，但侧栏高亮仍落在合并入口上。</li>
  *   <li>图标名必须是 `harmonyIcons` 注册表内的名称（Element Plus 兼容名或 ic_public_* 文件名）；
  *       未注册的名字 HIcon 会渲染为空，因此本文件是图标名的白名单来源。</li>
@@ -91,18 +91,19 @@ export const DIALOGUE_ITEMS = [
  * 设置子页清单（**唯一事实来源**）。
  *
  * <p>V2.0（P1 设置收敛）背景：改造前设置被复制成三份——`/settings/*`(8) +
- * `/project/:id/settings/*`(8) + `/project/:id/dialogue/settings/*`(7)，共 23 条路由指向同一批组件；
+ * `/world/:id/settings/*`(8) + `/world/:id/dialogue/settings/*`(7)，共 23 条路由指向同一批组件；
  * 且「对谈」界面侧栏 9 项里有 6 项是设置子页（占比 67%），侧栏被设置淹没。
  * 现在：设置子页清单只在本处声明一次，供设置页内部的页内导航标签（PageTabs）与命令面板复用——
  * 侧栏只保留「设置」一个入口，进入设置后由设置页自己的标签切换子页
  * （域侧栏常驻，不再用「设置轨道」顶替侧栏，观感与其它项目页一致）。
  *
  * <p>{@code rel} 为相对 `settings/` 的路径段，绝对路径由使用方按界面前缀拼接
- * （`/project/:id/settings/<rel>` 或 `/project/:id/dialogue/settings/<rel>`）。</p>
+ * （`/world/:id/settings/<rel>` 或 `/world/:id/dialogue/settings/<rel>`）。</p>
  */
 export const SETTINGS_SUB_ITEMS = [
   { key: 'general', rel: 'general', name: '通用设置', icon: 'ic_public_settings', desc: '账户、主题外观、世界时钟、导入导出' },
   { key: 'apis', rel: 'apis', name: 'API 配置', icon: 'ic_public_connection', desc: '模型供应商与密钥' },
+  { key: 'decision-model', rel: 'decision-model', name: '决策模型', icon: 'ic_public_security', desc: '本地部署下载与运行形态（本机推理 / 远程 API）' },
   { key: 'prompts', rel: 'prompts', name: 'Prompt 模板', icon: 'ic_public_edit', desc: '场景模板覆盖与版本' },
   { key: 'usage', rel: 'usage', name: 'AI 用量', icon: 'ic_public_view_list', desc: 'Token、场景与模型用量统计' },
   { key: 'appearance', rel: 'appearance', name: '界面与布局', icon: 'ic_public_highlight', desc: '面板宽度、信息密度、抽屉固定与导览' },
@@ -128,8 +129,8 @@ export const DIALOGUE_SETTINGS_ITEMS = [
     name: '设置',
     icon: 'ic_public_settings',
     path: 'dialogue/settings/general',
-    aliases: ['dialogue/settings/apis', 'dialogue/settings/prompts', 'dialogue/settings/usage', 'dialogue/settings/appearance', 'dialogue/settings/assistant', 'dialogue/settings/update'],
-    desc: '通用 / API / Prompt / 用量 / 界面 / 助手 / 玩家档案 / 更新'
+    aliases: ['dialogue/settings/apis', 'dialogue/settings/decision-model', 'dialogue/settings/prompts', 'dialogue/settings/usage', 'dialogue/settings/appearance', 'dialogue/settings/assistant', 'dialogue/settings/update'],
+    desc: '通用 / API / 决策模型 / Prompt / 用量 / 界面 / 助手 / 玩家档案 / 更新'
   }
 ]
 
@@ -150,11 +151,11 @@ export const NAV_ITEMS = [
   // 时钟/速率/演化控制条在新首页与仪表盘），路由 /evolve 已一并移除（P2 顺手清理，2026-10-15）。
   // { key: 'evolve', domain: 'world', name: '世界演化', icon: 'ic_public_refresh', path: 'evolve', desc: '世界模拟控制台' },
   { key: 'timeline', domain: 'world', name: '时间线', icon: 'ic_public_clock', path: 'timeline', desc: '事件竖轴与行动记录' },
-  // V2.0 §4.2 P5（孤立页归位）：/project/:id/init（世界初始化 6 步工作流）**刻意不在此登记**。
+  // V2.0 §4.2 P5（孤立页归位）：/world/:id/init（世界初始化 6 步工作流）**刻意不在此登记**。
   // 它的定位是「项目创建向导的续接流程页」，只在两种情形出现：① 新建项目后自动进入；
   // ② 世界地图页没有世界数据时给出「去初始化」按钮。把它放进常驻导航会让「一次性流程」
   // 与「日常页面」混在一起（这也是审计里「导航项语义混杂」的来源之一）。
-  // 路由本身保留并可用（/project/:id/init，见 router/index.js 的 project-init），旧深链不失效。
+  // 路由本身保留并可用（/world/:id/init，见 router/index.js 的 project-init），旧深链不失效。
 
   // ===== 域② 角色 =====
   { key: 'characters', domain: 'cast', name: 'NPC 角色', icon: 'ic_public_contacts', path: 'characters', desc: '特殊 NPC 档案、记忆与人格面具' },
@@ -232,10 +233,10 @@ export function isItemActive(item, currentPath, projectId) {
   })
 }
 
-/** 拼装项目内绝对路径（`/project/:id/<rel>`）；projectId 为空时返回 `#`（调用方应避免渲染） */
+/** 拼装项目内绝对路径（`/world/:id/<rel>`）；projectId 为空时返回 `#`（调用方应避免渲染） */
 export function itemPath(projectId, relPath) {
   if (projectId === null || projectId === undefined || projectId === '') return '#'
-  return `/project/${projectId}/${relPath}`
+  return `/world/${projectId}/${relPath}`
 }
 
 /** 由当前路由路径反查命中的导航项（用于侧栏高亮与顶栏标题） */
@@ -277,7 +278,7 @@ export function interfaceInfo(key) {
  */
 export function interfaceOfPath(currentPath, projectId) {
   if (projectId != null && projectId !== '') {
-    const prefix = `/project/${projectId}/dialogue`
+    const prefix = `/world/${projectId}/dialogue`
     if (currentPath === prefix || currentPath.startsWith(prefix + '/')) return 'dialogue'
   }
   return 'fusheng'

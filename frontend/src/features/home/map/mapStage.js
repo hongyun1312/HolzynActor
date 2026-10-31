@@ -36,7 +36,7 @@ import { buildGroundLayer } from './mapRenderGround'
 import { buildRoadLayer } from './mapRenderRoads'
 import { drawCharacters } from './mapRenderCharacters'
 import { NIGHT_TINT } from './mapPalette'
-import { boundsOf } from './mapGeometry'
+import { boundsOf, pointAtArc, polylineLength } from './mapGeometry'
 
 /** 缩放范围（px/米）：0.12 ≈ 整岛塞进窄栏；24 ≈ 一栋房子占满屏幕。 */
 const MIN_SCALE = 0.12
@@ -51,8 +51,14 @@ const CLUSTER_PX_PER_M = 0.24
 /** 时间流速：现实 1 秒 = 世界 1 分钟（一天 24 分钟）。 */
 const MINUTES_PER_SECOND = 1
 
-/** 换场地点的走动用时（世界分钟）：跨段时人物「走过去」，而不是瞬移。 */
-const WALK_MINUTES = 4
+/**
+ * 现实 1 秒 = 世界 60 秒（与 MINUTES_PER_SECOND 同源，只是换成秒）。
+ *
+ * <p>为什么要有这个换算：服务端给的是「游戏秒」（轨迹的出发/到达都是游戏秒），
+ * 而前端推进用的是真实毫秒。两个单位不统一，插值就会慢 60 倍或快 60 倍——
+ * 表现是「人走到一半突然瞬移到终点」。</p>
+ */
+const GAME_SECONDS_PER_REAL_SECOND = MINUTES_PER_SECOND * 60
 
 /** 角色重绘节流（毫秒）：点跟着时钟走，不需要每帧重画。 */
 const CHAR_TICK_MS = 120
@@ -113,12 +119,18 @@ export class MapStage {
     // ---- 环境（季节/天气/潮汐）----
     this.ambient = null
     this.ambientLayer = null
-    // ---- 角色时钟（日程锦点 → 图上位置）----
+    // ---- 角色时钟（服务端权威坐标 → 图上位置）----
     this.gameMinute = null       // 当天第几分钟（null=未启动）
     this._charTimer = null
-    this._clockBase = 0          // 时钟起点（世界分钟）
-    this._clockAt = 0            // 时钟起点对应的 performance.now()
-    this._charShadow = []        // 段切换时的起点（做走过去插值）
+    this._serverGameSecond = 0   // 服务端给的「此刻游戏秒」（快照锚点）
+    this._serverAt = 0           // 快照到达时的本地时间戳
+    this._clockPaused = false    // 世界是否暂停（暂停就停表，别自己往前跑）
+    this._actors = []            // 服务端角色快照（含在途轨迹）
+    // ---- 布局编辑（拖拽/旋转草稿；保存前只在本地生效）----
+    this.editMode = false
+    this.drafts = new Map()      // code → {code,name,baseX,baseZ,baseRot,x,z,rot}
+    this.editSelectedCode = ''   // 当前选中的建筑 code
+    this.featureDrag = null      // 拖拽建筑中的指针状态
   }
 
   /**
@@ -178,6 +190,10 @@ export class MapStage {
    */
   setBundle(bundle) {
     this.bundle = bundle || null
+    // 新数据 = 服务端真相：本地草稿一律作废（保存成功后也会走到这里）
+    this.drafts = new Map()
+    this.editSelectedCode = ''
+    this.featureDrag = null
     this.bounds = boundsOf((bundle?.features || []).filter((f) => f?.kind === 'building'))
     this.hitCache = (bundle?.features || []).map((f) => ({
       f,
@@ -396,6 +412,9 @@ export class MapStage {
     }
     this.featureLayer = next
     this.ensureOrder()
+    // LOD 换档会重建整个要素层：草稿（拖了一半的房子）必须重新贴回去，
+    // 否则用户轻轻滚一下滚轮，刚拖好的位置就"弹回原位"了。
+    this.reapplyDrafts()
   }
 
   /** 聚合层（极低倍下的聚落轮廓）。 */
@@ -504,47 +523,114 @@ export class MapStage {
   buildCharactersFromBundle(bundle) {
     this.stopCharacterClock()
     const raw = Array.isArray(bundle?.characters) ? bundle.characters : []
-    this.characters = raw.map((c) => ({
-      key: c?.ref || c?.name || '',
-      ref: c?.ref || '',
-      name: c?.name || '',
-      activity: c?.activity || '',
-      activityLabel: c?.activityLabel || '',
-      indoor: !!c?.indoor,
-      segments: Array.isArray(c?.segments) ? c.segments : [],
-      x: 0,
-      z: 0,
-      special: !!c?.special,
-      selected: false
-    })).filter((c) => c.segments.length > 0)
+    this.characters = raw.map((c) => {
+      const segs = Array.isArray(c?.segments) ? c.segments : []
+      const first = segs[0] || null
+      const x = Number(c?.x)
+      const z = Number(c?.z)
+      // 后端已经把「此刻坐标」叠进来了；没有就退回日程首段落点（不能退到 (0,0)：那是海角）
+      const hasPos = Number.isFinite(x) && Number.isFinite(z) && (x !== 0 || z !== 0)
+      return {
+        key: c?.ref || c?.name || '',
+        ref: c?.ref || '',
+        name: c?.name || '',
+        activity: c?.activity || '',
+        activityLabel: c?.activityLabel || '',
+        indoor: !!c?.indoor,
+        segments: segs,
+        x: hasPos ? x : Number(first?.x ?? 0),
+        z: hasPos ? z : Number(first?.z ?? 0),
+        heading: Number(c?.heading ?? 0),
+        status: c?.status || 'static',
+        path: null,
+        special: !!c?.special,
+        selected: false
+      }
+    }).filter((c) => c.ref || c.segments.length > 0)
+    if (bundle?.clock) this.applyClock(bundle.clock)
     if (this.characters.length === 0) {
       this.redrawCharacters()
       return
     }
-    const startMinute = Number(this.ambient?.minuteOfDay)
-    // 世界时钟：起点用后端烘图时的那一刻（季节/天气/潮汐与底图同一时刻），然后按 1 秒 1 分钟走。
-    this._clockBase = Number.isFinite(startMinute) ? startMinute : 8 * 60
-    this._clockAt = nowMs()
-    this.gameMinute = this._clockBase
-    this.placeCharacters(this.gameMinute, [])
+    this.placeFromActors()
+    this.redrawCharacters()
     this.startCharacterClock()
+  }
+
+  /**
+   * 采用服务端时钟（唯一时间源）。
+   *
+   * <p><b>为什么前端不再自己起一条时间河</b>：旧实现从 ambient.minuteOfDay 起算、按 1 秒 1 分钟
+   * 一路往前跑——世界暂停了它照跑，世界倍速了它还是 1:1。于是「后端说天黑了、图上还是下午」。
+   * 现在时间由服务端给锚点 + 本地只在两次快照之间推算，暂停即停表。</p>
+   *
+   * @param {object} clock {gameSecond, paused, rate}
+   */
+  applyClock(clock) {
+    const gs = Number(clock?.gameSecond)
+    if (!Number.isFinite(gs)) return
+    this._serverGameSecond = gs
+    this._serverAt = nowMs()
+    this._clockPaused = !!clock?.paused
+    this.gameMinute = ((gs / 60) % 1440 + 1440) % 1440
+  }
+
+  /**
+   * 应用一次服务端角色快照（{@code GET /map/actors}）。
+   *
+   * <p>坐标与轨迹都来自后端：前端只做「按游戏秒在折线上取点」这一件事。
+   * 这样图上演的位置就是 AI 决策读到的位置（验收 A4 的对账基础）。</p>
+   *
+   * @param {object} payload {clock, actors:[{ref,x,z,heading,status,indoor,activity,path}]}
+   */
+  applyActorSnapshot(payload) {
+    if (!payload) return
+    if (payload.clock) this.applyClock(payload.clock)
+    const actors = Array.isArray(payload.actors) ? payload.actors : []
+    if (actors.length === 0) return
+    this._actors = actors
+    const byRef = new Map(this.characters.map((c) => [c.ref, c]))
+    for (const a of actors) {
+      const c = byRef.get(a?.ref)
+      if (!c) continue
+      c.activity = a.activity || c.activity || ''
+      c.indoor = !!a.indoor
+      c.heading = Number(a.heading || 0)
+      c.status = a.status || 'static'
+      const path = a.path && Array.isArray(a.path.points) && a.path.points.length >= 2 ? a.path : null
+      c.path = path
+      if (!path) {
+        const x = Number(a.x)
+        const z = Number(a.z)
+        if (Number.isFinite(x) && Number.isFinite(z)) {
+          c.x = x
+          c.z = z
+        }
+      }
+    }
+    this.placeFromActors()
+    this.redrawCharacters()
+  }
+
+  /** 此刻的游戏秒（暂停则冻结在快照锚点）。 */
+  currentGameSecond() {
+    if (this._clockPaused || !this._serverAt) return this._serverGameSecond
+    return this._serverGameSecond + ((nowMs() - this._serverAt) / 1000) * GAME_SECONDS_PER_REAL_SECOND
   }
 
   /** 启动定时器（节流重绘；不占渲染帧）。 */
   startCharacterClock() {
     if (this._charTimer) return
-    this._days = Math.floor(this._clockBase / 1440)
+    this._days = Math.floor(this.currentGameSecond() / 86400)
     const tick = () => {
       if (this.destroyed || !this.app) return
-      const raw = this._clockBase
-        + ((nowMs() - this._clockAt) / 1000) * MINUTES_PER_SECOND
-      const wrapped = ((raw % 1440) + 1440) % 1440
-      const day = Math.floor(raw / 1440)
+      const gs = this.currentGameSecond()
+      const day = Math.floor(gs / 86400)
       const crossedDay = day !== this._days
       if (crossedDay) this._days = day
-      const prev = this.gameMinute
+      const wrapped = ((gs / 60) % 1440 + 1440) % 1440
       this.gameMinute = wrapped
-      this.placeCharacters(wrapped, prev == null ? [] : [prev])
+      this.placeFromActors()
       this.redrawCharacters()
       if (this.onClock) this.onClock({ minute: wrapped, crossedDay })
     }
@@ -560,34 +646,28 @@ export class MapStage {
   }
 
   /**
-   * 按分钟把每个人放到他此刻该在的地方。
+   * 把每个角色放到他此刻的位置：有轨迹就沿轨迹按游戏秒取点，没有就停在服务端坐标。
    *
-   * @param {number} minute 当天分钟（0~1439）
-   * @param {number[]} prevMinutes 上一拍分钟（用于判断是否刚跨段 → 做走动插值）
+   * <p><b>为什么这里不再算「从上一段走到下一段」</b>：路线已经在后端算好了（沿路、绕房、过桥），
+   * 前端再插值一次只会得到一条「两点一线的穿墙斜线」，而且与服务端对不上。
+   * 现在这里只做一件纯函数的事：{@code pointAt(折线, t × 总长)}。</p>
    */
-  placeCharacters(minute, prevMinutes = []) {
+  placeFromActors() {
+    const gs = this.currentGameSecond()
     for (const c of this.characters) {
-      const segs = c.segments
-      const cur = segmentAt(segs, minute)
-      if (!cur) continue
-      const from = prevMinutes.length ? segmentAt(segs, prevMinutes[0]) : null
-      const cx = Number(cur.x)
-      const cz = Number(cur.z)
-      const fx = from ? Number(from.x) : cx
-      const fz = from ? Number(from.z) : cz
-      // 刚跨段（或刚加载）时把上一段的位置记成起点，接下来 WALK_MINUTES 分钟内线性走过去。
-      if (!c._segStart || c._segKey !== cur.startMinute) {
-        c._segStart = { x: fx, z: fz, at: cur.startMinute }
-        c._segKey = cur.startMinute
-      }
-      const walk = Math.min(1, Math.max(0, (minute - c._segStart.at) / WALK_MINUTES))
-      c.x = c._segStart.x + (cx - c._segStart.x) * walk
-      c.z = c._segStart.z + (cz - c._segStart.z) * walk
-      c.activity = cur.activity || ''
-      c.activityLabel = cur.label || cur.activityLabel || ''
-      c.indoor = !!cur.indoor
-      c.placeRef = cur.placeRef || ''
-      c.featureCode = cur.featureCode || ''
+      const path = c.path
+      if (!path) continue
+      const points = path.points
+      const depart = Number(path.departGameSecond)
+      const arrive = Number(path.arriveGameSecond)
+      const total = polylineLength(points)
+      if (!Number.isFinite(total) || total <= 0) continue
+      const span = Math.max(1, (Number.isFinite(arrive) ? arrive : depart) - (Number.isFinite(depart) ? depart : 0))
+      const t = Math.max(0, Math.min(1, (gs - (Number.isFinite(depart) ? depart : 0)) / span))
+      const p = pointAtArc(points, t * total)
+      if (!p) continue
+      c.x = p[0]
+      c.z = p[1]
     }
   }
 
@@ -598,6 +678,176 @@ export class MapStage {
       c.selected = !!key && (c.ref === key || c.key === key)
     }
     this.redrawCharacters()
+  }
+
+  // ==================== 布局编辑（拖拽/旋转/草稿） ====================
+
+  /**
+   * 开/关编辑态。
+   *
+   * <p>编辑态下：点建筑 = 选中（建立一个草稿），拖 = 移动（0.5 米吸附），
+   * 空白处拖 = 平移地图。关掉编辑态会把草稿全部还原——「取消」不该留下半成品。</p>
+   *
+   * @param {boolean} on 是否编辑
+   */
+  setEditMode(on) {
+    const next = !!on
+    if (this.editMode && !next) this.clearDrafts(true)
+    this.editMode = next
+    if (this.host) this.host.style.cursor = next ? 'default' : ''
+    this.emitEdit()
+  }
+
+  /** 编辑态摘要（给 Vue 面板渲染）。 */
+  editSnapshot() {
+    const drafts = []
+    for (const d of this.drafts.values()) {
+      if (d.x === d.baseX && d.z === d.baseZ && d.rot === d.baseRot) continue
+      drafts.push({ code: d.code, name: d.name, x: d.x, z: d.z, rot: d.rot })
+    }
+    let selected = null
+    if (this.editSelectedCode) {
+      const d = this.drafts.get(this.editSelectedCode)
+      const f = this.featureOf(this.editSelectedCode)
+      selected = {
+        code: this.editSelectedCode,
+        name: (f && f.name) || this.editSelectedCode,
+        x: d ? d.x : Number(f?.x) || 0,
+        z: d ? d.z : Number(f?.z) || 0,
+        rot: d ? d.rot : Number(f?.rot) || 0,
+        moved: !!d && (d.x !== d.baseX || d.z !== d.baseZ || d.rot !== d.baseRot)
+      }
+    }
+    return { on: this.editMode, drafts, selected }
+  }
+
+  /** 业务要素（bundle 里那条）。 */
+  featureOf(code) {
+    return (this.bundle?.features || []).find((f) => f && f.code === code) || null
+  }
+
+  /** 屏幕点选中建筑（建立一个草稿）。 */
+  selectFeatureAt(mx, mz) {
+    const hit = this.pickAt(mx, mz)
+    if (!hit || hit.kind !== 'building') {
+      this.editSelectedCode = ''
+      this.emitEdit()
+      return null
+    }
+    this.editSelectedCode = hit.code
+    this.ensureDraft(hit)
+    this.emitEdit()
+    return hit
+  }
+
+  /** 建立草稿（记住原值，供取消/还原用）。 */
+  ensureDraft(f) {
+    if (!this.drafts.has(f.code)) {
+      this.drafts.set(f.code, {
+        code: f.code,
+        name: f.name || f.code,
+        baseX: Number(f.x) || 0,
+        baseZ: Number(f.z) || 0,
+        baseRot: Number(f.rot) || 0,
+        x: Number(f.x) || 0,
+        z: Number(f.z) || 0,
+        rot: Number(f.rot) || 0
+      })
+    }
+    return this.drafts.get(f.code)
+  }
+
+  /** 找到某栋建筑的 Pixi 图元。 */
+  graphicsOf(code) {
+    const kids = this.featureLayer?.children || []
+    return kids.find((g) => g && g.__feature && g.__feature.code === code) || null
+  }
+
+  /**
+   * 把草稿画到图上。
+   *
+   * <p>为什么用 pivot + rotation 而不是重建图元：图元是按绝对米坐标画的，
+   * 把 pivot 设到原中心、position 设到新中心，就等于「绕自己的中心转 + 平移到新位置」，
+   * 一次赋值就能移动一整栋带影子/挑檐/瓦垄的房子——重建一次要几十毫秒，拖拽会掉帧。</p>
+   */
+  applyDraftVisual(d) {
+    if (!d) return
+    const g = this.graphicsOf(d.code)
+    if (!g) return
+    g.pivot.set(d.baseX, d.baseZ)
+    g.position.set(d.x, d.z)
+    g.rotation = ((d.rot - d.baseRot) * Math.PI) / 180
+  }
+
+  /** 重建要素层后把草稿贴回去。 */
+  reapplyDrafts() {
+    for (const d of this.drafts.values()) this.applyDraftVisual(d)
+  }
+
+  /** 拖动选中建筑到（米）。 */
+  moveSelectedTo(x, z) {
+    const d = this.drafts.get(this.editSelectedCode)
+    if (!d) return
+    d.x = Math.round((Number(x) || 0) * 2) / 2
+    d.z = Math.round((Number(z) || 0) * 2) / 2
+    this.applyDraftVisual(d)
+    this.emitEdit()
+  }
+
+  /** 旋转选中建筑（度，15 度吸附）。 */
+  rotateSelected(deltaDeg) {
+    const d = this.drafts.get(this.editSelectedCode)
+    if (!d) return
+    const next = d.rot + (Number(deltaDeg) || 0)
+    d.rot = ((Math.round(next / 15) * 15) % 360 + 360) % 360
+    this.applyDraftVisual(d)
+    this.emitEdit()
+  }
+
+  /** 把选中建筑放回原位。 */
+  resetSelected() {
+    const d = this.drafts.get(this.editSelectedCode)
+    if (!d) return
+    d.x = d.baseX
+    d.z = d.baseZ
+    d.rot = d.baseRot
+    this.applyDraftVisual(d)
+    this.emitEdit()
+  }
+
+  /**
+   * 清空草稿。
+   *
+   * @param {boolean} revert true=把图元还原到服务端坐标（取消编辑/保存成功重拉）
+   */
+  clearDrafts(revert = true) {
+    if (revert) {
+      for (const d of this.drafts.values()) {
+        d.x = d.baseX
+        d.z = d.baseZ
+        d.rot = d.baseRot
+        this.applyDraftVisual(d)
+      }
+    }
+    this.drafts.clear()
+    this.editSelectedCode = ''
+    this.featureDrag = null
+    this.emitEdit()
+  }
+
+  /** 待提交的编辑（只回变更项）。 */
+  draftEdits() {
+    const out = []
+    for (const d of this.drafts.values()) {
+      if (d.x === d.baseX && d.z === d.baseZ && d.rot === d.baseRot) continue
+      out.push({ code: d.code, x: d.x, z: d.z, rotation: d.rot, moveGroup: true })
+    }
+    return out
+  }
+
+  /** 通知外部「编辑态变了」。 */
+  emitEdit() {
+    if (typeof this.onEditChange === 'function') this.onEditChange(this.editSnapshot())
   }
 
   /** 按当前相机重投影角色点（屏幕空间，恒定像素大小）。 */
@@ -811,10 +1061,40 @@ export class MapStage {
     this._onPointerDown = (e) => {
       if (e.button !== 0) return
       const p = local(e)
+      if (this.editMode) {
+        const m = this.toMap(p.x, p.y)
+        const hit = this.pickAt(m.x, m.z)
+        if (hit && hit.kind === 'building') {
+          const f = this.selectFeatureAt(m.x, m.z)
+          const d = this.drafts.get(f?.code)
+          if (d) {
+            this.featureDrag = { id: e.pointerId, sx: p.x, sy: p.y, ox: d.x, oz: d.z }
+            canvas.setPointerCapture?.(e.pointerId)
+          }
+          return
+        }
+        // 空白处：清掉选中，继续按「平移地图」处理（编辑态也要能挪视角）
+        this.editSelectedCode = ''
+        this.emitEdit()
+      }
       this.drag = { id: e.pointerId, sx: p.x, sy: p.y, lx: p.x, ly: p.y, moved: 0 }
       canvas.setPointerCapture?.(e.pointerId)
     }
     this._onPointerMove = (e) => {
+      // 拖动建筑（编辑态）：位移换算成米、0.5 米吸附、实时改图元
+      if (this.featureDrag && e.pointerId === this.featureDrag.id) {
+        const p = local(e)
+        const dxm = (p.x - this.featureDrag.sx) / this.scale
+        const dzm = (p.y - this.featureDrag.sy) / this.scale
+        const d = this.drafts.get(this.editSelectedCode)
+        if (d) {
+          d.x = Math.round((this.featureDrag.ox + dxm) * 2) / 2
+          d.z = Math.round((this.featureDrag.oz + dzm) * 2) / 2
+          this.applyDraftVisual(d)
+          this.emitEdit()
+        }
+        return
+      }
       if (!this.drag || e.pointerId !== this.drag.id) return
       const p = local(e)
       const dx = p.x - this.drag.lx
@@ -828,6 +1108,10 @@ export class MapStage {
       }
     }
     this._onPointerUp = (e) => {
+      if (this.featureDrag && e.pointerId === this.featureDrag.id) {
+        this.featureDrag = null
+        return
+      }
       if (!this.drag || e.pointerId !== this.drag.id) return
       const d = this.drag
       this.drag = null
@@ -919,25 +1203,6 @@ function nowMs() {
     return performance.now()
   }
   return Date.now()
-}
-
-/**
- * 找到某一分钟落在日程的哪一段（段按 startMinute 升序，尾段 endMinute=1440）。
- *
- * @param {object[]} segments 日程段
- * @param {number} minute 当天分钟
- * @returns {object|null} 命中的段
- */
-function segmentAt(segments, minute) {
-  if (!Array.isArray(segments) || segments.length === 0) return null
-  const m = ((Number(minute) || 0) % 1440 + 1440) % 1440
-  let hit = null
-  for (const s of segments) {
-    const a = Number(s?.startMinute) || 0
-    const b = Number(s?.endMinute)
-    if (m >= a && (Number.isFinite(b) ? m < b : true)) hit = s
-  }
-  return hit || segments[segments.length - 1]
 }
 
 /**

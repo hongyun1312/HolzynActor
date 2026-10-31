@@ -152,18 +152,45 @@ public class DebugDbService {
     }
 
     /**
+     * 白名单表（只读快照）。
+     *
+     * <p>开发者数据页要按「系统库 / 存档库」分别列自己的表，但浏览权限仍必须走同一份
+     * 白名单——否则等于给调试面开了第二个入口，两处规则迟早漂移。</p>
+     *
+     * @return 白名单表名集合
+     */
+    public static Set<String> whitelistTables() {
+        return WHITELIST_TABLES;
+    }
+
+    /**
      * 白名单表清单（含行数与列数，供左侧表清单展示）。
      *
      * @return 表信息列表 [{table,rows,columns}]
      */
     public List<Map<String, Object>> tables() {
+        return tables(jdbcTemplate, WHITELIST_TABLES);
+    }
+
+    /**
+     * 用指定连接源 + 指定白名单列表（开发者数据页按范围浏览时使用）。
+     *
+     * @param jdbc 连接源（目录库 / 某存档的世界库）
+     *
+     * @param whitelist 该范围允许浏览的表
+     *
+     * @return 表信息列表 [{table,rows,columns}]；表不存在时 rows/columns = -1
+     */
+    public List<Map<String, Object>> tables(JdbcTemplate jdbc, Set<String> whitelist) {
         List<Map<String, Object>> list = new ArrayList<>();
-        for (String table : WHITELIST_TABLES) {
+        List<String> sorted = new ArrayList<>(whitelist);
+        sorted.sort(String::compareTo);
+        for (String table : sorted) {
             try {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("table", table);
-                m.put("rows", count(table));
-                m.put("columns", safeColumns(table).size());
+                m.put("rows", count(jdbc, table));
+                m.put("columns", safeColumns(jdbc, table).size());
                 list.add(m);
             } catch (Exception e) {
                 // 表不存在（旧库缺表）时跳过
@@ -190,13 +217,35 @@ public class DebugDbService {
      * @param keyword 关键字（可空；对安全文本列做不区分大小写包含匹配）
      */
     public Map<String, Object> browse(String table, int page, int size, String keyword) {
-        String safeTable = requireWhitelist(table);
-        List<String> cols = safeColumns(safeTable);
+        return browse(jdbcTemplate, WHITELIST_TABLES, table, page, size, keyword);
+    }
+
+    /**
+     * 用指定连接源 + 白名单只读分页浏览一张表。
+     *
+     * @param jdbc 连接源（目录库 / 某存档的世界库）
+     *
+     * @param whitelist 该范围允许浏览的表
+     *
+     * @param table 表名（白名单）
+     *
+     * @param page 页码（从 1 起）
+     *
+     * @param size 每页条数（默认 50，上限 200）
+     *
+     * @param keyword 关键字（可空；对安全文本列做不区分大小写包含匹配）
+     *
+     * @return 分页结果 {table,page,size,total,columns,items}
+     */
+    public Map<String, Object> browse(JdbcTemplate jdbc, Set<String> whitelist, String table,
+                                      int page, int size, String keyword) {
+        String safeTable = requireWhitelist(whitelist, table);
+        List<String> cols = safeColumns(jdbc, safeTable);
         int pageNo = Math.max(1, page);
         int pageSize = Math.min(Math.max(1, size), MAX_SIZE);
         String kw = keyword == null || keyword.isBlank() ? null : keyword.trim();
 
-        long total = count(safeTable);
+        long total = count(jdbc, safeTable);
         int from = (pageNo - 1) * pageSize;
 
         StringBuilder sql = new StringBuilder("SELECT ")
@@ -219,7 +268,7 @@ public class DebugDbService {
         params.add(pageSize);
         params.add(from);
 
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql.toString(), params.toArray());
+        List<Map<String, Object>> rows = jdbc.queryForList(sql.toString(), params.toArray());
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("table", safeTable);
@@ -234,28 +283,32 @@ public class DebugDbService {
     /**
      * 表行数。
      *
+     * @param jdbc 连接源
+     *
      * @param table 表名（已白名单校验）
      *
      * @return 行数
      */
-    private long count(String table) {
-        Long n = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Long.class);
+    private long count(JdbcTemplate jdbc, String table) {
+        Long n = jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Long.class);
         return n == null ? 0 : n;
     }
 
     /**
      * 表名白名单校验（未命中抛 400）。
      *
+     * @param whitelist 白名单
+     *
      * @param table 表名
      *
      * @return 规范化后的表名（小写）
      */
-    private String requireWhitelist(String table) {
+    private String requireWhitelist(Set<String> whitelist, String table) {
         if (table == null) {
             throw new BizException(400, "表名不能为空");
         }
         String lower = table.trim().toLowerCase(Locale.ROOT);
-        if (!WHITELIST_TABLES.contains(lower)) {
+        if (!whitelist.contains(lower)) {
             throw new BizException(400, "表不在白名单：仅允许调试只读浏览指定表");
         }
         return lower;
@@ -264,12 +317,14 @@ public class DebugDbService {
     /**
      * 取表的可展示安全列（JDBC 元数据取全列 − 敏感列黑名单）。
      *
+     * @param jdbc 连接源
+     *
      * @param table 表名（已白名单校验）
      *
      * @return 安全列名列表（升序，与库一致）
      */
-    private List<String> safeColumns(String table) {
-        try (Connection conn = jdbcTemplate.getDataSource().getConnection()) {
+    private List<String> safeColumns(JdbcTemplate jdbc, String table) {
+        try (Connection conn = jdbc.getDataSource().getConnection()) {
             DatabaseMetaData meta = conn.getMetaData();
             Set<String> cols = new LinkedHashSet<>();
             try (ResultSet rs = meta.getColumns(conn.getCatalog(), null, table, null)) {

@@ -18,11 +18,11 @@
 
 package com.holzyn.actor.domain.growth.evolution;
 
-import com.holzyn.actor.ai.nanojev.NanoJevQuestion;
-import com.holzyn.actor.ai.nanojev.NanoJevState;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionTemplates;
+import com.holzyn.actor.ai.decision.DecisionQuestion;
+import com.holzyn.actor.ai.decision.DecisionState;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
+import com.holzyn.actor.ai.decision.gate.DecisionTemplates;
 import com.holzyn.actor.common.NpcRefs;
 import com.holzyn.actor.domain.agent.runtime.RealTimeDecisionService;
 import com.holzyn.actor.domain.agent.runtime.StimulusType;
@@ -47,13 +47,13 @@ import java.util.concurrent.Executors;
 /**
  * 意外事件判定。
  * <p><b>定位</b>：世界里的「意外」不该全部由脚本写死——真人会扭伤、受凉、失手打翻东西，
- * 危险劳作/恶劣天气/虚弱疲劳时概率略高，但总体仍是低概率事件。NanoJev boolean 低概率采样
+ * 危险劳作/恶劣天气/虚弱疲劳时概率略高，但总体仍是低概率事件。决策模型 boolean 低概率采样
  * 让 NPC 偶发小意外，写进 L1 感知记忆 + 触发一次即时决策（WORLD_EVENT 刺激），影响其当下
  * 状态而不致死（与既有世界事件体系共存，不新增事件类型）。</p>
  * <p><b>开关</b>：{@code scenes.accident} <b>默认关</b>——仅调试开启时
  * 生效（boolean 场景 sample 采样天然低频，低概率项也会偶发选中）。默认关确保生产零成本。</p>
  * <p><b>执行模型</b>：异步虚拟线程执行、不进 tick 屏障；任何失败 fail-closed 零阻断。
- * 含 NanoJev 调用，<b>不带 {@code @Transactional}</b>（AiCallOutsideTransactionTest 反射守护）。</p>
+ * 含 决策模型 调用，<b>不带 {@code @Transactional}</b>（AiCallOutsideTransactionTest 反射守护）。</p>
  */
 @Slf4j
 @Service
@@ -67,9 +67,9 @@ public class AccidentJudge {
 
     // ==================== 依赖（字段注入，构造器不变——治理纪律） ====================
 
-    /** NanoJev 判定门 */
+    /** 决策模型 判定门 */
     @Autowired(required = false)
-    private NanoJevDecisionGate nanoJevDecisionGate;
+    private DecisionGate decisionGate;
 
     /** 角色主表（全 NPC 名单/名称/位置/当前行动） */
     @Autowired(required = false)
@@ -107,8 +107,8 @@ public class AccidentJudge {
         if (event.getImportance() == null || event.getImportance() < 2) {
             return; // 琐碎事件不值得意外判定
         }
-        if (nanoJevDecisionGate == null || !nanoJevDecisionGate.isEnabled(
-                NanoJevDecisionScenes.ACCIDENT)) {
+        if (decisionGate == null || !decisionGate.isEnabled(
+                DecisionScenes.ACCIDENT)) {
             return; // accident 场景未启用（默认关）→ 零成本跳过
         }
         executor.submit(() -> {
@@ -131,20 +131,20 @@ public class AccidentJudge {
         }
         String eventText = event.getContent().trim();
         Long gameSecond = event.getGameHour() == null ? null : event.getGameHour() * 3600L;
-        Map<String, NanoJevState> states = new LinkedHashMap<>();
+        Map<String, DecisionState> states = new LinkedHashMap<>();
         for (ActorCharacter ch : chars) {
             String npcRef = NpcRefs.of(ch.getId());
-            states.put(npcRef, NanoJevState.text(npcRef,
+            states.put(npcRef, DecisionState.text(npcRef,
                     buildStateText(projectId, ch, eventText, gameSecond),
                     accidentQuestions()));
         }
-        Map<String, NanoJevDecisionGate.BooleanOutcome> results =
-                nanoJevDecisionGate.booleanDecisions(projectId, NanoJevDecisionScenes.ACCIDENT,
+        Map<String, DecisionGate.BooleanOutcome> results =
+                decisionGate.booleanDecisions(projectId, DecisionScenes.ACCIDENT,
                         states, QID_ACCIDENT);
         int hits = 0;
         for (ActorCharacter ch : chars) {
             String npcRef = NpcRefs.of(ch.getId());
-            NanoJevDecisionGate.BooleanOutcome bo = results.get(npcRef);
+            DecisionGate.BooleanOutcome bo = results.get(npcRef);
             if (bo == null || !bo.adopted() || !bo.value()) {
                 continue;
             }
@@ -175,9 +175,9 @@ public class AccidentJudge {
     }
 
     /** 意外判定问题表（boolean；qid=QID_ACCIDENT）。 */
-    private static Map<String, NanoJevQuestion> accidentQuestions() {
-        Map<String, NanoJevQuestion> q = NanoJevState.newQuestions();
-        q.put(QID_ACCIDENT, NanoJevDecisionTemplates.accidentQuestion());
+    private static Map<String, DecisionQuestion> accidentQuestions() {
+        Map<String, DecisionQuestion> q = DecisionState.newQuestions();
+        q.put(QID_ACCIDENT, DecisionTemplates.accidentQuestion());
         return q;
     }
 

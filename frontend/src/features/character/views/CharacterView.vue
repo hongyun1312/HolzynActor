@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="character-view">
+  <div class="character-view project-col">
     <!-- 左栏：角色列表 -->
     <div class="char-side">
       <div class="side-header">
@@ -607,7 +607,7 @@
  * personaRenderText 按维切分，由 {@code PersonaArchivePanel} 渲染，含"原始 JSON"折叠面板；编辑入口置灰，
  * 编辑器属 G1b）／记忆（{@code CharacterMemoryPanel}，
  * 长期/工作/核心记忆 + 治理健康度 + 注入预览，接口调用在面板内）。</p>
- * <p>数据来源：/api/projects/{id}/characters、/api/characters/{id}/card(versions)、
+ * <p>数据来源：/api/worlds/{id}/characters、/api/characters/{id}/card(versions)、
  * /api/debug/npc-state、/api/debug/growth/*（记忆族接口见 CharacterMemoryPanel）。</p>
  */
 import { ref, reactive, computed, onMounted, nextTick, defineAsyncComponent } from 'vue'
@@ -1134,7 +1134,7 @@ async function saveChar() {
     ElMessage.success('角色已保存')
     // 全局拓扑页「补充」流程：保存成功后回到拓扑页（自动按名称全表扫描关联由后端完成）
     if (fromTopology) {
-      router.replace(`/project/${projectId}/topology`)
+      router.replace(`/world/${projectId}/topology`)
       return
     }
   } catch (e) { ElMessage.error(e.message || '保存失败') } finally { charDialog.saving = false }

@@ -31,6 +31,7 @@ public record WorldSettingVO(
         Integer version,
         String name,
         String genre,
+        String tone,
         String era,
         String geography,
         String factions,
@@ -52,7 +53,7 @@ public record WorldSettingVO(
      */
     public static WorldSettingVO of(ActorWorldSetting w) {
         return new WorldSettingVO(w.getId(), w.getProjectId(), w.getVersion(), w.getName(), w.getGenre(),
-                w.getEra(), w.getGeography(), w.getFactions(), w.getMagicSystem(), w.getCulture(),
+                w.getTone(), w.getEra(), w.getGeography(), w.getFactions(), w.getMagicSystem(), w.getCulture(),
                 w.getHistory(), w.getFreeText(), w.getStatus(), w.getWorldgenTaskId(),
                 w.getCreatedAt(), w.getUpdatedAt());
     }

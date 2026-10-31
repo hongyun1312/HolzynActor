@@ -86,6 +86,8 @@ class SceneRouterTest {
         // maxTokens 未覆盖 → 沿用类别档位
         assertEquals(2048, r.maxTokens());
         assertEquals(SceneRouter.SOURCE_SCENE, r.source());
+        // 逐场景覆盖不能丢掉类别：决策模型的选取依赖 category=decision
+        assertEquals("decision", r.category());
     }
 
     @Test

@@ -50,7 +50,7 @@ public class SceneController {
      *
      * @return 场景视图列表
      */
-    @GetMapping("/projects/{projectId}/scenes")
+    @GetMapping("/worlds/{projectId}/scenes")
     public R<List<Map<String, Object>>> list(@PathVariable("projectId") Long projectId) {
         return R.ok(sceneService.list(projectId));
     }
@@ -64,7 +64,7 @@ public class SceneController {
      *
      * @return 新增后的场景视图
      */
-    @PostMapping("/projects/{projectId}/scenes")
+    @PostMapping("/worlds/{projectId}/scenes")
     public R<Map<String, Object>> create(@PathVariable("projectId") Long projectId, @RequestBody(required = false) Map<String, Object> body) {
         return R.ok(sceneService.create(projectId, body));
     }
@@ -78,7 +78,7 @@ public class SceneController {
      *
      * @return 本次新增的场景视图列表
      */
-    @PostMapping("/projects/{projectId}/scenes/ai-generate")
+    @PostMapping("/worlds/{projectId}/scenes/ai-generate")
     public R<List<Map<String, Object>>> aiGenerate(@PathVariable("projectId") Long projectId,
                                                    @RequestBody(required = false) Map<String, Object> body) {
         return R.ok(sceneService.aiGenerate(projectId, currentUserProvider.currentUserId(), body));

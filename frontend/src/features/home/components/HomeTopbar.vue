@@ -306,8 +306,8 @@ const weatherHint = computed(() => {
 }
 
 .hm-clock { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.hm-clock-title { font-size: 11px; font-weight: 700; color: var(--hm-text-dim); display: flex; align-items: center; gap: 6px; }
-.hm-live { font-size: 10px; font-weight: 600; color: var(--hm-amber); display: inline-flex; align-items: center; gap: 4px; }
+.hm-clock-title { font-size: 12.5px; font-weight: 700; color: var(--hm-text-dim); display: flex; align-items: center; gap: 6px; }
+.hm-live { font-size: 12px; font-weight: 600; color: var(--hm-amber); display: inline-flex; align-items: center; gap: 4px; }
 .hm-live::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--hm-amber); }
 .hm-live.on { color: var(--hm-green); }
 .hm-live.on::before { background: var(--hm-green); box-shadow: 0 0 6px var(--hm-green); animation: pulse 1.2s infinite; }
@@ -325,7 +325,7 @@ const weatherHint = computed(() => {
   flex-shrink: 0; cursor: pointer;
 }
 .hm-run-label {
-  font-size: 10.5px; font-weight: 700; color: var(--hm-text-dim);
+  font-size: 12px; font-weight: 700; color: var(--hm-text-dim);
   white-space: nowrap; user-select: none;
 }
 .hm-run .el-switch { --el-switch-on-color: var(--hm-green, var(--state-success)); }
@@ -335,7 +335,7 @@ const weatherHint = computed(() => {
 .hm-state {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 1px 7px; border-radius: 999px;
-  font-size: 10.5px; font-weight: 700;
+  font-size: 12px; font-weight: 700;
   border: 1px solid var(--hm-border); color: var(--hm-text-dim);
   cursor: help; white-space: nowrap;
 }

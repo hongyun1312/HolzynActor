@@ -22,7 +22,7 @@ package com.holzyn.actor.domain.growth.romance;
  * 求婚判定插拔点。
  * <p><b>判定语义</b>：处于恋爱期（ROMANTIC 关系持续 ≥ 30 游戏日）的角色，是否向候选对象求婚。</p>
  * SCHEMA_JSON）；AI 失败 → 程序化兜底（恋爱期满且好感最高 → 求婚，确定性 0.7）。</p>
- * <p><b>NanoJev 替换契约（N 轨道）</b>：序列化为 choice question——
+ * <p><b>决策模型 替换契约（N 轨道）</b>：序列化为 choice question——
  * {@code state: "恋爱{romanceGameDays}游戏日，候选：{candidatesSummary}"}，
  * {@code question: {type:"choice", criteria:{propose:"求婚", wait:"再等等", give_up:"结束这段感情"}}}，
  * 输出概率分布选 max。N 轨道只换实现类。</p>

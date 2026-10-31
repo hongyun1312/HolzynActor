@@ -22,7 +22,7 @@ import http from './http'
 import { streamFetch } from '@/shared/sse/sseClient'
 
 /** 会话接口前缀 */
-const base = (projectId) => `/api/assistant/projects/${projectId}`
+const base = (projectId) => `/api/assistant/worlds/${projectId}`
 
 /**
  * 项目会话列表（按更新时间倒序）。

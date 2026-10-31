@@ -44,7 +44,7 @@ import java.util.Random;
  * <ul>
  * <li><b>低值区</b>（hunger&lt;45 / thirst&lt;45 / bladder&lt;35 / hygiene&lt;50）→ 生理行动
  * <b>候选注入</b>决策候选池（{@link SpaceDecisionCandidates.SpaceCandidate}，带「（倾向 x%）」
- * 情境权重，x=需求缺口比例），由既有空间候选选择链路（NanoJev space_decision choice）选择；
+ * 情境权重，x=需求缺口比例），由既有空间候选选择链路（决策模型 space_decision choice）选择；
  * 进食候选仅<b>三餐窗口</b>内注入（饮水/如厕/清洗不受窗口限制）；</li>
  * <li><b>危险区</b>（hunger&lt;20 / thirst&lt;20 / bladder&lt;15 / hygiene&lt;25）→ <b>程序化强制</b>
  * （0 AI）：任何决策触发源（周期/打断/兜底）都在 AI 之前命中本检查，直接产出生理行动；
@@ -58,7 +58,7 @@ import java.util.Random;
  * 动机层次「先处理低层需求」）／NEEDSIM（需求优先于日程调度——本服务危险区强制即此语义）。
  * 行动文本与 {@code NpcStateService.onNpcAction} 关键词恢复表对齐（用餐/饮水/如厕/洗漱），
  * 满足需求后状态自然回升、离开低值/危险区，形成「衰减→行动→恢复」闭环。</p>
- * <p><b>架构纪律</b>：纯程序化 0 AI（无 NanoJev/chat 调用）→ 无 {@code @Transactional} 约束；
+ * <p><b>架构纪律</b>：纯程序化 0 AI（无 决策模型/chat 调用）→ 无 {@code @Transactional} 约束；
  * 不持有领域权威（需求值权威=actor_state，配置权威=NpcStateProperties.Physio）；读状态经
  * {@code NpcStateService.stateFor} 门面、地点经 {@code NpcStateService.locationNames}（同一
  * 匹配口径）；静态纯函数可单测。</p>

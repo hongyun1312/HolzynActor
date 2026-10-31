@@ -35,8 +35,8 @@ import java.util.List;
  * 的角色生成聚集候选（带目标地点 → move_to），供 空间候选决策注入。</p>
  * <p><b>接线点两处</b>（特殊 NPC 与普通 NPC 决策管线同源，覆盖全量 NPC）：</p>
  * <ul>
- * <li>{@code DecisionService.trySpaceDecision}（特殊 NPC：NanoJev space_decision 空间候选）；</li>
- * <li>{@code NpcStateService.decideCrowdActionNanoJevFromSpace}（普通 NPC：crowd 空间候选）。</li>
+ * <li>{@code DecisionService.trySpaceDecision}（特殊 NPC：决策模型 space_decision 空间候选）；</li>
+ * <li>{@code NpcStateService.decideCrowdActionDecisionFromSpace}（普通 NPC：crowd 空间候选）。</li>
  * </ul>
  * <p><b>通用世界观纪律</b>：社交中心按<b>关键词</b>（名称或类型命中）识别、关键词可配，
  * 不绑定任何具体测试世界的地点名（对齐「Prompt 与代码不得绑定单一世界观」审计要求）。</p>

@@ -24,10 +24,23 @@ import java.time.LocalDateTime;
 /**
  * 角色视图对象（CharacterVO）。
  * <p>职责：向前端返回角色基础档案（含是否已有角色卡标记）。</p>
+ *
+ * <p><b>为什么带 npcRef / stage / age（2026-10-25 家族谱系页全空白的事故）</b>：
+ * 谱系页要先列出「本项目全部角色」让用户选一个「本人视角」，选中后拿到的必须是统一身份引用
+ * {@code npc:{id}}（谱系/基因接口的 {@code npcRef} 入参）。改前本 VO 没有 npcRef，
+ * 前端只能拿 {@code ch.npcRef}（undefined）当选择值 → 选项能显示、但选完 {@code npcRef} 仍是空
+ * → {@code v-if="npcRef"} 恒假 → 页面永远停在「请选择一位角色」，且一个谱系请求都不发。
+ * stage/age 是选择器标签（「阿禾（壮年 32岁）」）的数据源，缺了只能显示「— ?岁」。</p>
+ *
+ * <p>字段口径：{@code npcRef} = {@link ActorCharacter#npcRef()}（与 {@code common/NpcRefs} 同源，
+ * 前端不得自己拼 {@code 'npc:' + id}）；{@code stage}/{@code age} 直接取实体列
+ * （成长阶段机维护，未计算时可为 null）。</p>
  */
 public record CharacterVO(
         Long id,
         Long projectId,
+        /** 统一身份引用 {@code npc:{id}}（谱系/基因/记忆等接口的入参） */
+        String npcRef,
         String type,
         String name,
         String title,
@@ -36,6 +49,10 @@ public record CharacterVO(
         Integer isProtagonist,
         Integer importance,
         Integer status,
+        /** 成长阶段（INFANT…ANCIENT/DECEASED；未计算为 null） */
+        String stage,
+        /** 年龄（岁；未计算为 null） */
+        Integer age,
         Boolean hasCard,
         String location,
         Long locationId,
@@ -52,9 +69,9 @@ public record CharacterVO(
      * @return VO 对象
      */
     public static CharacterVO of(ActorCharacter c, Boolean hasCard) {
-        return new CharacterVO(c.getId(), c.getProjectId(), c.getType(), c.getName(), c.getTitle(), c.getDetail(),
-                c.getAvatarUrl(), c.getIsProtagonist(), c.getImportance(), c.getStatus(), hasCard,
-                c.getLocation(), c.getLocationId(),
+        return new CharacterVO(c.getId(), c.getProjectId(), c.npcRef(), c.getType(), c.getName(), c.getTitle(),
+                c.getDetail(), c.getAvatarUrl(), c.getIsProtagonist(), c.getImportance(), c.getStatus(),
+                c.getStage(), c.getAge(), hasCard, c.getLocation(), c.getLocationId(),
                 c.getCreatedAt(), c.getUpdatedAt());
     }
 }

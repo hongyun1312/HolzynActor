@@ -48,9 +48,18 @@ class SpaForwardControllerTest {
     void portalWhitelistCoversTopLevelRoutes() throws Exception {
         String[] paths = portalPaths();
         for (String required : new String[]{
-                "/login", "/register", "/projects", "/project", "/project/**", "/admin", "/admin/**",
+                "/login", "/register", "/worlds", "/worlds/**", "/world", "/world/**", "/admin", "/admin/**",
                 "/settings", "/settings/**", "/account", "/onboarding", "/tutorial"}) {
             assertTrue(contains(paths, required), "SPA 白名单缺少顶层路由：" + required);
+        }
+    }
+
+    /** M5 改名后旧 `/project(s)` 必须彻底消失（留下只会把用户带进空页面） */
+    @Test
+    void legacyProjectRoutesAreGone() throws Exception {
+        String[] paths = portalPaths();
+        for (String legacy : new String[]{"/project", "/project/**", "/projects", "/projects/**"}) {
+            assertTrue(!contains(paths, legacy), "SPA 白名单仍保留旧路由：" + legacy);
         }
     }
 

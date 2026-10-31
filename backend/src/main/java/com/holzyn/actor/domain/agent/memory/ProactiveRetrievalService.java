@@ -60,10 +60,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * （{@code need=false} 是默认——真人不会每时每刻都在回忆），需要时产出<b>定向检索 query</b>，
  * 走既有检索设施三源召回（角色 L2 记忆 + 项目级世界大事记 + 人物知识卡），组装
  * <b>【主动想起】段</b>注入决策/反思 prompt（决策经 {@link AiCallContext} holder 传递——
- * AI 深思 {{proactive_memory}} 占位符 / NanoJev 快判情境文本；反思经 {{proactive_memory}} 占位符）。
+ * AI 深思 {{proactive_memory}} 占位符 / 决策模型 快判情境文本；反思经 {{proactive_memory}} 占位符）。
  * 区别于既有被动检索（触发时携带 query 检索一次）：本组件是角色<b>主动发起的定向检索</b>，
  * 检索目标由角色自己的「认知缺口」驱动（ProactAgent 2025：被动检索常错失知识缺口）。</p>
- * <p><b>触发口径（用户 Q1-Q9 确认）</b>：决策全局挂载（含 SpaceChoice/NanoJev 快判；programmatic
+ * <p><b>触发口径（用户 Q1-Q9 确认）</b>：决策全局挂载（含 SpaceChoice/决策模型 快判；programmatic
  * 档 0 AI 除外、生理危险区强制除外）+ 反思双入口；AI 按情境判断 need（scene=proactive_retrieval，
  * 输出 {"need":bool,"query":str,"reason":str}）；判定失败/超时/解析失败 → <b>fail-open</b>
  * （降级为直接跳过，零阻断）；need=true 后进入<b>冷却期</b>（默认 2 游戏小时，可配），

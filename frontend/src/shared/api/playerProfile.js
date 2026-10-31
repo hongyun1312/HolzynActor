@@ -38,8 +38,8 @@ export const savePlayerRelationSetting = (characterRef, data) =>
 
 // 某项目全部玩家-角色关系行 → PlayerRelationVO[]
 export const fetchPlayerRelations = (projectId) =>
-  http.get(`/api/projects/${projectId}/player-profile/relations`)
+  http.get(`/api/worlds/${projectId}/player-profile/relations`)
 
 // 保存某项目+角色关系行（affinity/trust/stage/note 选填）→ PlayerRelationVO
 export const savePlayerRelation = (projectId, characterRef, data) =>
-  http.put(`/api/projects/${projectId}/player-profile/relations/${encodeURIComponent(characterRef)}`, data)
+  http.put(`/api/worlds/${projectId}/player-profile/relations/${encodeURIComponent(characterRef)}`, data)

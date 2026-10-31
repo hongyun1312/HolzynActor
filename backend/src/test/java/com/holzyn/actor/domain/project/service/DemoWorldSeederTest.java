@@ -19,6 +19,7 @@
 package com.holzyn.actor.domain.project.service;
 
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
+import com.holzyn.actor.domain.worldstore.WorldArchiveService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,27 +27,29 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.Map;
+import java.io.InputStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * 示例世界自动注入器单元测试。
- * <p>覆盖五态：开关关 / 已有项目 / 资源缺失 / 全新库正常注入 / 导入失败降级不抛。
- * 注入路径用 mock（{@code importPackage} 不真跑），成功态以测试 classpath 资源
- * {@code demo-world/test-sample.holzyn} 验证「非空字节 + 无密码」传入。</p>
+ * 示例世界自动注入器单元测试（M6 改走 v3 存档导入）。
+ *
+ * <p>覆盖五态：开关关 / 已有世界 / 资源缺失 / 全新库正常注入 / 导入失败降级不抛。
+ * 注入路径用 mock（{@code WorldArchiveService.importPackage} 不真跑），成功态以测试 classpath 资源
+ * {@code demo-world/test-sample.holzyn} 验证"确实把包流交给了导入服务"。</p>
  */
 @ExtendWith(MockitoExtension.class)
 class DemoWorldSeederTest {
 
     @Mock
-    private HolzynImportService importService;
+    private WorldArchiveService archiveService;
 
     @Mock
     private ActorProjectRepository projectRepository;
@@ -55,7 +58,7 @@ class DemoWorldSeederTest {
 
     @BeforeEach
     void setUp() {
-        seeder = new DemoWorldSeeder(importService, projectRepository);
+        seeder = new DemoWorldSeeder(archiveService, projectRepository);
         ReflectionTestUtils.setField(seeder, "seedEnabled", true);
         ReflectionTestUtils.setField(seeder, "resourcePath", DemoWorldSeeder.DEFAULT_RESOURCE);
     }
@@ -64,15 +67,15 @@ class DemoWorldSeederTest {
     void disabled_skipsEverything() {
         ReflectionTestUtils.setField(seeder, "seedEnabled", false);
         seeder.run(null);
-        verifyNoInteractions(projectRepository, importService);
+        verifyNoInteractions(projectRepository, archiveService);
     }
 
     @Test
-    void existingProjects_skipInjection() {
+    void existingWorlds_skipInjection() {
         when(projectRepository.count()).thenReturn(3L);
         seeder.run(null);
         verify(projectRepository).count();
-        verify(importService, never()).importPackage(any(byte[].class), isNull());
+        verify(archiveService, never()).importPackage(any(InputStream.class), anyString(), anyLong());
     }
 
     @Test
@@ -81,30 +84,30 @@ class DemoWorldSeederTest {
         ReflectionTestUtils.setField(seeder, "resourcePath", "demo-world/not-exist.holzyn");
         seeder.run(null);
         verify(projectRepository).count();
-        verify(importService, never()).importPackage(any(byte[].class), isNull());
+        verify(archiveService, never()).importPackage(any(InputStream.class), anyString(), anyLong());
     }
 
     @Test
     void freshDatabase_injectsBundledWorld() {
         when(projectRepository.count()).thenReturn(0L);
-        Map<String, Object> result = Map.of(
-                "name", "浮生小镇 · 青屿镇", "projectId", 1L, "characterCount", 12, "conversationCount", 9);
-        when(importService.importPackage(any(byte[].class), isNull())).thenReturn(result);
-        // 成功态用测试 classpath 资源（真实打包资源 demo-world/qingyu-town.holzyn 由打包流程生成）
+        when(archiveService.importPackage(any(InputStream.class), anyString(), anyLong()))
+                .thenReturn(new WorldArchiveService.ImportResult(1L, "uid-demo", "浮生小镇 · 青屿镇",
+                        false, 1024L, 7, 0L, 12L, 42L));
+        // 成功态用测试 classpath 资源（真实打包资源 demo-world/qingyu-town.holzyn 由发布流程生成）
         ReflectionTestUtils.setField(seeder, "resourcePath", "demo-world/test-sample.holzyn");
         seeder.run(null);
         verify(projectRepository).count();
-        verify(importService).importPackage(any(byte[].class), isNull());
+        verify(archiveService).importPackage(any(InputStream.class), anyString(), anyLong());
     }
 
     @Test
     void importFailure_logsWarnWithoutThrowing() {
         when(projectRepository.count()).thenReturn(0L);
-        when(importService.importPackage(any(byte[].class), isNull()))
+        when(archiveService.importPackage(any(InputStream.class), anyString(), anyLong()))
                 .thenThrow(new RuntimeException("mock import boom"));
         ReflectionTestUtils.setField(seeder, "resourcePath", "demo-world/test-sample.holzyn");
         assertDoesNotThrow(() -> seeder.run(null));
         verify(projectRepository).count();
-        verify(importService).importPackage(any(byte[].class), isNull());
+        verify(archiveService).importPackage(any(InputStream.class), anyString(), anyLong());
     }
 }

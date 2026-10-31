@@ -9,7 +9,7 @@
    - 页内主导航用本组件（视觉更重：更大间距、选中态更强、左置时固定导航列宽）；
    - 面板内部（角色详情信息栏、对话信息栏、设置对话框）继续直接用 `el-tabs`，不套本组件。
 
-  统一掉的历史不一致：`WorldDetailView` / `WorldEditView` / `ManualAddPanel` 三处左置标签
+  统一掉的历史不一致：`WorldDetailView` / `WorldEditView` / `WorldSettingForm`（原 `ManualAddPanel`）三处左置标签
   各自复制了同一段 `.world-tabs :deep(...)` 样式（128px 导航列宽 + 去掉右边距 + 内容区不裁切），
   现由本组件 + 全局 `.page-tabs` 样式统一提供。
 

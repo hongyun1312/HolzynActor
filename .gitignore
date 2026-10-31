@@ -91,3 +91,14 @@ packaging/runtime/
 
 # 2026-10-21 mapgen runtime artifacts (terrain/composite PNG per map id, regenerable, not in repo)
 data/worldmap/
+
+# --- world split storage (V1.1.2-beta.1 M3): runtime products, never commit ---
+data/holzyn-registry.mv.db
+data/worlds/
+data/worldsplit.state
+data/worldsplit-report.json
+data/worldsplit-report.md
+# local DB snapshots taken before risky migrations
+backup/
+data/import-tmp/
+data/export-tmp/

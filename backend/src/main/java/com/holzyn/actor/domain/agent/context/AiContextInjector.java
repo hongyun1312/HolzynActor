@@ -51,7 +51,7 @@ import java.util.Optional;
 /**
  * 统一 AI 上下文注入器（角色视角 AI 调用 · 上下文富化）。
  * <p><b>定位</b>：所有「涉及具体角色视角」的 AI 调用（对话/行动/决策/记忆/感知/关系/情绪/
- * 空间触发/演化/反思/NanoJev 角色判定）在发送前，统一注入两类上下文：</p>
+ * 空间触发/演化/反思/决策模型 角色判定）在发送前，统一注入两类上下文：</p>
  * <ul>
  * <li><b>世界观简报</b>（恒定注入，默认 300-500 字）：复用 {@code actor_world_setting}
  * 拼装——名称/题材/时代/地理/势力/规则/文化/历史/自由文本，供 AI 准确理解世界，杜绝 OOC；</li>
@@ -62,7 +62,7 @@ import java.util.Optional;
  * </ul>
  * <p><b>负担控制（分层注入）</b>：注入器按「角色视角调用涉及的角色」组装核心卡（必选，
  * 涉及即注入），世界观简报恒定；不注入记忆切片（L1/L2 检索切片由各调用方按需注入）。
- * 核心卡/简报均有字符预算上限，防上下文超限。轻量判定（NanoJev boolean/score/choice）
+ * 核心卡/简报均有字符预算上限，防上下文超限。轻量判定（决策模型 boolean/score/choice）
  * 与重量生成（对话/决策）共用本注入器，只是调用方按场景决定是否追加动态切片。</p>
  * <p><b>设计依据</b>：Smallville 生成式智能体「记忆流 + 检索切片注入」、上下文工程
  * 「稳定前缀 + 动态切片」（角色卡/世界观 = 稳定前缀，可命中 prompt caching）；
@@ -96,7 +96,7 @@ public class AiContextInjector {
     /** 档案服务（11 维档案分片渲染；null=跳过档案段）
      *  ⚠️ @Lazy：AiContextInjector 被 12 类角色视角调用方注入，且自身又依赖
      *  PersonaService/NpcStateService（二者经 NpcStateService→AiSpringChatGateway→
-     *  NanoJevGuardSemanticCheck→NanoJevDecisionGate 回到本注入器）——不加 @Lazy
+     *  GuardSemanticCheck→DecisionGate 回到本注入器）——不加 @Lazy
      *  会在启动期形成 Bean 循环依赖（第 35 次轮纯单测未启动真实世界未暴露，
      *  长跑清库重建首启实测抓到）；本类纯文本组装、服务依赖仅运行时按需调用。 */
     @Lazy
@@ -124,8 +124,8 @@ public class AiContextInjector {
     private WorldClockService worldClockService;
 
     /** 环境上下文服务（段 2D 天气来源；null=跳过天气位）
-     *  ⚠️ @Lazy：EnvironmentContextService → AiSpringChatGateway → NanoJevGuardSemanticCheck →
-     *  NanoJevDecisionGate → 本注入器 环形依赖，懒注入断环（同 personaService 先例）。 */
+     *  ⚠️ @Lazy：EnvironmentContextService → AiSpringChatGateway → GuardSemanticCheck →
+     *  DecisionGate → 本注入器 环形依赖，懒注入断环（同 personaService 先例）。 */
     @Lazy
     @Autowired(required = false)
     private com.holzyn.actor.domain.world.service.EnvironmentContextService environmentContextService;
@@ -142,15 +142,26 @@ public class AiContextInjector {
     @Autowired(required = false)
     private ActorMessageRepository messageRepository;
 
+    /**
+     * 世界程度（：控制世界能力与设定的边界）。
+     * <p>为什么注入到「世界观简报」这一层：它是所有对话/判定/叙事调用都会拼的恒定段，
+     * 在唯一入口加一段「世界程度：休闲 —— 不出现势力斗争/战争/暗杀/背叛…」，所有场景就都
+     * 受同一份边界约束，不需要逐个提示词模板改占位符（改了模板还要同步
+     * {@code PromptTemplateServiceTest} 计数，扩散面大且易漏）。</p>
+     */
+    @Lazy
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.service.WorldToneService worldToneService;
+
     // ==================== V2.0 判定输入固定段文本（段 1B / 段 3I / 段 3J） ====================
 
     /**
-     * 段 1B · 系统指令（NanoJev 判定引擎专用，调用类型专属；跨调用稳定=缓存友好）。
+     * 段 1B · 系统指令（决策模型 判定引擎专用，调用类型专属；跨调用稳定=缓存友好）。
      * <p>V2.0 规范化结构 §3.2：1B 为「系统指令 / 任务指令」，开头含角色锚定句。
-     * NanoJev 是 0.6B 并行决策模型（System One 判定层）——指令刻意收敛为
+     * 决策模型 是 0.6B 并行决策模型（System One 判定层）——指令刻意收敛为
      * 「结构化情境 + 明确判据」：只依据情境事实与问题判据作答，不臆测。</p>
      */
-    public static final String SEG_1B_NANOJEV_INSTRUCTION =
+    public static final String SEG_1B_DECISION_INSTRUCTION =
             "你是一个快速判断引擎。请阅读下方情境，只依据情境中给出的事实与各问题的判据作答，"
                     + "不要臆测情境之外的信息。";
 
@@ -164,7 +175,7 @@ public class AiContextInjector {
 
     /**
      * 段 3J · 输出契约（Post-History 高权重指令位）。
-     * <p>NanoJev 输出概率分布（零解码）——契约即「按问题判据作答」；
+     * <p>决策模型 输出概率分布（零解码）——契约即「按问题判据作答」；
      * 各问题的 instructions/criteria 才是真正的输出 Schema（模板自带）。</p>
      */
     public static final String SEG_3J_OUTPUT_CONTRACT =
@@ -208,13 +219,40 @@ public class AiContextInjector {
             ActorWorldSetting w = opt.get();
             // 首选：AI 生成的 300-500 字精炼世界常识（完整返回，不做句子级截断）
             if (w.getCommonKnowledge() != null && !w.getCommonKnowledge().isBlank()) {
-                return w.getCommonKnowledge().trim();
+                return appendToneBoundary(projectId, w.getCommonKnowledge().trim());
             }
             // 回退：结构化字段拼装（旧数据兼容，仍整体截断到预算）
-            return assembleFromSections(w);
+            return appendToneBoundary(projectId, assembleFromSections(w));
         } catch (Exception e) {
             log.debug("[上下文注入] 世界观简报组装失败（跳过）: project={} : {}", projectId, e.getMessage());
             return "";
+        }
+    }
+
+    /**
+     * 在简报末尾追加「世界程度边界」段（标准档不追加，保持改造前字节一致）。
+     *
+     * @param projectId 项目 ID
+     * @param brief     已有简报
+     *
+     * @return 追加后的简报（无边界/无档位时原样返回）
+     */
+    private String appendToneBoundary(Long projectId, String brief) {
+        if (brief == null || brief.isBlank()) {
+            return brief;
+        }
+        if (worldToneService == null) {
+            return brief;
+        }
+        try {
+            String boundary = worldToneService.boundary(projectId);
+            if (boundary == null || boundary.isBlank()) {
+                return brief;
+            }
+            return brief + "\n" + boundary;
+        } catch (RuntimeException e) {
+            log.debug("[上下文注入] 世界程度边界读取失败（跳过）: project={} : {}", projectId, e.toString());
+            return brief;
         }
     }
 
@@ -329,11 +367,11 @@ public class AiContextInjector {
         }
     }
 
-    // ==================== 组合注入（NanoJev 判定 / ChatModel 调用共用） ====================
+    // ==================== 组合注入（决策模型 判定 / ChatModel 调用共用） ====================
 
     /**
      * 组装【注入上下文】段：世界观简报（恒定）+ 角色核心卡（涉及该角色必注入）。
-     * <p>轻量判定（NanoJev）与重量生成（对话/决策）共用：调用方把本段拼到自己的
+     * <p>轻量判定（决策模型）与重量生成（对话/决策）共用：调用方把本段拼到自己的
      * state/prompt 前即可；记忆切片（L1/L2）由各调用方按需追加（不在此段内）。</p>
      *
      * @param projectId 项目 ID
@@ -363,7 +401,7 @@ public class AiContextInjector {
     }
 
     /**
-     * 便捷：把注入上下文段拼到既有 state 文本前（NanoJev 判定用）。
+     * 便捷：把注入上下文段拼到既有 state 文本前（决策模型 判定用）。
      *
      * @param projectId 项目 ID
      *
@@ -385,8 +423,8 @@ public class AiContextInjector {
     // ==================== V2.0 判定输入装配（段 1+2+3 单串） ====================
 
     /**
-     * 段 2D · 当前世界动态（精简行，NanoJev 轻量判定用）。
-     * <p>V2.0 规范化结构 §3.3：2D = 游戏时间/季节/天气……「NanoJev 轻量判定可只给精简行」。
+     * 段 2D · 当前世界动态（精简行，决策模型 轻量判定用）。
+     * <p>V2.0 规范化结构 §3.3：2D = 游戏时间/季节/天气……「决策模型 轻量判定可只给精简行」。
      * 组装「{世界历时刻} · {季节} · {天气}」单行（≤80 字符）；无时钟/季节/环境服务
      * 逐位降级，全空返回空串（零阻断）。纯文本确定性组装，零 AI。</p>
      *
@@ -538,12 +576,12 @@ public class AiContextInjector {
     }
 
     /**
-     * V2.0 判定输入装配（NanoJev 判定统一门用，段 1+段 2+段 3 全量拼接为单串）。
-     * <p>V2.0 规范化结构 §3.4：「对 NanoJev 判定这类<b>单串判定输入</b>：段 1+段 2+段 3
+     * V2.0 判定输入装配（决策模型 判定统一门用，段 1+段 2+段 3 全量拼接为单串）。
+     * <p>V2.0 规范化结构 §3.4：「对 决策模型 判定这类<b>单串判定输入</b>：段 1+段 2+段 3
      * 全量拼接为一个判定输入串」。顺序：</p>
      * <ol>
      * <li>段 1A【世界观】= {@link #worldBrief}（稳定 300-500 字，缓存友好）；</li>
-     * <li>段 1B【系统指令】= {@link #SEG_1B_NANOJEV_INSTRUCTION}（判定引擎固定句）；</li>
+     * <li>段 1B【系统指令】= {@link #SEG_1B_DECISION_INSTRUCTION}（判定引擎固定句）；</li>
      * <li>段 1C【角色身份】= {@link #characterCard}（涉及该角色必注入）；</li>
      * <li>段 2D【当前世界动态】= {@link #worldDynamicsLine}（精简行，可空）；</li>
      * <li>段 2H【本次情境/本轮输入】= 原 state 文本（调用方判定输入）；</li>
@@ -568,7 +606,7 @@ public class AiContextInjector {
         if (!brief.isBlank()) {
             segs.add("【世界观】\n" + brief);
         }
-        segs.add("【系统指令】\n" + SEG_1B_NANOJEV_INSTRUCTION);
+        segs.add("【系统指令】\n" + SEG_1B_DECISION_INSTRUCTION);
         String card = characterRef == null || characterRef.isBlank()
                 ? "" : characterCard(projectId, characterRef);
         if (!card.isBlank()) {

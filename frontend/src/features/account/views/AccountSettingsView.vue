@@ -48,8 +48,11 @@ function onSaved() {
 </script>
 
 <style scoped>
-/* 页面容器与背景由外壳提供；卡片居中由 .content-col + 卡片自身 max-width 决定 */
-.account-page { display: flex; flex-direction: column; align-items: center; }
+/* 页面容器与背景由外壳提供；卡片居中由 .content-col + 卡片自身 max-width 决定。
+   2026-10 布局审计：原来用 align-items:center，页头按内容宽度收缩（实测 554px，
+   x=439）而卡片是 720（x=356），标题与卡片左边缘差 77px；改成整列同宽 720 居中，
+   页头与卡片左边缘对齐（都是 x=360）。 */
+.account-page { display: flex; flex-direction: column; align-items: stretch; max-width: var(--page-w-form, 720px); margin: 0 auto; }
 .ac-card { width: 100%; max-width: var(--page-w-form, 720px); background: var(--bg-layer-1); border-radius: 18px; box-shadow: 0 10px 32px rgba(24, 50, 100, 0.10); padding: 32px 40px; height: fit-content; }
 /* V2.0 批次二：断点 640 → 1024（全站三档；<1024 为单栏兜底档） */
 @media (max-width: 1024px) { .ac-card { padding: 24px 20px; } }

@@ -82,6 +82,18 @@ public class MapBundleQueryService {
     private final ActorWorldClockRepository clockRepository;
 
     /**
+     * 角色快照（坐标权威在 mapnav；未装配[单测]时为 null，退回日程落点）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcActorQueryService actorQueryService;
+
+    /**
+     * 导航服务（取缩略水域/可建位图给前端拖拽提示；未装配时为 null，不下发 navGrid）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcNavigationService navigationService;
+
+    /**
      * 项目当前地图（最新一行；没有则返回 null）。
      *
      * @param projectId 项目 ID
@@ -115,7 +127,66 @@ public class MapBundleQueryService {
         MapAmbient ambient = ambientOf(map);
         bundle.setAmbient(ambient.toMap());
         bundle.setCharacters(characters(map, ambient));
+        applyRuntimeState(bundle, projectId);
         return bundle;
+    }
+
+    /**
+     * 把「运行期状态」叠到渲染包上：世界时钟、导航缩略、角色真实坐标。
+     *
+     * <p><b>为什么在查询时叠而不是在 characters() 里算</b>：日程给的是「这一段的落点」，
+     * 而人此刻可能在半路上。落点是<b>配置</b>、坐标是<b>状态</b>，两者分开取、在这里合并，
+     * 才不会出现「为了拿位置把日程表整个复制一份」的耦合。</p>
+     *
+     * <p>三者都是可缺的（单测/无地图时）：缺了就退回旧语义，页面不报错。</p>
+     *
+     * @param bundle    渲染包
+     * @param projectId 项目
+     */
+    private void applyRuntimeState(MapBundleVO bundle, Long projectId) {
+        if (actorQueryService != null) {
+            try {
+                bundle.setClock(actorQueryService.clock(projectId));
+                java.util.Map<String, com.holzyn.actor.domain.mapnav.vo.ActorSnapshotVO> byRef =
+                        new HashMap<>();
+                for (com.holzyn.actor.domain.mapnav.vo.ActorSnapshotVO a
+                        : actorQueryService.actors(projectId)) {
+                    byRef.put(a.getRef(), a);
+                }
+                if (bundle.getCharacters() != null) {
+                    for (MapBundleVO.CharacterVO c : bundle.getCharacters()) {
+                        com.holzyn.actor.domain.mapnav.vo.ActorSnapshotVO a = byRef.get(c.getRef());
+                        if (a == null) {
+                            continue;
+                        }
+                        c.setX(a.getX());
+                        c.setZ(a.getZ());
+                        c.setHeading(a.getHeading());
+                        c.setStatus(a.getStatus());
+                        c.setIndoor(Boolean.TRUE.equals(a.getIndoor()));
+                        if (a.getActivity() != null) {
+                            c.setActivity(a.getActivity());
+                        }
+                        c.setPathId(a.getPath() == null ? null : a.getPath().getId());
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("[mapgen] 叠运行期状态失败（退回日程落点）：{}", e.getMessage());
+            }
+        }
+        if (navigationService != null) {
+            try {
+                Map<String, Object> nav = new LinkedHashMap<>();
+                nav.put("size", com.holzyn.actor.domain.mapnav.service.NpcNavigationService.PREVIEW_SIZE);
+                nav.put("scale", 1024 / com.holzyn.actor.domain.mapnav.service.NpcNavigationService.PREVIEW_SIZE);
+                nav.put("encoding", "packed-bits-base64");
+                nav.put("water", navigationService.waterPreview(projectId));
+                nav.put("buildable", navigationService.buildablePreview(projectId));
+                bundle.setNavGrid(nav);
+            } catch (Exception e) {
+                log.debug("[mapgen] 生成导航缩略失败：{}", e.getMessage());
+            }
+        }
     }
 
     // ==================== 环境 / 角色 ====================

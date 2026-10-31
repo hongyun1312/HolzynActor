@@ -46,7 +46,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/projects/{id}/world-frame")
+@RequestMapping("/api/worlds/{id}/world-frame")
 @RequiredArgsConstructor
 public class WorldFrameController {
 

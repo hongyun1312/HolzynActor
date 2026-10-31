@@ -34,10 +34,14 @@ import java.util.List;
  * H2 TCP Server 配置（，应用运行中外部工具直连能力）。
  * <p>背景：本地 H2 文件库（{@code jdbc:h2:file:...}）被应用进程独占文件锁——应用运行中
  * DataGrip 等外部工具无法直连文件。本配置在<b>应用同 JVM 内</b>启动一个 H2 TCP Server，
- * 客户端经 {@code jdbc:h2:tcp://localhost:9092/holzyn-actor} 连接时，TCP Server 解析到
+ * 客户端经 {@code jdbc:h2:tcp://localhost:9092/holzyn-registry} 连接时，TCP Server 解析到
  * <b>与数据源完全相同的绝对路径</b>（{@link #resolvedDataDir()} 与 {@link DataDirResolver}
  * 同一解析口径），复用该 JVM 已打开的库实例——<b>不产生第二个文件锁、不双开文件</b>，
  * 共享同一份数据且无写坏风险；应用停止时 TCP Server 随 bean destroyMethod 自动关闭。</p>
+ * <p>⚠️ V1.1.2-beta.1（世界数据分存档）起 TCP 只暴露**目录库**：库名由 {@code holzyn-actor}
+ * 改为 {@code holzyn-registry}（目录库退化为 16 张索引/全局表），世界库位于
+ * {@code worlds/<uid>/world.mv.db} 且**刻意不暴露**（设计 U5：暴露世界库会让外部工具在
+ * 世界挂载时抢文件锁）。需要只读查看世界库时先关世界、停应用，再复制文件出来看。</p>
  * CASE_INSENSITIVE_IDENTIFIERS=TRUE}，用户 {@code sa}，密码空；仅本机 loopback（{@code -tcpAllowOthers}
  * 默认关闭，局域网/远程 DataGrip 需显式开启）。</p>
  * <p>开关：{@code holzyn.actor.h2.tcp-enabled}（默认 true）/ {@code tcp-port}（默认 9092）/
@@ -68,8 +72,8 @@ public class H2TcpServerConfig {
         List<String> args = new ArrayList<>();
         args.add("-tcpPort");
         args.add(String.valueOf(tcpPort));
-        // 关键：-baseDir 与数据源解析到同一绝对数据目录，客户端 jdbc:h2:tcp://localhost:9092/holzyn-actor
-        // 被解析为 <数据目录>/holzyn-actor，与应用的 file: URL 命中同一库名 → 复用同 JVM 已打开的实例
+        // 关键：-baseDir 与数据源解析到同一绝对数据目录，客户端 jdbc:h2:tcp://localhost:9092/holzyn-registry
+        // 被解析为 <数据目录>/holzyn-registry，与应用的 file: URL 命中同一库名 → 复用同 JVM 已打开的实例
         args.add("-baseDir");
         args.add(resolvedDataDir());
         if (allowOthers) {

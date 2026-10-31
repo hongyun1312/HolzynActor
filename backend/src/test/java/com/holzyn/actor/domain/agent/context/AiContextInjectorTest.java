@@ -38,7 +38,7 @@ import static org.mockito.Mockito.when;
  * ② 角色核心卡拼装（身份/档案分片/核心记忆/关键关系/当前状态 + 段边界预算装配[放不下整段省略+WARN]）；
  * ③ 组合注入 compose（【世界观】+【我的身份与处境】双段头）；④ enrichState（注入段 + 原 state）；
  * ⑤ 逐段降级零阻断（服务未装配/数据缺失/异常自动跳过该段，全空返回空串）。</p>
- * <p>背景：2026-10-07 统一上下文注入根治——AI 角色视角调用（对话/行动/决策/记忆/NanoJev 判定）
+ * <p>背景：2026-10-07 统一上下文注入根治——AI 角色视角调用（对话/行动/决策/记忆/决策模型 判定）
  * 统一注入世界观简报（恒定）+ 角色核心卡（涉及即注入），杜绝「只有关系变化、无角色身份与世界观」。</p>
  */
 class AiContextInjectorTest {
@@ -334,7 +334,7 @@ class AiContextInjectorTest {
         assertEquals("", injector.compose(1L, "npc:1"));
     }
 
-    // ==================== enrichState（NanoJev 判定用） ====================
+    // ==================== enrichState（决策模型 判定用） ====================
 
     @Test
     void enrichState_prependsContextToState() {
@@ -379,7 +379,7 @@ class AiContextInjectorTest {
         // 段 1 前缀：世界观 + 系统指令 + 角色身份
         assertTrue(input.contains("【世界观】"));
         assertTrue(input.contains("【系统指令】"));
-        assertTrue(input.contains(AiContextInjector.SEG_1B_NANOJEV_INSTRUCTION));
+        assertTrue(input.contains(AiContextInjector.SEG_1B_DECISION_INSTRUCTION));
         assertTrue(input.contains("【角色身份】"));
         assertTrue(input.contains("沈砚秋"));
         // 段 2 动态切片：世界动态 + 本轮输入

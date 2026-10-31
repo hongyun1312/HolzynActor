@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
 /**
- * 生育意愿判定默认实现（Qwen AI 主 + 程序化兜底；NanoJev 替换实现类即可）。
+ * 生育意愿判定默认实现（Qwen AI 主 + 程序化兜底；决策模型 替换实现类即可）。
  * <p><b>AI 判定</b>（scene=growth_fertility_decision，SCHEMA_JSON 0.4/300）：输入婚姻时长 +
  * 已有子女 + 年龄 + 人口，输出 {@code {want:boolean, reason}}。</p>
  * <p><b>程序化兜底</b>（AI 失败/非法 → 不想要，零阻断；{@code programmaticFallback=true} 且
@@ -39,26 +39,26 @@ public class AiFertilityDecisionSource implements FertilityDecisionSource {
     private final AiDecisionSourceSupport support;
 
     /**
-     * NanoJev 生育意愿判定（默认关场景；开启且采纳时优先，失败/升级回退本 Qwen 实现；
+     * 决策模型 生育意愿判定（默认关场景；开启且采纳时优先，失败/升级回退本 Qwen 实现；
      * 字段注入保持构造器不变，null=未装配[单测]直接走 Qwen）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevFertilityDecision nanoJevDecision;
+    private com.holzyn.actor.ai.decision.gate.FertilityJudge decisionJudge;
 
     @Override
     public RomanceDecisions.FertilityDecision decide(RomanceDecisions.FertilityContext ctx) {
         if (ctx == null || ctx.npcRef() == null || ctx.spouseRef() == null) {
             return RomanceDecisions.FertilityDecision.of(false, "参数缺失，视为不想要", "programmatic");
         }
-        // ：NanoJev 优先（逐场景开关默认关；采纳即用，否则回退 Qwen）
-        if (nanoJevDecision != null) {
+        // ：决策模型 优先（逐场景开关默认关；采纳即用，否则回退 Qwen）
+        if (decisionJudge != null) {
             try {
-                RomanceDecisions.FertilityDecision nano = nanoJevDecision.decide(ctx);
+                RomanceDecisions.FertilityDecision nano = decisionJudge.decide(ctx);
                 if (nano != null) {
                     return nano;
                 }
             } catch (Exception e) {
-                log.warn("[婚育] NanoJev 生育意愿判定异常（回退 Qwen）: {} : {}", ctx.npcName(), e.getMessage());
+                log.warn("[婚育] 决策模型 生育意愿判定异常（回退 Qwen）: {} : {}", ctx.npcName(), e.getMessage());
             }
         }
         String content = support.call(ctx.projectId(), NpcRefs.idOf(ctx.npcRef()), SCENE, AiDecisionSourceSupport.ph(

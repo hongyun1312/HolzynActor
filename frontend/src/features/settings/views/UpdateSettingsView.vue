@@ -28,11 +28,26 @@
 
       <div class="set-row">
         <span class="set-row-label">当前版本</span>
-        <b class="uv-value">{{ store.currentVersion || '—' }}</b>
+        <!-- 开发者模式入口：连点 5 次解锁（3 秒窗口）。静默计数——有反馈等于告诉所有人这里有东西 -->
+        <b class="uv-value" title="连点 5 次可打开开发者模式" @click="onVersionTap">{{ store.currentVersion || '—' }}</b>
         <el-tag v-if="store.channel === 'beta'" size="small" type="warning">beta 预发布</el-tag>
         <el-tag v-else size="small" type="info">stable 正式</el-tag>
         <el-tag v-if="store.portable" size="small" type="info">便携版</el-tag>
         <el-tag v-if="store.isDev" size="small" type="danger">开发模式</el-tag>
+        <span v-if="devHint" class="set-hint uv-dev-hint">{{ devHint }}</span>
+      </div>
+
+      <!-- 开发者模式入口（解锁后才出现）：单行设置项，与「当前版本」「关闭窗口时」同构。
+           只保留「名称 + 一句用途/风险」，补充说明（独立窗口 / 新标签页 / 快捷键）收进按钮 tooltip，
+           不再单独占一块警示卡——入口是日常可见的入口，不该每次都用红色告警抢注意力。 -->
+      <div v-if="devUnlocked" class="set-row uv-dev-entry">
+        <span class="set-row-label">开发者模式</span>
+        <span class="uv-dev-desc">直连引擎与数据库，仅用于开发调试</span>
+        <el-button
+          plain
+          title="桌面端打开独立窗口；浏览器在新标签页打开（快捷键 Ctrl+Shift+D）"
+          @click="openDev"
+        >打开</el-button>
       </div>
 
       <div class="set-row">
@@ -56,7 +71,7 @@
         type="info"
         :closable="false"
         show-icon
-        title="发现新版本 v{{ store.newVersion }}"
+        title="发现新版本，正在下载…"
         description="请前往下载页获取最新便携包：关闭本应用后，解压覆盖原目录即可完成更新（世界数据不受影响）。"
         class="uv-alert"
       />
@@ -225,12 +240,18 @@
  * 各动作 no-op，仅展示当前版本与说明。</p>
  */
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 import HIcon from '@/shared/components/HIcon.vue'
 import { useUpdaterStore } from '@/shared/store/updater'
+import { useDevMode, devUnlocked } from '@/shared/composables/useDevMode'
 
 const store = useUpdaterStore()
+const router = useRouter()
+const { onVersionClick, openDevConsole } = useDevMode()
+/** 连点提示（只在最后两次出现） */
+const devHint = ref('')
 const autoCheckModel = ref(store.autoCheck)
 const notesLoading = ref(false)
 /** 桌面端桥是否存在（安装版/桌面开发模式为 true，纯浏览器为 false） */
@@ -294,8 +315,45 @@ async function onChannelChange(v) {
   ElMessage.success(isBeta ? '已切换到 beta 预发布通道，正在检查该通道的更新…' : '已切换回 stable 正式通道，正在检查正式更新…')
 }
 
-async function onConfirmInstall() {
-  try {
+/**
+ * 版本号点击：开发者模式 5 连击解锁。
+ *
+ * <p>前 3 次完全静默（有提示等于暴露隐藏入口）；第 4 次提示「再点 1 次」；
+ * 第 5 次解锁并弹出显眼的警告确认——用户必须读一遍风险才能进入。</p>
+ */
+async function onVersionTap() {
+  const result = onVersionClick()
+  if (result === 'progress') {
+    devHint.value = '再点击 1 次…'
+    return
+  }
+  devHint.value = ''
+  if (result === 'unlocked') {
+    try {
+      await ElMessageBox.confirm(
+        '开发者模式会解锁「参数直改、数据库直读、AI 调用原文、后端一键重启」等高危能力：\n'
+        + '· 修改参数会立即改变世界运行（角色行为、需求衰减、AI 路由）\n'
+        + '· 部分操作会触发真实 AI 调用并产生费用\n'
+        + '· 错误取值可能导致世界数据不一致\n\n'
+        + '入口会一直保留在设置页下方，可随时「隐藏开发者入口」移除。是否解锁？',
+        '⚠️ 解锁开发者模式',
+        { type: 'warning', confirmButtonText: '我已知晓风险，解锁', cancelButtonText: '取消' }
+      )
+    } catch (_) {
+      // 取消：立即重新隐藏，避免「点了取消但其实已解锁」
+      useDevMode().lock()
+      return
+    }
+    ElMessage.success('开发者模式已解锁：入口在下方')
+  }
+}
+
+/** 打开开发者控制台（桌面端独立窗口 / 浏览器新标签） */
+async function openDev() {
+  await openDevConsole(router, '/dev/overview')
+}
+
+async function onConfirmInstall() {  try {
     await ElMessageBox.confirm(
       '应用将保存当前世界并优雅退出，随后自动备份数据、安装新版本并重启。是否继续？',
       '确认更新',
@@ -322,6 +380,8 @@ async function onConfirmInstall() {
    此处仅保留更新状态区的本页特有样式；颜色一律走令牌，深浅主题自适应。 */
 .uv-value {
   font-size: var(--density-font, 0.9rem);
+  cursor: default;
+  user-select: none;
 }
 .uv-alert {
   margin-top: var(--space-3, 12px);
@@ -365,5 +425,16 @@ async function onConfirmInstall() {
 .uv-notes-btn {
   margin-top: var(--space-3, 12px);
   margin-right: var(--space-2, 8px);
+}
+
+/* 开发者模式入口：走全局 .set-row 单行设置项（与「当前版本」「关闭窗口时」同构）。
+   uv-dev-entry 仅作语义/测试锚点（tests/browser-verify/dev-console-shots.mjs 依赖它），不再单独上色——
+   入口是常驻入口，红色警示块会稀释整页的「危险」语义，也让日常使用时视线被反复拽走。 */
+.uv-dev-hint { color: var(--text-tertiary); }
+.uv-dev-desc {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--density-font-sm, 0.82rem);
+  color: var(--text-secondary);
 }
 </style>

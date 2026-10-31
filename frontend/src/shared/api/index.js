@@ -28,6 +28,8 @@ export { default as http } from './http'
 export * from './account'
 // 项目
 export * from './project'
+// 存档（世界）生命周期（M5：列表 / 新建 / 打开 / 关闭 / 归档删除 / 摘要改名）
+export * from './worldStore'
 // 世界（时钟/时间线/场景/演化）
 export * from './world'
 // 角色（NPC/角色卡/行动）
@@ -50,6 +52,8 @@ export * from './settings'
 export * from './misc'
 // 新建项目工作流（文件解析 / 世界初始化，SSE）
 export * from './workflow'
+// 世界初始化（状态判定 / 单步执行 / 跳过可选步 / 世界名与简介）
+export * from './worldInit'
 // 工作流世界观生成
 export * from './worldgen'
 // 世界沙盘（S1：沙盘总览/场景/状态 + 上次项目记录）

@@ -124,7 +124,7 @@ public class GlobalSearchService {
         }
         int cap = limit == null ? DEFAULT_LIMIT : Math.max(1, Math.min(MAX_LIMIT, limit));
         Set<HitType> wanted = parseTypes(types);
-        String base = "/project/" + projectId;
+        String base = "/world/" + projectId;
 
         List<GlobalSearchVO.Group> groups = new ArrayList<>();
         int remaining = cap;

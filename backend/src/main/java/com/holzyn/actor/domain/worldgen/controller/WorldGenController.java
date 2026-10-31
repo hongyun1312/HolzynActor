@@ -212,7 +212,7 @@ public class WorldGenController {
      *
      * @return 故事规划版本列表（无记录返回空数组）
      */
-    @GetMapping("/projects/{projectId}/story-plans")
+    @GetMapping("/worlds/{projectId}/story-plans")
     public R<List<Map<String, Object>>> storyPlans(@PathVariable Long projectId) {
         return R.ok(taskService.listStoryPlans(projectId));
     }

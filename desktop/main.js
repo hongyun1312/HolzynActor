@@ -10,6 +10,7 @@
  *     即「双击 exe → 弹出应用窗口」的桌面体验；窗口**无边框 + 16:9**（基准逻辑尺寸 1280×720，
  *     见 window-geometry.js）：标题栏由前端顶栏自绘（拖拽区 + 最小化/最大化/关闭三键），
  *     每次打开都按 1280×720 开、屏幕装不下时等比缩小，拖拽缩放时保持 16:9；
+ *     开发者控制台独立窗口走**同一套几何规则**（同基准、同比例、同最小档）；
  *  3. 关闭窗口 → 停掉后端子进程 → 退出应用（单实例锁防重复启动）。
  *  4. 自动更新（U1+U2，设计文档《HolzynActor_桌面端更新机制_设计方案_V1.0》）：
  *     - electron-updater（GitHub Releases provider）启动后台检查 + 设置页手动检查；
@@ -92,6 +93,8 @@ if (!app.requestSingleInstanceLock()) {
 
 function main() {
   let win = null;
+  // 开发者控制台独立窗口（单例）：非模态、跟随主窗口生命期，主窗口关闭时一并销毁
+  let devWin = null;
   let backend = null;
   let backendPort = null;
   let quitting = false;
@@ -616,7 +619,7 @@ function main() {
   function resolveBackend() {
     if (isDev) {
       // 开发模式：直接用仓库构建产物 + 本机 JDK（免打包快速联调）
-      const jar = path.resolve(__dirname, '..', 'backend', 'target', 'holzyn-actor-1.1.1-beta.1.jar');
+      const jar = path.resolve(__dirname, '..', 'backend', 'target', 'holzyn-actor-1.1.2-beta.1.jar');
       const java = process.env.JAVA_HOME
         ? path.join(process.env.JAVA_HOME, 'bin', 'java.exe')
         : 'java';
@@ -884,11 +887,15 @@ function main() {
 
   // ==================== 窗口 ====================
 
-  /** 把「当前是否最大化」推给渲染进程（自绘标题栏据此切换「最大化/还原」图标） */
-  function pushWindowState() {
-    if (!win || win.isDestroyed()) return;
+  /**
+   * 把「当前是否最大化」推给渲染进程（自绘标题栏据此切换「最大化/还原」图标）。
+   *
+   * @param {object} [target=win] 目标窗口：主窗口与开发者窗口都带自绘三键，状态各推各的
+   */
+  function pushWindowState(target = win) {
+    if (!target || target.isDestroyed()) return;
     try {
-      win.webContents.send('holzyn:window:maximized', win.isMaximized());
+      target.webContents.send('holzyn:window:maximized', target.isMaximized());
     } catch (_) { /* 窗口正在销毁：忽略 */ }
   }
 
@@ -899,33 +906,41 @@ function main() {
    * 标注为 macOS 专属），实测拖拽仍会破比例。`will-resize` 在 macOS/Windows 都会触发，
    * 且只由**用户手动拖拽**触发（程序化 setBounds 不触发，不会自我递归）。
    * 最大化/全屏时放行——铺满工作区是系统级预期，16:9 保证的是「窗口化状态与每次打开时」。</p>
+   *
+   * <p>主窗口与开发者窗口共用本函数：两个窗口的几何契约必须同源（`window-geometry.js`），
+   * 否则「开发者页 16:9、主窗口 16:9」只是两处各写一遍的数字，迟早走偏。</p>
+   *
+   * @param {object} target 要挂守卫的窗口（主窗口 / 开发者窗口）
    */
-  function applyAspectGuard() {
-    if (!win || win.isDestroyed()) return;
-    win.on('will-resize', (event, newBounds, details) => {
-      if (win.isMaximized() || win.isFullScreen()) return;
-      const current = win.getBounds();
+  function applyAspectGuard(target) {
+    if (!target || target.isDestroyed()) return;
+    target.on('will-resize', (event, newBounds, details) => {
+      if (target.isMaximized() || target.isFullScreen()) return;
+      const current = target.getBounds();
       const fitted = windowGeometry.constrainToAspect(newBounds, details && details.edge, current);
       const unchanged = fitted.x === newBounds.x && fitted.y === newBounds.y
         && fitted.width === newBounds.width && fitted.height === newBounds.height;
       if (unchanged) return;
       event.preventDefault();
-      win.setBounds(fitted);
+      target.setBounds(fitted);
     });
   }
 
   /**
    * 从最大化/托盘恢复后自检比例：系统还原的是「最大化之前的 bounds」，
    * 正常路径一定还是 16:9；但外部缩放工具/多屏切换可能把尺寸改飘，这里兜一层修正。
+   *
+   * @param {object} [target=win] 目标窗口
+   * @param {string} [tag='window'] 日志前缀（区分主窗口 / dev）
    */
-  function ensureAspectAfterRestore() {
-    if (!win || win.isDestroyed()) return;
-    if (win.isMaximized() || win.isFullScreen() || win.isMinimized()) return;
-    const bounds = win.getBounds();
+  function ensureAspectAfterRestore(target = win, tag = 'window') {
+    if (!target || target.isDestroyed()) return;
+    if (target.isMaximized() || target.isFullScreen() || target.isMinimized()) return;
+    const bounds = target.getBounds();
     if (windowGeometry.isAspectRatioOk(bounds)) return;
     const fixed = windowGeometry.normalizeToAspect(bounds);
-    log(`[window] 恢复后尺寸 ${bounds.width}x${bounds.height} 非 16:9 → 修正为 ${fixed.width}x${fixed.height}`);
-    win.setBounds(fixed);
+    log(`[${tag}] 恢复后尺寸 ${bounds.width}x${bounds.height} 非 16:9 → 修正为 ${fixed.width}x${fixed.height}`);
+    target.setBounds(fixed);
   }
 
   function createWindow(url) {
@@ -955,11 +970,11 @@ function main() {
     });
     win.setMenuBarVisibility(false);
     win.center();
-    applyAspectGuard();
-    win.on('maximize', pushWindowState);
-    win.on('unmaximize', () => { ensureAspectAfterRestore(); pushWindowState(); });
-    win.on('restore', () => { ensureAspectAfterRestore(); pushWindowState(); });
-    win.webContents.on('did-finish-load', pushWindowState);
+    applyAspectGuard(win);
+    win.on('maximize', () => pushWindowState(win));
+    win.on('unmaximize', () => { ensureAspectAfterRestore(win); pushWindowState(win); });
+    win.on('restore', () => { ensureAspectAfterRestore(win); pushWindowState(win); });
+    win.webContents.on('did-finish-load', () => pushWindowState(win));
     win.once('ready-to-show', () => {
       win.show();
       win.focus();
@@ -988,7 +1003,139 @@ function main() {
     });
     win.on('closed', () => {
       win = null;
+      // 主窗口消失 → 开发者窗口一并销毁（否则会留下一个「后端已停、数据全空」的独立窗口）
+      closeDevWindow();
     });
+  }
+
+  // ==================== 开发者控制台独立窗口 ====================
+
+  /**
+   * 打开（或聚焦）开发者控制台窗口。
+   *
+   * <p>设计取舍：</p>
+   * <ul>
+   *   <li><b>单例</b>：重复点击只聚焦已有窗口，不做多开——多开会让「同一个参数两处编辑、
+   *       各自显示旧值」成为常态。</li>
+   *   <li><b>非模态</b>：不设 parent。开发者需要一边看世界一边改参数，模态会把主窗口锁死。</li>
+   *   <li><b>同 origin</b>（127.0.0.1:同一端口）：与主窗口共享 localStorage/IndexedDB，
+   *       因此「5 连击解锁」只需做一次，两个窗口都认得。</li>
+   *   <li><b>与主窗口同一套几何</b>：16:9 + 基准逻辑尺寸 1280×720（UI 设计画布）。开发者页与主应用
+   *       共用同一套断点/密度/限宽档位，窗口比例一旦放飞，「开发者页里调好的版式回主窗口就挤出滚动条」；
+   *       基准也只允许有一个来源（`window-geometry.js`），才能直接按 1280×720 截图验收两个窗口。</li>
+   *   <li><b>跟随主窗口关闭</b>：主窗口关闭/退出时一并销毁，避免残留一个「后端已停但窗口还在」的空壳。</li>
+   * </ul>
+   *
+   * @param {string} [route='/dev/overview'] 目标路由（同 origin 内的相对路径）
+   * @returns {object|null} 窗口是否可用（{ ok: true } / { ok:false, reason }）
+   */
+  function createDevWindow(route = '/dev/overview') {
+    if (!backendPort) return { ok: false, reason: '后端尚未就绪' };
+    const url = `http://127.0.0.1:${backendPort}${route.startsWith('/') ? route : '/' + route}`;
+    if (devWin && !devWin.isDestroyed()) {
+      if (!devWin.isVisible()) devWin.show();
+      devWin.focus();
+      devWin.loadURL(url);
+      return { ok: true };
+    }
+    const work = screen.getPrimaryDisplay().workAreaSize;
+    // 与主窗口同源：基准 1280×720（16:9），屏幕装不下等比缩小，最小 960×540
+    const size = windowGeometry.fitToWorkArea(work);
+    log(`[dev] 打开开发者控制台窗口 ${size.width}x${size.height}（基准 ${WINDOW_BASE_WIDTH}x${WINDOW_BASE_HEIGHT}，比例 ${WINDOW_ASPECT_RATIO.toFixed(3)} = 16:9）→ ${url}`);
+    devWin = new BrowserWindow({
+      width: size.width,
+      height: size.height,
+      minWidth: WINDOW_MIN_WIDTH,
+      minHeight: WINDOW_MIN_HEIGHT,
+      show: false,
+      frame: false,
+      thickFrame: true,
+      titleBarStyle: 'hidden',
+      autoHideMenuBar: true,
+      backgroundColor: '#0B1220',
+      title: `${APP_NAME} · 开发者控制台`,
+      icon: path.join(__dirname, 'build', 'icon.png'),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    devWin.setMenuBarVisibility(false);
+    devWin.center();
+    // 与主窗口同一套 16:9 守卫：拖边框反算另一边；最大化/全屏放行（铺满工作区是系统级预期）。
+    // 自绘三键的状态也各推各的，否则开发者窗口最大化后图标仍停在「最大化」态。
+    applyAspectGuard(devWin);
+    devWin.on('maximize', () => pushWindowState(devWin));
+    devWin.on('unmaximize', () => { ensureAspectAfterRestore(devWin, 'dev'); pushWindowState(devWin); });
+    devWin.on('restore', () => { ensureAspectAfterRestore(devWin, 'dev'); pushWindowState(devWin); });
+    devWin.webContents.on('did-finish-load', () => pushWindowState(devWin));
+    devWin.once('ready-to-show', () => { devWin.show(); devWin.focus(); pushWindowState(devWin); });
+    devWin.on('closed', () => { devWin = null; });
+    devWin.webContents.setWindowOpenHandler(({ url: target }) => {
+      if (/^https?:\/\//.test(target)) shell.openExternal(target);
+      return { action: 'deny' };
+    });
+    // 路由一旦离开 /dev，就说明用户点了「返回」或从开发者页跳去了别的界面。
+    // 此时必须关掉这个独立窗口：主窗口本来就已经显示着那个界面（通常是当前世界），
+    // 让开发者窗口也跳过去，用户看到的就是两个一模一样的世界界面。
+    devWin.webContents.on('did-navigate-in-page', (_e, target) => {
+      if (!devWin || devWin.isDestroyed()) return;
+      let pathname = '';
+      try { pathname = new URL(target).pathname; } catch (_) { return; }
+      if (pathname.startsWith('/dev')) return;
+      log(`[dev] 开发者窗口离开 /dev（${pathname}）→ 关闭独立窗口并聚焦主窗口`);
+      closeDevWindow();
+      if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+    });
+    devWin.loadURL(url);
+    return { ok: true };
+  }
+
+  /**
+   * 关闭开发者控制台窗口（主窗口关闭/退出时调用）。
+   */
+  function closeDevWindow() {
+    if (devWin && !devWin.isDestroyed()) devWin.destroy();
+    devWin = null;
+  }
+
+  /**
+   * 保存并重启后端（开发者页「需重启参数」的落地动作）。
+   *
+   * <p>时序：优雅停（/api/system/shutdown → 等进程真退出，释放 H2 锁）→ 重新拉起 →
+   * 两个窗口 loadURL 到新端口。之所以不用 app.relaunch()：那会把主窗口、托盘、
+   * 闪屏全部重来一遍，用户视角是「整个应用闪了一下」，而这里只需要换后端。</p>
+   *
+   * @returns {Promise<{ok:boolean, port?:number, reason?:string}>} 结果
+   */
+  async function restartBackendForDev() {
+    if (startupRunning) return { ok: false, reason: '后端正在启动中，请稍后再试' };
+    if (!backend) return { ok: false, reason: '后端进程不存在（可能已在退出流程中）' };
+    log('[dev] 收到「保存并重启后端」请求');
+    intentionalBackendStop = true;
+    try {
+      await stopBackendGracefully();
+      backendStarted = false;
+      const result = await startBackend();
+      if (!result.ok) {
+        intentionalBackendStop = false;
+        log('[dev] 重启后端失败');
+        return { ok: false, reason: '后端启动失败，请查看日志' };
+      }
+      intentionalBackendStop = false;
+      log(`[dev] 后端已重启，端口 ${result.port}`);
+      if (win && !win.isDestroyed()) win.loadURL(`http://127.0.0.1:${result.port}`);
+      if (devWin && !devWin.isDestroyed()) {
+        devWin.loadURL(`http://127.0.0.1:${result.port}/dev/overview`);
+      }
+      return { ok: true, port: result.port };
+    } catch (e) {
+      intentionalBackendStop = false;
+      log(`[dev] 重启后端异常：${e && e.message}`);
+      return { ok: false, reason: (e && e.message) || '重启失败' };
+    }
   }
 
   // ==================== 系统托盘（后台运行） ====================
@@ -1034,6 +1181,7 @@ function main() {
     if (quitting) return;
     quitting = true;
     intentionalBackendStop = true;
+    closeDevWindow(); // 退出时一并关掉开发者窗口，避免退出过程中它还在轮询即将消失的后端
     scheduleClosingOverlay('正在关闭世界…'); // 关得快就不显示，慢才浮出（不制造闪烁）
     stopBackendGracefully().finally(() => {
       // 已关完：撤掉延迟定时器；已显示的遮罩不撤，直接随窗口一起消失（避免闪回主界面）
@@ -1168,21 +1316,42 @@ function main() {
   function registerIpc() {
     // ===== 无边框窗口的自绘标题栏（WindowControls.vue → preload → 这里）=====
     // 窗口是 frame:false，系统按钮不存在；三个动作都必须回主进程执行真实窗口操作。
-    ipcMain.handle('holzyn:window:minimize', () => {
-      if (win && !win.isDestroyed()) win.minimize();
+    // 目标窗口 = 事件来源所在窗口（而不是写死主窗口 win）：
+    // 开发者控制台是第二个无边框窗口，它的自绘三键若操作主窗口，最小化/关闭会作用到错误的窗口。
+    const winOf = (event) => {
+      try {
+        const w = BrowserWindow.fromWebContents(event.sender);
+        return w && !w.isDestroyed() ? w : null;
+      } catch (_) {
+        return null;
+      }
+    };
+    ipcMain.handle('holzyn:window:minimize', (event) => {
+      const w = winOf(event);
+      if (w) w.minimize();
     });
-    ipcMain.handle('holzyn:window:toggle-maximize', () => {
-      if (!win || win.isDestroyed()) return false;
-      if (win.isMaximized()) win.unmaximize();
-      else win.maximize();
-      return win.isMaximized();
+    ipcMain.handle('holzyn:window:toggle-maximize', (event) => {
+      const w = winOf(event);
+      if (!w) return false;
+      if (w.isMaximized()) w.unmaximize();
+      else w.maximize();
+      return w.isMaximized();
     });
     // 关闭按钮走 win.close()，因此仍然复用既有 close 语义：
     // 「关闭到托盘后台运行」或「关闭=退出（优雅停后端 + 关闭遮罩）」由设置决定。
-    ipcMain.handle('holzyn:window:close', () => {
-      if (win && !win.isDestroyed()) win.close();
+    ipcMain.handle('holzyn:window:close', (event) => {
+      const w = winOf(event);
+      if (w) w.close();
     });
-    ipcMain.handle('holzyn:window:is-maximized', () => !!(win && !win.isDestroyed() && win.isMaximized()));
+    ipcMain.handle('holzyn:window:is-maximized', (event) => {
+      const w = winOf(event);
+      return !!(w && w.isMaximized());
+    });
+
+    // ===== 开发者控制台（独立窗口 + 后端重启）=====
+    ipcMain.handle('holzyn:dev:open', (_e, route) => createDevWindow(typeof route === 'string' ? route : '/dev/overview'));
+    ipcMain.handle('holzyn:dev:restart-backend', () => restartBackendForDev());
+    ipcMain.handle('holzyn:dev:close', () => { closeDevWindow(); return { ok: true }; });
 
     ipcMain.handle('holzyn:updater:get-state', () => ({ ...updaterState }));
     ipcMain.handle('holzyn:updater:check', () => { checkForUpdate(); return { ...updaterState }; });

@@ -18,6 +18,7 @@
 
 package com.holzyn.actor.common;
 
+import com.holzyn.actor.domain.worldstore.RegistryTables;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.SessionFactory;
@@ -199,6 +200,16 @@ public class DatabaseStructureValidator implements ApplicationRunner {
             });
             result.put(tableName.toLowerCase(), new ExpectedTable(tableName, cols, pk));
         });
+        // V1.1.2-beta.1 分档：113 个实体里只有 16 张属于目录库，另外 97 张是世界库专属表
+        // （世界库有它自己的 113 张基线，由 WorldDataSourceFactory 的 Flyway 建）。
+        // 不过滤的话，切到目录库后这里会把 97 张世界表当成"缺失表"CREATE 进目录库——
+        // 两个库一旦混杂，分档的全部收益（独立备份/搬运/故障隔离）当场归零。
+        int mapped = result.size();
+        result.keySet().retainAll(RegistryTables.SET);
+        if (mapped != result.size()) {
+            log.info("[数据库] 分档校验口径：只校验目录库 {} 张表（跳过世界库专属 {} 张，由世界库 Flyway 负责）",
+                    result.size(), mapped - result.size());
+        }
         return result;
     }
 
@@ -388,6 +399,10 @@ public class DatabaseStructureValidator implements ApplicationRunner {
         List<String> extraTables = new ArrayList<>();
         Map<String, List<String>> extraCols = new TreeMap<>();
         for (Map.Entry<String, Set<String>> a : actual.entrySet()) {
+            if (!RegistryTables.isRegistryTable(a.getKey())) {
+                // 世界库专属表（97 张）不参与目录库校验，也不该在这里被报成"多余表"
+                continue;
+            }
             if (!expected.containsKey(a.getKey())) {
                 extraTables.add(a.getKey());
                 continue;

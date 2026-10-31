@@ -21,6 +21,7 @@ package com.holzyn.actor.domain.settings.vo;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * AI 模型 API 视图对象。
@@ -68,6 +69,15 @@ public class ModelApiVO {
 
     /** embedding 模型名（如 doubao-embedding / bge-m3） */
     private String embeddingModel;
+
+    /**
+     * 该供应商下的模型清单（文本 / 向量 / 决策三种角色）。
+     * <p>旧数据（models_json 为空）由 model / embedding_model / purpose 推导，前端无需区分新旧。</p>
+     */
+    private List<ProviderModelVO> models;
+
+    /** 模型数量（卡片摘要展示用） */
+    private Integer modelCount;
 
     /** 备注 */
     private String remark;

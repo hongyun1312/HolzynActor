@@ -18,7 +18,7 @@
     中栏 2D 世界地图串联两者（a16z ai-town 范式：地图即 UI 主角）。
     数据源全复用：/world-map + /movements + 沙盘 SSE + world-graph + /macro/* + /ai-runtime/status（零新后端）。
   -->
-  <div class="hm-home">
+  <div class="hm-home project-col">
     <!-- 顶栏控制条 -->
     <HomeTopbar
       :clock="clock"
@@ -444,7 +444,7 @@ async function reloadMap() {
 
 /** P0-2：去初始化 → 进入世界初始化页（独立全屏，6 步工作流；默认「跳过已生成」幂等模式） */
 function goInit() {
-  router.push(`/project/${projectId}/init`)
+  router.push(`/world/${projectId}/init`)
 }
 
 /** 在途移动列表 */
@@ -1119,7 +1119,7 @@ function validSceneSize(v) {
 /* V2.0：800 → 700（分片只保留 400/700；原写法会被浏览器就近解析到 900 字重，多下一个完整字重） */
 .hm-banner-title { font-size: 12.5px; font-weight: 700; }
 .hm-banner-time { font-style: normal; font-size: 12px; color: var(--hm-gold); font-variant-numeric: tabular-nums; }
-.hm-banner-hint { font-size: 11px; color: var(--hm-text-faint); }
+.hm-banner-hint { font-size: 12.5px; color: var(--hm-text-faint); }
 .hm-banner-close {
   border: none; background: transparent; cursor: pointer;
   color: var(--hm-text-faint); font-size: 12px; padding: 0 2px; line-height: 1;
@@ -1156,11 +1156,11 @@ function validSceneSize(v) {
 .hm-loc-head { display: flex; align-items: center; gap: 8px; }
 .hm-loc-name { font-size: 14px; font-weight: 700; color: var(--hm-text); }
 .hm-loc-close { margin-left: 0; color: var(--hm-text-faint); }
-.hm-loc-intro { font-size: 11.5px; color: var(--hm-text-soft); line-height: 1.7; }
-.hm-loc-stats { display: flex; gap: 10px; font-size: 11px; color: var(--hm-text-dim); }
+.hm-loc-intro { font-size: 13px; color: var(--hm-text-soft); line-height: 1.7; }
+.hm-loc-stats { display: flex; gap: 10px; font-size: 12.5px; color: var(--hm-text-dim); }
 .hm-loc-stat { font-variant-numeric: tabular-nums; }
 .hm-loc-nearby { border-top: 1px solid var(--hm-border-soft); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-.hm-loc-sub { font-size: 11px; font-weight: 700; color: var(--hm-text-dim); }
+.hm-loc-sub { font-size: 12.5px; font-weight: 700; color: var(--hm-text-dim); }
 .hm-loc-npc {
   display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--hm-text-soft);
   padding: 3px 6px; border-radius: 6px; cursor: pointer;

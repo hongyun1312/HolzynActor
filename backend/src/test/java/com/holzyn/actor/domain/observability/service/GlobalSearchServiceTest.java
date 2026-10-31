@@ -145,11 +145,11 @@ class GlobalSearchServiceTest {
         assertEquals(1, vo.groups().get(0).count());
         assertEquals(1L, vo.groups().get(0).items().get(0).id());
         assertEquals("沈砚秋", vo.groups().get(0).items().get(0).title());
-        assertEquals("/project/5/characters", vo.groups().get(0).items().get(0).route());
-        assertEquals("/project/5/world", vo.groups().get(1).items().get(0).route());
-        assertEquals("/project/5/timeline", vo.groups().get(2).items().get(0).route());
-        assertEquals("/project/5/knowledge", vo.groups().get(3).items().get(0).route());
-        assertEquals("/project/5/dashboard", vo.groups().get(4).items().get(0).route());
+        assertEquals("/world/5/characters", vo.groups().get(0).items().get(0).route());
+        assertEquals("/world/5/world", vo.groups().get(1).items().get(0).route());
+        assertEquals("/world/5/timeline", vo.groups().get(2).items().get(0).route());
+        assertEquals("/world/5/knowledge", vo.groups().get(3).items().get(0).route());
+        assertEquals("/world/5/dashboard", vo.groups().get(4).items().get(0).route());
         assertFalse(vo.truncated());
     }
 

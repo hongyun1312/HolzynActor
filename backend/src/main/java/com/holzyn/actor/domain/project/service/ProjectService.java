@@ -26,19 +26,24 @@ import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
 import com.holzyn.actor.domain.knowledge.service.WorldKnowledgeSyncService;
 import com.holzyn.actor.domain.project.entity.ActorProject;
 import com.holzyn.actor.domain.world.entity.ActorWorldSetting;
+import com.holzyn.actor.domain.world.model.WorldCategory;
+import com.holzyn.actor.domain.world.model.WorldTone;
 import com.holzyn.actor.common.PageResult;
 import com.holzyn.actor.domain.project.vo.ProjectVO;
 import com.holzyn.actor.domain.world.vo.WorldSettingVO;
 import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository;
+import com.holzyn.actor.domain.worldstore.WorldIndexDao;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -61,6 +66,29 @@ public class ProjectService {
     @org.springframework.context.annotation.Lazy
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.world.service.WorldCommonKnowledgeService worldCommonKnowledgeService;
+
+    /**
+     * 目录库索引 DAO（{@code actor_project} 展示列的唯一写入口）。
+     *
+     * <p>为什么字段注入 {@code required=false}：单元测试与"目录库未迁移"场景装配不到它，
+     * 此时世界名只落到世界观表，不抛异常。</p>
+     *
+     * <p>为什么必须 {@code @Lazy}：ProjectService 在会话/引擎依赖链上（世界打开时会回写项目），
+     * 而 WorldIndexDao 又挂在目录库数据源上——直接注入会形成 Bean 环，实测启动即报
+     * "WorldGate 需要 WorldSessionService，找不到 Bean"（环被 Spring 断在了别处）。</p>
+     */
+    @org.springframework.context.annotation.Lazy
+    @Autowired(required = false)
+    private WorldIndexDao worldIndexDao;
+
+    /**
+     * 世界程度读取入口（{@code @Lazy}：它本身依赖 WorldIndexDao，直接注入会与上面的环叠加）。
+     *
+     * <p>保存世界观后必须让它的短 TTL 缓存失效，否则宏观调度器最多 2 秒内还按旧档位跑。</p>
+     */
+    @org.springframework.context.annotation.Lazy
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.service.WorldToneService worldToneService;
 
     /**
      * 查询当前用户的项目列表（分页，按更新时间倒序）。
@@ -193,7 +221,14 @@ public class ProjectService {
             target.setVersion(1);
         }
         target.setName(dto.name());
-        target.setGenre(dto.genre());
+        // 世界类别固定八类：非空就必须能归一成那八个标签之一，归不了一律 400。
+        // 为什么这里用 require 而不是 normalize：normalize 会把不认识的题材静默丢成 null，
+        // 用户以为选上了、实际没落库；require 直接回「只能从这八类里选」，前端就能提示补选。
+        // 空值仍然允许（新建向导第一次保存可能还没选类别）。
+        String genre = dto.genre() == null ? "" : dto.genre().trim();
+        target.setGenre(genre.isEmpty() ? null : WorldCategory.require(genre));
+        // 世界程度：空值按 standard 落库（显式写下来，避免"空=未设置"与"空=标准"两种语义混用）
+        target.setTone(WorldTone.ofCode(dto.tone()).code());
         target.setEra(dto.era());
         target.setGeography(dto.geography());
         target.setFactions(dto.factions());
@@ -204,10 +239,57 @@ public class ProjectService {
         target.setWorldgenTaskId(worldgenTaskId);
         target.setStatus(1);
         WorldSettingVO saved = WorldSettingVO.of(worldSettingRepository.save(target));
+        // 分类/程度的展示快照写目录库（画廊卡片上的「仙侠 · 休闲」）；档位还影响宏观调度与提示词，
+        // 缓存必须立刻失效，否则改档后最多 2 秒内仍然按旧档位跑
+        try {
+            if (worldIndexDao != null) {
+                worldIndexDao.updateClassification(projectId, saved.genre(), saved.tone());
+            }
+            if (worldToneService != null) {
+                worldToneService.invalidate(projectId);
+            }
+        } catch (Exception e) {
+            log.warn("[世界观] 同步分类快照失败（不影响保存本身）project={}：{}", projectId, e.toString());
+        }
         // RAG 适配：世界设定已变 → 事务提交后把最新设定同步为项目级知识文档（AI 调用在事务外，不持 H2 锁）
         // userId 在事务内取好传入（afterCommit 回调执行时请求上下文可能已清理）
         scheduleWorldKnowledgeSync(currentUserProvider.currentUserId(), projectId);
         return saved;
+    }
+
+    /**
+     * 保存世界名与世界简介（新建世界向导「世界名与简介」步的落库入口）。
+     *
+     * <p><b>为什么不能直接 save 项目行</b>：进入某个世界后当前数据源就是世界库，而
+     * {@code actor_project} 在世界库里只是**只读镜像**（重开世界时会被目录库覆盖），
+     * 直接 {@code projectRepository.save} 会被全局配置写保护拦下并 400。所以这里：
+     * 目录库{@code actor_project}（画廊真正读的那份）走 {@link WorldIndexDao#updateMeta}
+     * 这个 index 列唯一写入口；世界库只更新 {@code actor_world_setting.name}（详情页标题）。
+     * 世界库镜像由关世界时的 mirror sync 自然对齐，不需要在这里写。</p>
+     *
+     * <p>不含 AI 调用，可以 {@code @Transactional}。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param name      世界名（非空）
+     *
+     * @param summary   世界简介（可空）
+     *
+     * @return 更新后的项目 VO（name/summary 为本次写入值）
+     */
+    @Transactional
+    public ProjectVO applyWorldMeta(Long projectId, String name, String summary) {
+        ActorProject p = requireOwned(projectId);
+        if (worldIndexDao != null) {
+            worldIndexDao.updateMeta(projectId, name, summary, null, LocalDateTime.now());
+        }
+        worldSettingRepository.findTopByProjectIdOrderByVersionDesc(projectId).ifPresent(s -> {
+            s.setName(name);
+            worldSettingRepository.save(s);
+        });
+        // 返回新值的 VO 但不改托管实体：改托管实体会在提交时把它 flush 回镜像表
+        return new ProjectVO(p.getId(), p.getProjectUid(), p.getUserId(), name, p.getCode(), p.getCoverUrl(),
+                summary, p.getStatus(), characterCount(projectId), p.getCreatedAt(), p.getUpdatedAt());
     }
 
     /**

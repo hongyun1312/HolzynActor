@@ -33,7 +33,7 @@ import java.util.regex.Pattern;
  * <li>{@link Verdict#SATISFIED}：可程序化判定且条件成立；</li>
  * <li>{@link Verdict#NOT_SATISFIED}：可程序化判定且条件不成立（候选出局）；</li>
  * <li>{@link Verdict#UNKNOWN}：语义性条件（如「若无人提及旧契」）/ 上下文缺失 / 解析失败
- * ——调用方走 NanoJev boolean 批量兜底，判定失败则宽松放行。</li>
+ * ——调用方走 决策模型 boolean 批量兜底，判定失败则宽松放行。</li>
  * </ul>
  * <p><b>支持的条件类型</b>（判据自包含，全部可单测）：</p>
  * <ol>
@@ -246,7 +246,7 @@ public final class SpacePreconditionEvaluator {
         if (location != Verdict.UNKNOWN) {
             return location;
         }
-        // ⑦ 语义性条件 / 无法判定 → UNKNOWN（调用方 NanoJev boolean 兜底，失败宽松放行）
+        // ⑦ 语义性条件 / 无法判定 → UNKNOWN（调用方 决策模型 boolean 兜底，失败宽松放行）
         return Verdict.UNKNOWN;
     }
 

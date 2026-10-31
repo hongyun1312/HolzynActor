@@ -47,7 +47,7 @@ import java.util.Map;
  * {@link RealtimeDecisionActivationService} 惰性建行兜底（引擎推进时再行项目校验）。</p>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}/realtime-decision")
+@RequestMapping("/api/worlds/{projectId}/realtime-decision")
 @RequiredArgsConstructor
 public class RealtimeDecisionController {
 

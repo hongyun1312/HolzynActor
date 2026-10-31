@@ -47,7 +47,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 摘要级信息（不含 Prompt / 响应正文、不含密钥）。</p>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}")
+@RequestMapping("/api/worlds/{projectId}")
 @RequiredArgsConstructor
 public class ProjectObservabilityController {
 

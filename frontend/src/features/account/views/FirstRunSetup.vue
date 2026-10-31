@@ -24,11 +24,17 @@
         后端 AI 生成六维 → 回填表单预览 → 确认保存。保存同时写本地账户与玩家档案，
         身份/个人档案与 persona 的 identity/background 自动同步。</li>
   </ul>
-  <p>完成后：标记向导完成 → 置位「新手引导待启动」→ 进入项目画廊，自动启动 7 步交互式引导
+  <p>完成后：标记向导完成 → 置位「新手引导待启动」→ 进入世界画廊，自动启动 7 步交互式引导
   （画廊 → 示例世界浮生小镇 · 青屿镇 → 世界内），可跳过、可重看。</p>
   <p>数据：useAccountStore（本地账户），保存走 /api/local-account；模型配置走 /api/model-apis
   （projectId 空 = 用户级默认）；玩家档案走 /api/player-profile；AI 补充生成走
   POST /api/player-profile/generate（新接口）。</p>
+  <p><b>布局契约（开局配置页优化：顶部 ≤ 卡片 1/4）</b>：顶部区 = 品牌 + 阶段标题 + 紧凑分段步骤器
+  + 一句话副标题 + 完成度。实测 1280×720 下 92~95px（卡片 523px）≈ 17.5%；改前是 311px / 632px = 49%
+  （Logo 1.5rem + 居中 1.5rem 大标题 + 两行说明 + 97px 的 el-steps 步骤条，滚动区只剩 169px）。
+  长解释一律下移为表单内 .fr-note 可展开块（原文保留、默认收起）；「我的形象」20+ 字段收敛为
+  4 个 el-collapse 分区，默认只展开「基本信息」。改这里时不要恢复居中大标题 / 步骤条 description /
+  平铺长表单，否则输入区又会被挤回半屏。</p>
 -->
 <template>
   <div class="firstrun-page glass-scene" :class="{ 'no-cloudtrain': !cloudTrainEnabled }">
@@ -57,33 +63,63 @@
     <!-- ===== 阶段 1 / 2：向导卡片（连接模型 → 我的形象） ===== -->
     <!-- 玻璃卡片：固定高度 + 弹窗内滚动，两阶段弹窗大小完全一致 -->
     <div v-else-if="stage === 'api' || stage === 'persona'" class="fr-card glass-panel">
-      <!-- 头部：品牌 + 标题 -->
-      <div class="fr-header">
-        <div class="fr-logo">Holzyn<span class="fr-logo-sub">Actor</span></div>
-        <h1 class="fr-title">{{ stage === 'api' ? '连接模型' : '我的形象' }}</h1>
-        <p class="fr-desc">
-          {{ stage === 'api'
-            ? '世界的推进、角色的决策与对话全部依赖模型调用。这里配置一个用户级模型接口（所有项目共享），之后可在「设置 → API 配置」随时修改。'
-            : '让 NPC 角色认识真实的你：可手填，也可写一段自我介绍让 AI 帮你补全详细设定。所有字段选填，随时可在「设置」中修改。' }}
-        </p>
-      </div>
-
-      <!-- 步骤条（两阶段） -->
-      <el-steps :active="stage === 'api' ? 0 : 1" align-center finish-status="success" class="fr-steps">
-        <el-step title="连接模型" description="让世界像真人一样生活" />
-        <el-step title="我的形象" description="创建专属于你的角色" />
-      </el-steps>
+      <!--
+        顶部区（改前实测占卡片 49%，改后 ≤ 1/4）：第一行「品牌 + 当前阶段标题」+ 紧凑分段步骤器，
+        第二行一句话副标题 + 完成度。原来的长段说明与步骤条 description 全部下移：
+        长解释进 .fr-note（默认收起，原文保留）、分区说明进各折叠分区，信息不丢失但不再挤占输入区。
+      -->
+      <header class="fr-top">
+        <div class="fr-top-row">
+          <div class="fr-brand">
+            <span class="fr-logo">Holzyn<span class="fr-logo-sub">Actor</span></span>
+            <span class="fr-brand-sep" aria-hidden="true">/</span>
+            <h1 class="fr-title">{{ stageTitle }}</h1>
+          </div>
+          <CompactStepper
+            :items="stageItems"
+            :active="stageIndex"
+            clickable
+            label="设置步骤"
+            @select="goStage"
+          />
+        </div>
+        <div class="fr-top-row fr-top-row--sub">
+          <p class="fr-sub">{{ stageSub }}</p>
+          <span
+            v-if="stage === 'persona'"
+            class="fr-count"
+            :title="`已填写 ${filledCount} / ${totalCount} 个字段（全部选填）`"
+          >已填 {{ filledCount }}/{{ totalCount }}</span>
+          <span v-else-if="apiConfigured" class="fr-count">{{ apiCount }} 个接口已配置</span>
+        </div>
+      </header>
 
       <!-- 表单主体：唯一滚动区域（弹窗内滚动，页面本身不滚动） -->
       <div class="fr-body">
       <!-- ===== 阶段 1：连接模型（API 配置） ===== -->
       <div v-show="stage === 'api'" class="fr-step">
+        <!-- 长解释下移到这里：默认收起、需要时展开（原文保留，信息不丢） -->
+        <section class="fr-note" :class="{ 'is-open': noteOpen.api }">
+          <button
+            type="button"
+            class="fr-note-head"
+            :aria-expanded="noteOpen.api"
+            @click="toggleNote('api')"
+          >
+            <span class="fr-note-title">为什么必须先配模型？</span>
+            <span class="fr-note-chev" aria-hidden="true"></span>
+          </button>
+          <div v-show="noteOpen.api" class="fr-note-body">
+            <p>
+              世界的推进、角色的决策与对话全部依赖模型调用。这里配置的是一个<b>用户级</b>模型接口
+              （所有项目共享），之后可在「设置 → API 配置」随时修改、新增多个并测试。
+            </p>
+            <p>不配模型时，世界会退回机械的作息循环——角色只会按表起床睡觉，非常僵硬、非常不真实。</p>
+          </div>
+        </section>
+
         <div class="fr-section">
           <div class="fr-section-title">配置模型接口</div>
-          <p class="fr-sub-desc">
-            不配模型时世界会退回机械的作息循环，非常僵硬、非常不真实。这里配置一个<b>用户级</b>模型接口
-            （所有项目共享），之后随时可在「设置 → API 配置」新增多个并测试。
-          </p>
 
           <!-- 已配置：只读摘要 + 去设置 -->
           <div v-if="apiConfigured" class="fr-api-done">
@@ -118,124 +154,133 @@
         </div>
       </div>
 
-      <!-- ===== 阶段 2：我的形象 ===== -->
+      <!-- ===== 阶段 2：我的形象（4 个折叠分区；默认只展开「基本信息」，避免 20+ 字段一次糊满） ===== -->
       <el-form v-show="stage === 'persona'" :model="form" label-position="top" class="fr-form" @submit.prevent>
-        <div class="fr-section">
-          <div class="fr-section-title">基本信息</div>
-          <div class="fr-grid-2">
-            <el-form-item label="昵称（显示名）">
-              <el-input v-model="form.nickname" placeholder="例如：林晚" maxlength="64" show-word-limit clearable />
+        <el-collapse v-model="openSecs" class="fr-collapse">
+          <el-collapse-item name="base">
+            <template #title>
+              <span class="fr-sec-title">基本信息</span>
+              <span class="fr-sec-meta">{{ secCount.base.done }}/{{ secCount.base.total }}</span>
+            </template>
+            <div class="fr-grid-2">
+              <el-form-item label="昵称（显示名）">
+                <el-input v-model="form.nickname" placeholder="例如：林晚" maxlength="64" show-word-limit clearable />
+              </el-form-item>
+              <el-form-item label="头像">
+                <div class="avatar-line">
+                  <el-avatar :size="40" :src="form.avatarUrl" class="fr-avatar">
+                    {{ (form.nickname || 'H').charAt(0) }}
+                  </el-avatar>
+                  <el-input v-model="form.avatarUrl" placeholder="头像图片地址（可留空）" clearable />
+                </div>
+              </el-form-item>
+            </div>
+            <el-form-item label="个性签名">
+              <el-input v-model="form.signature" placeholder="一句话介绍自己（选填）" maxlength="255" show-word-limit clearable />
             </el-form-item>
-            <el-form-item label="头像">
-              <div class="avatar-line">
-                <el-avatar :size="44" :src="form.avatarUrl" class="fr-avatar">
-                  {{ (form.nickname || 'H').charAt(0) }}
-                </el-avatar>
-                <el-input v-model="form.avatarUrl" placeholder="头像图片地址（可留空）" clearable />
-              </div>
-            </el-form-item>
-          </div>
-          <el-form-item label="个性签名">
-            <el-input v-model="form.signature" placeholder="一句话介绍自己（选填）" maxlength="255" show-word-limit clearable />
-          </el-form-item>
-        </div>
+          </el-collapse-item>
 
-        <div class="fr-section">
-          <div class="fr-section-title">NPC 眼中的你（影响角色对你的了解与回应）</div>
-          <div class="fr-grid-2">
-            <el-form-item label="身份">
-              <el-input v-model="form.identity" placeholder="例如：大学生 / 旅行者 / 编辑" maxlength="255" clearable />
+          <el-collapse-item name="npc">
+            <template #title>
+              <span class="fr-sec-title">NPC 眼中的你</span>
+              <span class="fr-sec-meta">{{ secCount.npc.done }}/{{ secCount.npc.total }}</span>
+            </template>
+            <p class="fr-sub-desc">角色会把这些当作「对你的了解」：影响他们怎么称呼你、跟你聊什么、避开什么。</p>
+            <div class="fr-grid-2">
+              <el-form-item label="身份">
+                <el-input v-model="form.identity" placeholder="例如：大学生 / 旅行者 / 编辑" maxlength="255" clearable />
+              </el-form-item>
+              <el-form-item label="职业">
+                <el-input v-model="form.occupation" placeholder="例如：自由撰稿人" maxlength="255" clearable />
+              </el-form-item>
+              <el-form-item label="喜好">
+                <el-input v-model="form.hobbies" placeholder="例如：咖啡、悬疑小说、深夜散步" maxlength="512" clearable />
+              </el-form-item>
+              <el-form-item label="禁忌（角色应避免冒犯）">
+                <el-input v-model="form.taboos" placeholder="例如：不喜欢被问年龄" maxlength="512" clearable />
+              </el-form-item>
+            </div>
+            <el-form-item label="个人档案（自由描述）">
+              <el-input
+                v-model="form.profileText"
+                type="textarea"
+                :rows="3"
+                placeholder="你的背景、经历、性格、近期状态……角色会把它当作「对你的了解」来对话（选填）"
+                clearable
+              />
             </el-form-item>
-            <el-form-item label="职业">
-              <el-input v-model="form.occupation" placeholder="例如：自由撰稿人" maxlength="255" clearable />
-            </el-form-item>
-            <el-form-item label="喜好">
-              <el-input v-model="form.hobbies" placeholder="例如：咖啡、悬疑小说、深夜散步" maxlength="512" clearable />
-            </el-form-item>
-            <el-form-item label="禁忌（角色应避免冒犯）">
-              <el-input v-model="form.taboos" placeholder="例如：不喜欢被问年龄" maxlength="512" clearable />
-            </el-form-item>
-          </div>
-          <el-form-item label="个人档案（自由描述）">
-            <el-input
-              v-model="form.profileText"
-              type="textarea"
-              :rows="4"
-              placeholder="你的背景、经历、性格、近期状态……角色会把它当作「对你的了解」来对话（选填）"
-              clearable
-            />
-          </el-form-item>
-        </div>
+          </el-collapse-item>
 
-        <!-- 玩家 persona 六维（对谈模式） -->
-        <div class="fr-section">
-          <div class="fr-section-title">玩家 persona（对谈时角色如何认识你）</div>
-          <p class="fr-sub-desc">
-            对谈（静止世界聊天）以「玩家档案」身份与你对话：以下六维会注入对谈上下文。
-            可以手填，也可以用右下角的「AI 补充生成」写一段自我介绍让 AI 帮你补全。
-          </p>
-          <div class="fr-grid-2">
-            <el-form-item label="身份">
-              <el-input v-model="persona.identity" placeholder="例如：旅行编辑" maxlength="255" clearable />
-            </el-form-item>
-            <el-form-item label="说话风格">
-              <el-input v-model="persona.voice" placeholder="例如：慢条斯理、爱引经据典" maxlength="255" clearable />
-            </el-form-item>
-            <el-form-item label="性格">
-              <el-input v-model="persona.personality" placeholder="例如：温和、慢热" maxlength="255" clearable />
-            </el-form-item>
-            <el-form-item label="目标">
-              <el-input v-model="persona.goals" placeholder="例如：收集九州民间故事" maxlength="255" clearable />
-            </el-form-item>
-            <el-form-item label="能力">
-              <el-input v-model="persona.ability" placeholder="例如：善写、善辨音" maxlength="255" clearable />
-            </el-form-item>
-            <el-form-item label="背景">
-              <el-input v-model="persona.background" type="textarea" :rows="3" placeholder="你的经历与来处…" maxlength="500" show-word-limit clearable />
-            </el-form-item>
-          </div>
+          <!-- 玩家 persona 六维（对谈模式） -->
+          <el-collapse-item name="persona">
+            <template #title>
+              <span class="fr-sec-title">玩家 persona（对谈）</span>
+              <span class="fr-sec-meta">{{ secCount.persona.done }}/{{ secCount.persona.total }}</span>
+            </template>
+            <p class="fr-sub-desc">对谈（静止世界聊天）以「玩家档案」身份与你对话：以下六维会注入对谈上下文，可手填，也可用下方「AI 补充生成」。</p>
+            <div class="fr-grid-2">
+              <el-form-item label="身份">
+                <el-input v-model="persona.identity" placeholder="例如：旅行编辑" maxlength="255" clearable />
+              </el-form-item>
+              <el-form-item label="说话风格">
+                <el-input v-model="persona.voice" placeholder="例如：慢条斯理、爱引经据典" maxlength="255" clearable />
+              </el-form-item>
+              <el-form-item label="性格">
+                <el-input v-model="persona.personality" placeholder="例如：温和、慢热" maxlength="255" clearable />
+              </el-form-item>
+              <el-form-item label="目标">
+                <el-input v-model="persona.goals" placeholder="例如：收集九州民间故事" maxlength="255" clearable />
+              </el-form-item>
+              <el-form-item label="能力">
+                <el-input v-model="persona.ability" placeholder="例如：善写、善辨音" maxlength="255" clearable />
+              </el-form-item>
+              <el-form-item label="背景">
+                <el-input v-model="persona.background" type="textarea" :rows="3" placeholder="你的经历与来处…" maxlength="500" show-word-limit clearable />
+              </el-form-item>
+            </div>
+          </el-collapse-item>
 
-          <!-- AI 补充生成 -->
-          <div class="fr-ai-card" :class="{ 'is-off': !apiConfigured }">
-            <div class="fr-ai-head">
-              <div class="fr-ai-title">
-                <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;AI 补充生成
-              </div>
+          <!-- AI 补充生成（独立分区，展开后原地生成并回填上面的分区） -->
+          <el-collapse-item name="ai">
+            <template #title>
+              <span class="fr-sec-title"><el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;AI 补充生成</span>
               <el-tag v-if="!apiConfigured" size="small" type="info" effect="plain">需先配置模型接口</el-tag>
+            </template>
+            <div class="fr-ai-body" :class="{ 'is-off': !apiConfigured }">
+              <p class="fr-ai-desc">
+                写一段你想成为的角色（或真实的自己），AI 会把它扩写为 persona 六维并回填到上面的分区，你确认后再保存。
+              </p>
+              <el-input
+                v-model="selfIntro"
+                type="textarea"
+                :rows="3"
+                maxlength="2000"
+                show-word-limit
+                placeholder="例如：我是旅行编辑，喜欢收集九州各地的民间故事，性格温和慢热，说话慢条斯理…"
+              />
+              <div class="fr-ai-ops">
+                <el-button
+                  type="primary"
+                  plain
+                  :disabled="!apiConfigured"
+                  :loading="generating"
+                  @click="aiGenerate"
+                >
+                  <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;AI 补充生成
+                </el-button>
+                <el-button
+                  v-if="generated"
+                  size="small"
+                  text
+                  @click="clearGenerated"
+                >
+                  清空生成结果
+                </el-button>
+                <span class="fr-ai-hint">生成后请核对，再点「保存并进入世界画廊」</span>
+              </div>
             </div>
-            <p class="fr-ai-desc">
-              写一段你想成为的角色（或真实的自己），AI 会把它扩写为 persona 六维并回填到上面的表单，你确认后再保存。
-            </p>
-            <el-input
-              v-model="selfIntro"
-              type="textarea"
-              :rows="3"
-              maxlength="2000"
-              show-word-limit
-              placeholder="例如：我是旅行编辑，喜欢收集九州各地的民间故事，性格温和慢热，说话慢条斯理…"
-            />
-            <div class="fr-ai-ops">
-              <el-button
-                type="primary"
-                plain
-                :disabled="!apiConfigured"
-                :loading="generating"
-                @click="aiGenerate"
-              >
-                <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;AI 补充生成
-              </el-button>
-              <el-button
-                v-if="generated"
-                size="small"
-                text
-                @click="clearGenerated"
-              >
-                清空生成结果
-              </el-button>
-              <span class="fr-ai-hint">生成后请核对，再点「保存并进入画廊」</span>
-            </div>
-          </div>
-        </div>
+          </el-collapse-item>
+        </el-collapse>
       </el-form>
 
       </div><!-- /.fr-body -->
@@ -249,12 +294,12 @@
         <template v-else>
           <el-button class="fr-skip" text @click="skip">以后再说</el-button>
           <el-button type="primary" class="fr-save" :loading="saving" @click="finish">
-            保存并进入画廊
+            保存并进入世界画廊
           </el-button>
         </template>
       </div>
       <p class="fr-tip">
-        提示：本地数据只保存在你的电脑上；保存后我们会带你在项目画廊里快速逛逛示例世界。
+        提示：本地数据只保存在你的电脑上；保存后我们会带你在世界画廊里快速逛逛示例世界。
         所有内容都可在「设置」中随时修改。
       </p>
     </div>
@@ -265,9 +310,9 @@
 /**
  * 首次设置向导（新用户引导，v1.1.0-beta.2 重构）。
  * <p>阶段机：splash（启动动画，仅首次）→ api（连接模型，可跳过）→ persona（我的形象，含 AI 补充生成）
- * → 保存并进入画廊（置位新手引导待启动标记，由 FirstRunGuide 接续 7 步引导）。</p>
+ * → 保存并进入世界画廊（置位新手引导待启动标记，由 FirstRunGuide 接续 7 步引导）。</p>
  * <p>旧「开始使用」信息卡（时钟/成本/对谈/AI 助手）由新引导流程取代：完成本向导后
- * 进入画廊自动启动引导，引导内逐一步骤讲解这些能力。</p>
+ * 进入世界画廊自动启动引导，引导内逐一步骤讲解这些能力。</p>
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -277,6 +322,7 @@ import { useTheme } from '@/shared/theme'
 import { savePlayerProfile, fetchPlayerProfile, fetchModelApis, createModelApi, testModelApi, generatePlayerProfile } from '@/shared/api'
 import { armGuide } from '@/shared/onboarding/firstRunGuide'
 import CloudTrainBackground from '@/shared/components/CloudTrainBackground.vue'
+import CompactStepper from '@/shared/components/CompactStepper.vue'
 import WindowControls from '@/shared/layout/WindowControls.vue'
 import { useGlassScene } from '@/shared/composables/useGlassScene'
 
@@ -320,6 +366,62 @@ const persona = reactive({ identity: '', background: '', personality: '', voice:
 
 /** AI 补充生成的自我介绍输入 */
 const selfIntro = ref('')
+
+// ==================== 顶部区（紧凑页面头） ====================
+/**
+ * 两阶段步骤定义（紧凑分段器数据源）。
+ * <p>改前这里是 `el-steps align-center` + 每步 description，光步骤条就 97px 且描述折成两行；
+ * 现在只留标题，解释文案走 desc（仅作原生悬停提示，不占高度）。</p>
+ */
+const stageItems = [
+  { key: 'api', title: '连接模型', desc: '配置用户级模型接口（可跳过）' },
+  { key: 'persona', title: '我的形象', desc: '让 NPC 认识真实的你' }
+]
+
+/** 当前阶段索引（0 起，与分段器一致） */
+const stageIndex = computed(() => (stage.value === 'persona' ? 1 : 0))
+/** 当前阶段标题（左上行内标题，替代改前 1.5rem 的居中大标题） */
+const stageTitle = computed(() => (stage.value === 'persona' ? '我的形象' : '连接模型'))
+/** 当前阶段一句话副标题（严格一行：改前是 2 行居中说明，占掉半个输入区） */
+const stageSub = computed(() => (stage.value === 'persona'
+  ? '让 NPC 记住真实的你——全部选填，可写一段自我介绍让 AI 补全'
+  : '配置一个用户级模型接口（所有项目共享），之后可在「设置 → API 配置」修改'))
+
+/**
+ * 折叠分区展开项（我的形象阶段）。
+ * <p>只默认展开「基本信息」：改前 4 大块 20+ 字段平铺，1280×720 下要靠滚动才能看到头像/签名之外的字段。</p>
+ */
+const openSecs = ref(['base'])
+
+/** 长解释的展开态（默认收起；原文保留在 .fr-note-body 内） */
+const noteOpen = reactive({ api: false })
+function toggleNote(key) {
+  noteOpen[key] = !noteOpen[key]
+}
+
+/** 切到指定阶段（分段器点击回跳/前进） */
+function goStage(i) {
+  stage.value = i === 0 ? 'api' : 'persona'
+}
+
+/** 统计一组字段里已填的个数（去空格计非空，与保存逻辑口径一致） */
+function countFilled(obj, keys) {
+  return keys.filter((k) => String(obj[k] ?? '').trim()).length
+}
+
+/** 各分区已填/总数（分区标题右侧展示，让「选填」也有完成感） */
+const secCount = computed(() => ({
+  base: { done: countFilled(form, ['nickname', 'avatarUrl', 'signature']), total: 3 },
+  npc: { done: countFilled(form, ['identity', 'occupation', 'hobbies', 'taboos', 'profileText']), total: 5 },
+  persona: {
+    done: countFilled(persona, ['identity', 'background', 'personality', 'voice', 'goals', 'ability']),
+    total: 6
+  }
+}))
+/** 表单字段总数（3 + 5 + 6） */
+const totalCount = 14
+/** 已填总数（顶部「已填 n/14」） */
+const filledCount = computed(() => secCount.value.base.done + secCount.value.npc.done + secCount.value.persona.done)
 
 // ==================== 连接模型（API 配置） ====================
 const apiForm = reactive({ name: '', baseUrl: '', apiKey: '', model: '' })
@@ -537,7 +639,7 @@ async function persistAccount() {
   await syncPlayerProfile()
 }
 
-/** 完成向导：保存并进入画廊（置位引导待启动，由 FirstRunGuide 接续 7 步引导） */
+/** 完成向导：保存并进入世界画廊（置位引导待启动，由 FirstRunGuide 接续 7 步引导） */
 async function finish() {
   saving.value = true
   try {
@@ -552,7 +654,7 @@ async function finish() {
   }
 }
 
-/** 以后再说：仅标记完成，不保存（仍进入画廊 + 引导，引导内可再补） */
+/** 以后再说：仅标记完成，不保存（仍进入世界画廊 + 引导，引导内可再补） */
 async function skip() {
   saving.value = true
   try {
@@ -654,21 +756,25 @@ onMounted(init)
 .fr-splash-sub { font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px; }
 .fr-splash-skip { font-size: 0.72rem; color: var(--text-placeholder, var(--text-tertiary)); margin-top: 26px; }
 
-/* ===== 向导卡片（液态玻璃 + 固定尺寸 + 弹窗内滚动） ===== */
+/* ===== 向导卡片（液态玻璃 + 内容自适应高度 + 弹窗内滚动） =====
+   宽度 880：改前 720 在 1920 宽屏下两侧各空约 600px，表单却仍被挤在小框里；
+   高度：改前写死 min(680, 100vh−88)，折叠后会在底部留下大片空白，故改「内容自适应 + 上限」。 */
 .fr-card {
   width: 100%;
-  max-width: var(--page-w-form, 720px);
+  max-width: min(880px, calc(100vw - 32px));
   /* 液态玻璃材质（背景/模糊/描边/高光）由 .glass-panel 提供 */
   border-radius: 20px;
-  padding: 32px 44px 24px;
+  padding: 18px 30px 16px;
   display: flex;
   flex-direction: column;
-  /* 两阶段弹窗统一尺寸：固定高度（矮屏自适应），表单在 .fr-body 内滚动，页面本身不滚动 */
-  height: min(680px, calc(100vh - 88px));
+  /* 最小高度保证「已配置模型」这种短内容态下卡片不塌成一条（此时顶部 95px ≈ 卡片 24%，
+     是全页最差比例；表单实际填写态为 17~19%） */
+  min-height: 400px;
+  max-height: calc(100vh - 88px);
 }
-/* 表单主体：唯一滚动区域 */
+/* 表单主体：唯一滚动区域（内容不足时按内容高度，不硬撑满卡片） */
 .fr-body {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -679,21 +785,110 @@ onMounted(init)
 .fr-body::-webkit-scrollbar { width: 6px; }
 .fr-body::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, rgba(255, 255, 255, 0.24)); border-radius: 3px; }
 .fr-body::-webkit-scrollbar-track { background: transparent; }
-.fr-header { text-align: center; margin-bottom: 8px; }
-.fr-logo { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.5px; color: var(--brand-primary, #1d5cff); }
-.fr-logo-sub { font-size: 0.9rem; font-weight: 600; color: var(--text-secondary); margin-left: 4px; }
-.fr-title { font-size: 1.5rem; font-weight: 700; margin: 14px 0 8px; color: var(--text-primary); }
-.fr-desc { font-size: 0.88rem; color: var(--text-secondary); line-height: 1.7; max-width: 560px; margin: 0 auto 20px; }
 
-/* 步骤条 */
-.fr-steps { max-width: 560px; margin: 0 auto 6px; }
+/* ===== 顶部区（品牌 + 阶段标题 + 紧凑分段器 / 一句话副标题 + 完成度）=====
+   改前：Logo(1.5rem) + 居中大标题(1.5rem) + 两行说明 + 97px 步骤条 = 311px，占卡片 49%（1280×720）。
+   改后：两行 ≈ 70px（≤ 卡片 1/4），长说明移入表单内 .fr-note，标题右置分段器一眼可见进度。 */
+.fr-top {
+  flex: 0 0 auto;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border-l1);
+  margin-bottom: 12px;
+}
+.fr-top-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
+.fr-brand { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.fr-logo { font-size: 1rem; font-weight: 700; letter-spacing: 0.3px; color: var(--brand-primary, #1d5cff); white-space: nowrap; }
+.fr-logo-sub { font-size: 0.76rem; font-weight: 600; color: var(--text-secondary); margin-left: 3px; }
+.fr-brand-sep { font-size: 0.8rem; color: var(--text-placeholder, var(--text-tertiary)); }
+.fr-title { font-size: 1.05rem; font-weight: 700; margin: 0; color: var(--text-primary); white-space: nowrap; }
+.fr-top-row--sub { margin-top: 5px; }
+.fr-sub {
+  margin: 0;
+  min-width: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fr-count {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 8px;
+  border: 1px solid var(--border-l1);
+  border-radius: 999px;
+}
+
+/* ===== 长解释（默认收起；原文完整保留，信息不丢）===== */
+.fr-note {
+  border: 1px solid var(--border-l1);
+  border-radius: var(--radius-md, 10px);
+  background: var(--accent-softer);
+  margin: 0 0 12px;
+  overflow: hidden;
+}
+.fr-note-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  text-align: left;
+}
+.fr-note-head:hover { color: var(--accent-text); }
+.fr-note-title { font-weight: 600; }
+/* 折叠箭头用 CSS 雪佛龙（HIcon 的 ArrowDown/Up 已被映射成抽屉图标，见 AGENTS 8.3.9） */
+.fr-note-chev {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-right: 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.2s;
+}
+.fr-note.is-open .fr-note-chev { transform: rotate(45deg); }
+.fr-note-body { padding: 0 12px 9px; font-size: 0.78rem; line-height: 1.7; color: var(--text-secondary); }
+.fr-note-body p { margin: 0 0 6px; }
+.fr-note-body p:last-child { margin-bottom: 0; }
+
+/* ===== 我的形象：折叠分区（沿用 el-collapse，只把尺寸/描边收敛成紧凑规格）===== */
+.fr-collapse {
+  border: 0;
+  --el-collapse-border-color: var(--border-l1);
+  --el-collapse-header-height: 36px;
+  --el-collapse-header-bg-color: transparent;
+  --el-collapse-content-bg-color: transparent;
+  --el-collapse-header-font-size: 0.88rem;
+  --el-collapse-content-font-size: 0.82rem;
+}
+.fr-collapse :deep(.el-collapse-item__header) { font-weight: 600; color: var(--text-primary); padding: 0 2px; }
+.fr-collapse :deep(.el-collapse-item__arrow) { color: var(--text-tertiary); margin-left: 8px; }
+.fr-collapse :deep(.el-collapse-item__title) { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fr-collapse :deep(.el-collapse-item__wrap) { border-bottom: 0; }
+.fr-collapse :deep(.el-collapse-item__content) { padding: 8px 2px 6px; line-height: 1.6; }
+.fr-sec-title { display: inline-flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fr-sec-meta { margin-left: auto; font-size: 0.7rem; font-weight: 400; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
 .fr-form { text-align: left; }
 .fr-step { text-align: left; }
+/* 表单密度：改前 label + 输入框 + 24px 下边距在 720 高下只能放下两行 */
+.fr-card :deep(.el-form-item) { margin-bottom: 12px; }
+.fr-card :deep(.el-form-item__label) { padding-bottom: 2px; font-size: 0.8rem; line-height: 1.4; }
 .fr-section { margin-bottom: 8px; }
-.fr-section-title { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin: 18px 0 10px; padding-left: 10px; border-left: 3px solid var(--brand-primary, #1d5cff); }
-.fr-sub-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.8; margin: 0 0 12px; }
-.fr-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+.fr-section-title { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin: 12px 0 8px; padding-left: 10px; border-left: 3px solid var(--brand-primary, #1d5cff); }
+.fr-sub-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.7; margin: 0 0 10px; }
+.fr-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 .avatar-line { display: flex; align-items: center; gap: 12px; width: 100%; }
 .fr-avatar { flex-shrink: 0; background: var(--brand-gradient, linear-gradient(135deg, #1d5cff, #7b4dff)); }
 
@@ -721,31 +916,26 @@ onMounted(init)
 .fr-api-done-text { flex: 1; }
 .fr-api-ops { display: flex; gap: 10px; margin-top: 2px; }
 
-/* AI 补充生成卡片 */
-.fr-ai-card {
-  margin-top: 10px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--brand-primary, #1d5cff) 5%, transparent), transparent);
-}
-.fr-ai-card.is-off { opacity: 0.8; }
-.fr-ai-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.fr-ai-title { display: inline-flex; align-items: center; font-size: 0.88rem; font-weight: 700; color: var(--brand-primary, #1d5cff); }
-.fr-ai-desc { font-size: 0.76rem; color: var(--text-secondary); line-height: 1.7; margin: 8px 0 10px; }
+/* AI 补充生成（已提升为独立折叠分区，故内部不再套一层带边框的卡片） */
+.fr-ai-body { padding: 2px 0 0; }
+.fr-ai-body.is-off { opacity: 0.75; }
+.fr-ai-desc { font-size: 0.76rem; color: var(--text-secondary); line-height: 1.7; margin: 0 0 8px; }
 .fr-ai-ops { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .fr-ai-hint { font-size: 0.7rem; color: var(--text-placeholder, var(--text-tertiary)); }
 
-/* 底部操作 */
-.fr-actions { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-light, var(--border-l2)); flex-shrink: 0; }
+/* 底部操作（紧凑：改前 margin-top 24 + padding-top 18 又吃掉 42px） */
+.fr-actions { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-light, var(--border-l2)); flex-shrink: 0; }
 .fr-spacer { flex: 1; }
 .fr-skip { color: var(--text-secondary); }
 .fr-save { min-width: 150px; }
-.fr-tip { font-size: 0.75rem; color: var(--text-placeholder, var(--text-tertiary)); margin-top: 14px; text-align: center; flex-shrink: 0; }
+.fr-tip { font-size: 0.72rem; color: var(--text-placeholder, var(--text-tertiary)); margin: 8px 0 0; text-align: center; flex-shrink: 0; }
 
 /* V2.0 批次二：断点 640 → 1024（全站三档；<1024 为单栏兜底档） */
 @media (max-width: 1024px) {
   .fr-grid-2 { grid-template-columns: 1fr; }
-  .fr-card { padding: 24px 20px 20px; }
+  .fr-card { padding: 16px 16px 14px; max-width: calc(100vw - 24px); }
+  /* 窄屏：副标题允许折行（宽屏严格单行，靠这里兜底而不是在宽屏就折行） */
+  .fr-sub { white-space: normal; }
+  .fr-top-row { flex-wrap: wrap; }
 }
 </style>

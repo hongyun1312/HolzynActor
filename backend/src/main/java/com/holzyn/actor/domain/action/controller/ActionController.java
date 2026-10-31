@@ -157,7 +157,7 @@ public class ActionController {
      *
      * @param endDate 结束日期（可选，yyyy-MM-dd）
      */
-    @GetMapping("/projects/{projectId}/actions/timeline")
+    @GetMapping("/worlds/{projectId}/actions/timeline")
     public R<Map<String, Object>> projectTimeline(
             @PathVariable("projectId") Long projectId,
             @RequestParam(name = "characterId", required = false) Long characterId,

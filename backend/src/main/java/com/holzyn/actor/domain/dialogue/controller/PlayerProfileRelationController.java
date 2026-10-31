@@ -42,7 +42,7 @@ import java.util.Map;
  * <p>架构纪律：零 AI 短事务（见 {@link PlayerProfileService}）；项目不存在抛 404。</p>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}/player-profile/relations")
+@RequestMapping("/api/worlds/{projectId}/player-profile/relations")
 public class PlayerProfileRelationController {
 
     /** 玩家档案服务 */

@@ -132,7 +132,7 @@ async function onReadAll() {
 }
 
 /** 跳转通知中心 */
-function goCenter() { router.push('/projects') }
+function goCenter() { router.push('/worlds') }
 
 onMounted(() => { loadData() })
 </script>

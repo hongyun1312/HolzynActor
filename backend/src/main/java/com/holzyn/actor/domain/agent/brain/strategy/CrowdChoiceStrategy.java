@@ -29,11 +29,11 @@ import java.util.Optional;
 
 /**
  * 决策策略链·普通 NPC 快选择（System 1 快通道，priority=80，COMMON）。
- * <p>普通 NPC 的「此刻做什么」：空间候选/需求候选集由 NanoJev crowd_decision
- * 亚秒选择（熵最高的平坦分布恰是「真人做琐碎决定的随意感」）；NanoJev 未启用/
+ * <p>普通 NPC 的「此刻做什么」：空间候选/需求候选集由 决策模型 crowd_decision
+ * 亚秒选择（熵最高的平坦分布恰是「真人做琐碎决定的随意感」）；决策模型 未启用/
  * 失败 → AI 建议式回退（crowd AI，预算门控在调用方）；全失败 → 链继续（概率化）。</p>
  * <p><b>行为兼容</b>：内部逻辑 = 既有 {@code NpcStateService.crowdChoiceDrive}
- * 原样委托（NanoJev→AI 建议链路搬移），不新增/改变决策行为。</p>
+ * 原样委托（决策模型→AI 建议链路搬移），不新增/改变决策行为。</p>
  */
 @Slf4j
 @Component

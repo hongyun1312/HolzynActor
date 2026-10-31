@@ -46,7 +46,7 @@ export const parseWorkflowStream = async (files, expand, handlers = {}) => {
   fd.append('expand', expand ? 'true' : 'false')
   let lastErr = null
   const { promise } = streamFetch({
-    url: '/api/projects/import/workflow',
+    url: '/api/worlds/import/workflow',
     method: 'POST',
     body: fd,
     onEvent: (name, data) => {
@@ -76,7 +76,7 @@ export const parseWorkflowStream = async (files, expand, handlers = {}) => {
 export const initWorkflowStream = async (projectId, rebuild, handlers = {}) => {
   let lastErr = null
   const { promise } = streamFetch({
-    url: `/api/projects/${projectId}/init/stream`,
+    url: `/api/worlds/${projectId}/init/stream`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rebuild: !!rebuild }),

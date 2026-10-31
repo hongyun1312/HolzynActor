@@ -30,30 +30,30 @@ import { streamFetch, SSE_EVENTS } from '@/shared/sse/sseClient'
  * ageMin/ageMax（年龄区间）、sortBy（id/name/age/race/subRace/affiliation/occupation/location）、
  * sortDir（asc/desc）、page、size。
  */
-export const fetchOrdinaryNpcs = (projectId, params) => http.get(`/api/projects/${projectId}/ordinary-npcs`, { params })
+export const fetchOrdinaryNpcs = (projectId, params) => http.get(`/api/worlds/${projectId}/ordinary-npcs`, { params })
 // 手动新增单个
-export const createOrdinaryNpc = (projectId, data) => http.post(`/api/projects/${projectId}/ordinary-npcs`, data)
+export const createOrdinaryNpc = (projectId, data) => http.post(`/api/worlds/${projectId}/ordinary-npcs`, data)
 // 单个
 export const updateOrdinaryNpc = (id, data) => http.put(`/api/ordinary-npcs/${id}`, data)
 // 删除单个
 export const deleteOrdinaryNpc = (id) => http.delete(`/api/ordinary-npcs/${id}`)
 // 批量删除（body: { ids: [...] }）
-export const batchDeleteOrdinaryNpcs = (projectId, ids) => http.post(`/api/projects/${projectId}/ordinary-npcs/batch-delete`, { ids })
+export const batchDeleteOrdinaryNpcs = (projectId, ids) => http.post(`/api/worlds/${projectId}/ordinary-npcs/batch-delete`, { ids })
 //
-export const fetchOrdinaryNpcStats = (projectId) => http.get(`/api/projects/${projectId}/ordinary-npcs/stats`)
+export const fetchOrdinaryNpcStats = (projectId) => http.get(`/api/worlds/${projectId}/ordinary-npcs/stats`)
 
 // ===== 标准字段数据（字段字典：race 种族[含次级种族] / affiliation 归属 / occupation 职业，含出处） =====
 // 查询字段字典：{ race: [{field,level1,level2,source}], affiliation: [...], occupation: [...] }
-export const fetchFieldDict = (projectId) => http.get(`/api/projects/${projectId}/ordinary-npcs/field-dict`)
+export const fetchFieldDict = (projectId) => http.get(`/api/worlds/${projectId}/ordinary-npcs/field-dict`)
 // AI 依据世界观一次性拟定全部字段字典 + 选出主/次分类字段（不落库，供预览确认；AI 长耗时接口勿设短超时）
-export const generateFieldDict = (projectId) => http.post(`/api/projects/${projectId}/ordinary-npcs/field-dict/generate`, null, { timeout: 180000 })
+export const generateFieldDict = (projectId) => http.post(`/api/worlds/${projectId}/ordinary-npcs/field-dict/generate`, null, { timeout: 180000 })
 // 保存字段字典（预览确认后整体替换）+ 保存主/次分类字段（body: { primaryField, secondaryField, fields }）
-export const saveFieldDict = (projectId, preview) => http.post(`/api/projects/${projectId}/ordinary-npcs/field-dict`, preview, { timeout: 60000 })
+export const saveFieldDict = (projectId, preview) => http.post(`/api/worlds/${projectId}/ordinary-npcs/field-dict`, preview, { timeout: 60000 })
 // 手动新增一条字段字典（body: { field, level1, level2, source }）
-export const addFieldDictEntry = (projectId, entry) => http.post(`/api/projects/${projectId}/ordinary-npcs/field-dict/entry`, entry)
+export const addFieldDictEntry = (projectId, entry) => http.post(`/api/worlds/${projectId}/ordinary-npcs/field-dict/entry`, entry)
 // 手动删除一条字段字典（race 二级删除需传 level2；其余字段 level2 传空）
 export const deleteFieldDictEntry = (projectId, field, l1, l2) =>
-  http.delete(`/api/projects/${projectId}/ordinary-npcs/field-dict/${encodeURIComponent(field)}/${encodeURIComponent(l1)}/${l2 ? encodeURIComponent(l2) : 'undefined'}`)
+  http.delete(`/api/worlds/${projectId}/ordinary-npcs/field-dict/${encodeURIComponent(field)}/${encodeURIComponent(l1)}/${l2 ? encodeURIComponent(l2) : 'undefined'}`)
 
 // ===== AI 生成 / 入库 =====
 /**
@@ -69,7 +69,7 @@ export const deleteFieldDictEntry = (projectId, field, l1, l2) =>
  */
 export const generateOrdinaryNpcsStream = async (projectId, count, handlers = {}) => {
   const { promise } = streamFetch({
-    url: `/api/projects/${projectId}/ordinary-npcs/generate/stream`,
+    url: `/api/worlds/${projectId}/ordinary-npcs/generate/stream`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ count }),
@@ -88,7 +88,7 @@ export const generateOrdinaryNpcsStream = async (projectId, count, handlers = {}
 }
 
 // 预览确认后批量入库（body: [draft...]）
-export const batchSaveOrdinaryNpcs = (projectId, items) => http.post(`/api/projects/${projectId}/ordinary-npcs/batch-save`, items)
+export const batchSaveOrdinaryNpcs = (projectId, items) => http.post(`/api/worlds/${projectId}/ordinary-npcs/batch-save`, items)
 
 // ===== 关系（普通 NPC 关系写 actor_character_relation，复用角色关系拓扑结构与流程） =====
 /**
@@ -111,12 +111,12 @@ export const batchSaveCrowdRelations = (projectId, crowdId, mode, items) =>
 
 // ===== 调度 / 环境 =====
 // 程序化状态机调度（零 AI）
-export const scheduleOrdinaryNpcs = (projectId) => http.post(`/api/projects/${projectId}/ordinary-npcs/schedule`)
+export const scheduleOrdinaryNpcs = (projectId) => http.post(`/api/worlds/${projectId}/ordinary-npcs/schedule`)
 // 两级 AI 集体调度（项目级→归属级，多次 AI 调用，勿设短超时）
-export const scheduleOrdinaryNpcsAi = (projectId) => http.post(`/api/projects/${projectId}/ordinary-npcs/schedule-ai`, null, { timeout: 600000 })
+export const scheduleOrdinaryNpcsAi = (projectId) => http.post(`/api/worlds/${projectId}/ordinary-npcs/schedule-ai`, null, { timeout: 600000 })
 // 环境摘要（对话背景板）
-export const fetchOrdinaryNpcEnvSummary = (projectId) => http.get(`/api/projects/${projectId}/ordinary-npcs/env-summary`)
+export const fetchOrdinaryNpcEnvSummary = (projectId) => http.get(`/api/worlds/${projectId}/ordinary-npcs/env-summary`)
 // 项目级调度运行时信息（enabled/primaryField/secondaryField/lastScheduleAt/latestSummary）
-export const fetchOrdinaryNpcRuntime = (projectId) => http.get(`/api/projects/${projectId}/ordinary-npcs/runtime`)
+export const fetchOrdinaryNpcRuntime = (projectId) => http.get(`/api/worlds/${projectId}/ordinary-npcs/runtime`)
 // 项目级定时调度开关
-export const setOrdinaryNpcScheduleEnabled = (projectId, enabled) => http.put(`/api/projects/${projectId}/ordinary-npcs/schedule-enabled`, { enabled })
+export const setOrdinaryNpcScheduleEnabled = (projectId, enabled) => http.put(`/api/worlds/${projectId}/ordinary-npcs/schedule-enabled`, { enabled })

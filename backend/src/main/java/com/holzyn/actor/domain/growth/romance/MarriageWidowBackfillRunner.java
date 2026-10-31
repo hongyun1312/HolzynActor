@@ -54,12 +54,29 @@ public class MarriageWidowBackfillRunner implements ApplicationRunner {
     private final LineageService lineageService;
 
     /**
+     * 世界闸门（V1.1.2-beta.1 M4）：启动时通常没有挂载世界，此时 {@code actor_profile} /
+     * {@code actor_character_relation} 都不在目录库里，扫描只会报 "Table not found" 并白跑一遍。
+     * 未挂载就跳过（M3 迁移已把存量婚姻边原样搬进世界库，不会漏修）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.WorldGate worldGate;
+
+    /**
      * 启动时执行存量丧偶婚姻终止（幂等）。
      *
      * @param args 启动参数（未使用）
      */
     @Override
     public void run(ApplicationArguments args) {
+        if (worldGate == null) {
+            backfillNow();
+        } else {
+            worldGate.tryMaintenance("MarriageWidowBackfillRunner.run", this::backfillNow);
+        }
+    }
+
+    /** 补行实体（世界未挂载时不会进入） */
+    private void backfillNow() {
         try {
             int n = backfill();
             log.info("[谱系] 启动丧偶婚姻终止补行完成：{} 条存量婚姻边已终止", n);

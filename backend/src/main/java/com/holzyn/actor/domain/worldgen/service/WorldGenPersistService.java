@@ -24,6 +24,7 @@ import com.holzyn.actor.domain.project.entity.ActorProject;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import com.holzyn.actor.domain.project.service.ProjectService;
 import com.holzyn.actor.domain.world.dto.WorldSettingDTO;
+import com.holzyn.actor.domain.world.model.WorldCategory;
 import com.holzyn.actor.domain.world.entity.ActorWorldLocation;
 import com.holzyn.actor.domain.world.entity.ActorWorldSetting;
 import com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository;
@@ -130,7 +131,11 @@ public class WorldGenPersistService {
         // ① 世界观分节落库（版本化覆盖：内容有变化才新增版本，保留历史——对齐现有保存语义）
         WorldSettingDTO dto = new WorldSettingDTO(
                 truncate(preview.getSections().get("name"), 100),
-                truncate(preview.getSections().get("genre"), 50),
+                // 题材收敛到固定八类：AI 说什么都行，落库只能是那八个标签之一；
+                // 映射不到时留空（saveWorldSetting 里 genre 空 → null），由用户在第 2 步下拉里补选，
+                // 而不是猜一个（猜错会让整份世界观跑到另一套生成口径上）。
+                WorldCategory.normalize(preview.getSections().get("genre")),
+                truncate(inputOf(task, "tone"), 16),
                 truncate(preview.getSections().get("era"), 50),
                 preview.getSections().get("geography"),
                 preview.getSections().get("factions"),

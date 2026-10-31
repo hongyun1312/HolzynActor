@@ -73,8 +73,9 @@
       </el-table>
     </div>
 
-    <!-- 模板编辑对话框 -->
-    <el-dialog v-model="tplDialog.visible" title="编辑 Prompt 模板" width="680px">
+    <!-- 模板编辑对话框（尺寸与其它设置弹窗统一：.settings-dialog；append-to-body 逃出设置弹窗正文的裁剪） -->
+    <el-dialog v-model="tplDialog.visible" title="编辑 Prompt 模板" width="900px"
+      align-center append-to-body class="h-dialog settings-dialog" :close-on-click-modal="false">
       <el-form label-width="70px">
         <el-form-item label="名称">
           <el-input v-model="tplDialog.name" maxlength="100" />

@@ -106,7 +106,7 @@ public class CrowdController {
      *
      * @return 分页结果
      */
-    @GetMapping("/projects/{projectId}/ordinary-npcs")
+    @GetMapping("/worlds/{projectId}/ordinary-npcs")
     public R<PageResult<OrdinaryNpcVO>> page(@PathVariable("projectId") Long projectId,
                                              @RequestParam(name = "gender", required = false) String gender,
                                              @RequestParam(name = "race", required = false) String race,
@@ -135,7 +135,7 @@ public class CrowdController {
      *
      * @return 新增后的 VO
      */
-    @PostMapping("/projects/{projectId}/ordinary-npcs")
+    @PostMapping("/worlds/{projectId}/ordinary-npcs")
     public R<OrdinaryNpcVO> create(@PathVariable("projectId") Long projectId,
                                    @Valid @RequestBody OrdinaryNpcDTO dto) {
         return R.ok(ordinaryNpcService.create(projectId, dto));
@@ -177,7 +177,7 @@ public class CrowdController {
      *
      * @return {deleted 实际删除数}
      */
-    @PostMapping("/projects/{projectId}/ordinary-npcs/batch-delete")
+    @PostMapping("/worlds/{projectId}/ordinary-npcs/batch-delete")
     public R<Map<String, Object>> batchDelete(@PathVariable("projectId") Long projectId,
                                               @RequestBody(required = false) Map<String, Object> body) {
         List<?> raw = body == null ? List.of() : (List<?>) body.getOrDefault("ids", List.of());
@@ -192,7 +192,7 @@ public class CrowdController {
      *
      * @return 统计 Map
      */
-    @GetMapping("/projects/{projectId}/ordinary-npcs/stats")
+    @GetMapping("/worlds/{projectId}/ordinary-npcs/stats")
     public R<Map<String, Object>> stats(@PathVariable("projectId") Long projectId) {
         return R.ok(ordinaryNpcService.stats(projectId));
     }
@@ -204,7 +204,7 @@ public class CrowdController {
      *
      * @param projectId 项目 ID
      */
-    @GetMapping("/projects/{projectId}/ordinary-npcs/field-dict")
+    @GetMapping("/worlds/{projectId}/ordinary-npcs/field-dict")
     public R<Map<String, List<FieldDictVO>>> fieldDict(@PathVariable("projectId") Long projectId) {
         return R.ok(ordinaryNpcService.fieldDict(projectId));
     }
@@ -216,7 +216,7 @@ public class CrowdController {
      *
      * @return 拟定预览（fields + classification）
      */
-    @PostMapping("/projects/{projectId}/ordinary-npcs/field-dict/generate")
+    @PostMapping("/worlds/{projectId}/ordinary-npcs/field-dict/generate")
     public R<FieldDictPreviewVO> generateFieldDict(@PathVariable("projectId") Long projectId) {
         return R.ok(ordinaryNpcService.generateFieldDict(projectId));
     }
@@ -230,7 +230,7 @@ public class CrowdController {
      *
      * @return 保存后的字段字典分组
      */
-    @PostMapping("/projects/{projectId}/ordinary-npcs/field-dict")
+    @PostMapping("/worlds/{projectId}/ordinary-npcs/field-dict")
     public R<Map<String, List<FieldDictVO>>> saveFieldDict(@PathVariable("projectId") Long projectId,
                                                            @RequestBody(required = false) FieldDictPreviewVO preview) {
         return R.ok(ordinaryNpcService.saveFieldDict(projectId, preview));
@@ -245,7 +245,7 @@ public class CrowdController {
      *
      * @return 新增后的条目
      */
-    @PostMapping("/projects/{projectId}/ordinary-npcs/field-dict/entry")
+    @PostMapping("/worlds/{projectId}/ordinary-npcs/field-dict/entry")
     public R<FieldDictVO> addFieldDictEntry(@PathVariable("projectId") Long projectId,
                                             @RequestBody(required = false) FieldDictVO entry) {
         return R.ok(ordinaryNpcService.addFieldDictEntry(projectId, entry));
@@ -264,7 +264,7 @@ public class CrowdController {
      *
      * @return 删除确认
      */
-    @DeleteMapping("/projects/{projectId}/ordinary-npcs/field-dict/{field}/{l1}/{l2}")
+    @DeleteMapping("/worlds/{projectId}/ordinary-npcs/field-dict/{field}/{l1}/{l2}")
     public R<Map<String, Object>> deleteFieldDictEntry(@PathVariable("projectId") Long projectId,
                                                        @PathVariable("field") String field,
                                                        @PathVariable("l1") String l1,
@@ -287,7 +287,7 @@ public class CrowdController {
      *
      * @return SSE 事件流（text/event-stream）
      */
-    @PostMapping(value = "/projects/{projectId}/ordinary-npcs/generate/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PostMapping(value = "/worlds/{projectId}/ordinary-npcs/generate/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter generateStream(@PathVariable("projectId") Long projectId,
                                      @RequestBody(required = false) OrdinaryNpcGenerateDTO dto) {
         SseEmitter emitter = sseLifecycle.create(0L, 0L, null);
@@ -341,7 +341,7 @@ public class CrowdController {
      *
      * @return {saved 实际入库数, total 提交条数}
      */
-    @PostMapping("/projects/{projectId}/ordinary-npcs/batch-save")
+    @PostMapping("/worlds/{projectId}/ordinary-npcs/batch-save")
     public R<Map<String, Object>> batchSave(@PathVariable("projectId") Long projectId,
                                             @RequestBody(required = false) List<OrdinaryNpcDTO> items) {
         List<OrdinaryNpcDTO> list = items == null ? List.of() : items;
@@ -357,7 +357,7 @@ public class CrowdController {
      *
      * @return 调度结果 Map（mode/hour/states/summary）
      */
-    @PostMapping("/projects/{projectId}/ordinary-npcs/schedule")
+    @PostMapping("/worlds/{projectId}/ordinary-npcs/schedule")
     public R<Map<String, Object>> schedule(@PathVariable("projectId") Long projectId) {
         return R.ok(ordinaryNpcService.scheduleProgrammatic(projectId));
     }
@@ -370,7 +370,7 @@ public class CrowdController {
      *
      * @return 调度结果 Map（mode/summary/hour/updated/affiliations/primaryGroups）
      */
-    @PostMapping("/projects/{projectId}/ordinary-npcs/schedule-ai")
+    @PostMapping("/worlds/{projectId}/ordinary-npcs/schedule-ai")
     public R<Map<String, Object>> scheduleAi(@PathVariable("projectId") Long projectId) {
         return R.ok(ordinaryNpcService.scheduleWithAi(projectId));
     }
@@ -380,7 +380,7 @@ public class CrowdController {
      *
      * @param projectId 项目 ID
      */
-    @GetMapping("/projects/{projectId}/ordinary-npcs/env-summary")
+    @GetMapping("/worlds/{projectId}/ordinary-npcs/env-summary")
     public R<Map<String, Object>> envSummary(@PathVariable("projectId") Long projectId) {
         return R.ok(ordinaryNpcService.envSummary(projectId));
     }
@@ -390,7 +390,7 @@ public class CrowdController {
      *
      * @param projectId 项目 ID
      */
-    @GetMapping("/projects/{projectId}/ordinary-npcs/runtime")
+    @GetMapping("/worlds/{projectId}/ordinary-npcs/runtime")
     public R<Map<String, Object>> runtime(@PathVariable("projectId") Long projectId) {
         return R.ok(ordinaryNpcService.runtimeInfo(projectId));
     }
@@ -404,7 +404,7 @@ public class CrowdController {
      *
      * @return 更新后的运行时信息
      */
-    @PutMapping("/projects/{projectId}/ordinary-npcs/schedule-enabled")
+    @PutMapping("/worlds/{projectId}/ordinary-npcs/schedule-enabled")
     public R<Map<String, Object>> setEnabled(@PathVariable("projectId") Long projectId,
                                              @RequestBody(required = false) Map<String, Object> body) {
         boolean enabled = body != null && Boolean.TRUE.equals(body.get("enabled"));

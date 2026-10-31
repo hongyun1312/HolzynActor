@@ -57,7 +57,7 @@ import java.util.Map;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/projects/{id}/macro")
+@RequestMapping("/api/worlds/{id}/macro")
 @RequiredArgsConstructor
 public class MesoController {
 

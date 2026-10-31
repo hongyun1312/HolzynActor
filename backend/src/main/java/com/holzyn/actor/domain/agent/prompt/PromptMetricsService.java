@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
  * <li><b>格式合规率</b>：calls / jsonOk / jsonFail / fallback（程序化回退）/ blank / degraded；
  * 合规率 = jsonOk ÷ calls（gateway/解析器埋点）；</li>
  * <li><b>决策与角色一致性</b>：judge 一致性抽样评分记录（复用 评估基础设施的评分，
- * 此处仅登记最近批次均值，供调试页展示——真实批跑走 /api/projects/{id}/test/eval-runs）。</li>
+ * 此处仅登记最近批次均值，供调试页展示——真实批跑走 /api/worlds/{id}/test/eval-runs）。</li>
  * </ul>
  * <p>统计为内存态（重启清零，与 GuardRailTracker 同风格）；最近告警环形 200 条（新→旧）。
  * 各埋点方法均空值安全，失败静默不阻断业务。</p>

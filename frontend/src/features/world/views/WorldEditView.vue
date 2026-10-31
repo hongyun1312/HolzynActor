@@ -22,94 +22,25 @@
         <el-button type="primary" :loading="saving" @click="saveWorld">
           <el-icon><HIcon name="Check" /></el-icon>&nbsp;保存世界观
         </el-button>
-        <el-button @click="$router.push(`/project/${projectId}/world`)">
+        <el-button @click="$router.push(`/world/${projectId}/world`)">
           <el-icon><HIcon name="Back" /></el-icon>&nbsp;返回世界详情
         </el-button>
       </template>
     </PageHeader>
 
-    <!-- 分节编辑（与详情页同款左侧 Tab 导航，各区块就地编辑） -->
+    <!-- 分节编辑：复用与「新建世界第 2 步」「手动填写」同一份 WorldSettingForm，
+         避免三处各写一套几乎相同的分节表单（新增字段时三处漏改） -->
     <!-- V2.0 §5.6：这是加载态，不是空态——不再用空态框写「加载中…」 -->
     <div v-if="!worldForm.name && !loadingDone" v-loading="true" class="empty-card tech-card edit-loading" />
     <div v-else class="edit-body">
-      <PageTabs v-model="activeSection" position="left">
-        <el-tab-pane label="基本信息" name="basic">
-          <div class="world-card tech-card">
-            <el-form label-width="90px" class="section-form">
-              <el-form-item label="世界观名称" required>
-                <el-input v-model="worldForm.name" placeholder="世界名称（必填）" maxlength="100" show-word-limit />
-              </el-form-item>
-              <el-row :gutter="16">
-                <el-col :span="12">
-                  <el-form-item label="题材">
-                    <el-input v-model="worldForm.genre" placeholder="奇幻/科幻/都市/历史…" maxlength="50" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item label="时代背景">
-                    <el-input v-model="worldForm.era" placeholder="如：蒸汽纪元" maxlength="50" />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </el-form>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="地理设定" name="geography">
-          <div class="world-card tech-card">
-            <div class="section-title-row">
-              <span class="section-title">地理设定</span>
-              <span class="section-desc">AI 从该文本识别地点（地点详情 Tab 可一键提取）</span>
-            </div>
-            <el-input v-model="worldForm.geography" type="textarea" :rows="12" maxlength="5000" show-word-limit placeholder="地理/地图设定（≤5000 字）" />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="地点详情" name="locations">
-          <div class="world-card tech-card">
-            <div class="section-title-row">
-              <span class="section-title">世界观地点表</span>
-              <el-tag size="small" type="info" effect="plain">AI 提取 · 增删改查</el-tag>
-            </div>
-            <WorldLocationTable :project-id="projectId" editable extractable />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="势力阵营" name="factions">
-          <div class="world-card tech-card">
-            <div class="section-title-row"><span class="section-title">势力阵营</span></div>
-            <el-input v-model="worldForm.factions" type="textarea" :rows="12" maxlength="5000" show-word-limit placeholder="主要势力/阵营（≤5000 字）" />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="规则体系" name="magic">
-          <div class="world-card tech-card">
-            <div class="section-title-row"><span class="section-title">规则体系</span></div>
-            <el-input v-model="worldForm.magicSystem" type="textarea" :rows="12" maxlength="5000" show-word-limit placeholder="魔法/科技/规则体系（≤5000 字）" />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="文化风俗" name="culture">
-          <div class="world-card tech-card">
-            <div class="section-title-row"><span class="section-title">文化风俗</span></div>
-            <el-input v-model="worldForm.culture" type="textarea" :rows="12" maxlength="5000" show-word-limit placeholder="文化/风俗（≤5000 字）" />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="历史背景" name="history">
-          <div class="world-card tech-card">
-            <div class="section-title-row"><span class="section-title">历史背景</span></div>
-            <el-input v-model="worldForm.history" type="textarea" :rows="12" maxlength="5000" show-word-limit placeholder="历史背景（≤5000 字）" />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="完整世界观" name="freeText">
-          <div class="world-card tech-card">
-            <div class="section-title-row"><span class="section-title">自由文本（完整世界观）</span></div>
-            <el-input v-model="worldForm.freeText" type="textarea" :rows="14" maxlength="5000" show-word-limit placeholder="完整世界观自由文本（角色卡生成的知识库注入源，越详细角色卡越贴合，≤5000 字）" />
-          </div>
-        </el-tab-pane>
-      </PageTabs>
+      <div class="world-card tech-card">
+        <WorldSettingForm
+          :model="worldForm"
+          :project-id="projectId"
+          title="世界观设定"
+          desc="各分节就地编辑；「地点详情」以表格维护（AI 提取 + 增删改查）。保存后覆盖更新当前版本。"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -117,18 +48,16 @@
 <script setup>
 /**
  * 世界详情修改页。
- * <p>职责：世界观专属编辑页——采用与「世界详情」一致的左侧 Tab 分节展示（基本信息/地理设定/
- * 地点详情/势力阵营/规则体系/文化风俗/历史背景/完整世界观），每个区块就地编辑；
- * 地点详情以表格维护（WorldLocationTable：AI 提取 + 修改增删改查）。
- * 保存走现有 /api/projects/{id}/world-setting 覆盖更新接口；地点表由表格组件独立保存。</p>
+ * <p>职责：世界观专属编辑页——复用共享组件 {@link WorldSettingForm}（与「新建世界第 2 步」同一份表单，
+ * 左置分节：基本信息/地理/势力/规则/文化/历史/补充 + 地点详情表格维护），避免三处各写一套分节表单。
+ * 保存走现有 /api/worlds/{id}/world-setting 覆盖更新接口；地点表由表格组件独立保存。</p>
  */
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchProject, fetchWorldSetting, saveWorldSetting } from '@/shared/api'
-import WorldLocationTable from '@/shared/components/WorldLocationTable.vue'
+import WorldSettingForm from '@/shared/components/WorldSettingForm.vue'
 import PageHeader from '@/shared/layout/PageHeader.vue'
-import PageTabs from '@/shared/layout/PageTabs.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -137,9 +66,7 @@ const projectId = Number(route.params.id)
 const project = ref(null)
 const saving = ref(false)
 const loadingDone = ref(false)
-// 左侧导航当前分块（与详情页一致，地点详情在地理设定之后）
-const activeSection = ref('basic')
-const worldForm = reactive({ name: '', genre: '', era: '', geography: '', factions: '', magicSystem: '', culture: '', history: '', freeText: '' })
+const worldForm = reactive({ name: '', genre: '', tone: 'standard', era: '', geography: '', factions: '', magicSystem: '', culture: '', history: '', freeText: '' })
 
 /** 加载项目详情 + 世界观（回填表单） */
 async function loadAll() {
@@ -148,7 +75,7 @@ async function loadAll() {
     const w = await fetchWorldSetting(projectId)
     if (w) {
       Object.assign(worldForm, {
-        name: w.name, genre: w.genre, era: w.era, geography: w.geography, factions: w.factions,
+        name: w.name, genre: w.genre, tone: w.tone || 'standard', era: w.era, geography: w.geography, factions: w.factions,
         magicSystem: w.magicSystem, culture: w.culture, history: w.history, freeText: w.freeText
       })
     }
@@ -163,7 +90,7 @@ async function saveWorld() {
   try {
     await saveWorldSetting(projectId, { ...worldForm })
     ElMessage.success('世界观已保存（覆盖更新）')
-    router.push(`/project/${projectId}/world`)
+    router.push(`/world/${projectId}/world`)
   } catch (e) { ElMessage.error(e.message || '保存失败') }
   finally { saving.value = false }
 }

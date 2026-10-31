@@ -19,15 +19,23 @@
 package com.holzyn.actor.domain.debug.service;
 
 import com.holzyn.actor.domain.debug.repository.ActorAiCallLogRepository;
+import com.holzyn.actor.domain.worldstore.WorldGate;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.sql.DataSource;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 
@@ -69,6 +77,26 @@ public class AiCallLogRetentionService {
     /** 本地数据目录（与 {@code AiCallTraceService} 同源；文件副本根 = &lt;data-dir&gt;/ai-call-logs） */
     @Value("${holzyn.actor.data-dir:./data}")
     private String dataDir = null;
+
+    /**
+     * 世界闸门（V1.1.2-beta.1 M4）：世界未挂载时**不能**去删"世界库里的日志行"——
+     * 未挂载时默认路由是目录库，{@code actor_ai_call_log} 两库同构，删下去就是把
+     * 目录库里的全局行当成世界行删掉。
+     */
+    @Autowired(required = false)
+    private WorldGate worldGate;
+
+    /**
+     * 目录库数据源（世界数据分档后，{@code project_id IS NULL} 的全局日志行只存在这里）。
+     *
+     * <p>为什么直连目录库而不是"切到 GLOBAL 再走仓库"：本类的事务边界在
+     * {@link #scheduledMaintenance()} 上（见该方法注释），事务开始时已经绑定了世界库连接；
+     * 事务中途把路由切到 GLOBAL 仍然会复用那条已绑定的连接，删除会打到世界库。
+     * 第二趟必须用**自己的连接**直连目录库，才与第一趟的事务彻底解耦。</p>
+     */
+    @Autowired(required = false)
+    @Qualifier("registryDataSource")
+    private DataSource registryDataSource;
 
     /**
      * 构造（Spring 使用：仓库注入，开关/保留期/间隔/数据目录由 @Value 字段注入）。
@@ -113,17 +141,80 @@ public class AiCallLogRetentionService {
         if (!enabled || retentionDays <= 0) {
             return;
         }
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(retentionDays);
+        int worldRows = 0;
+        // ① 世界库一趟：世界未挂载时由闸门跳过（不能删目录库的"世界表同名行"）
         try {
-            retain();
+            worldRows = worldPass(cutoff);
         } catch (Exception e) {
             // 维护失败不影响业务，仅告警（与记忆归档/知识生命周期维护同一隔离口径）
-            log.warn("[AI-Log保留] 定时滚动清理失败（不影响主流程）: {}", e.getMessage());
+            log.warn("[AI-Log保留] 世界库滚动清理失败（不影响主流程）: {}", e.getMessage());
+        }
+        // ② 目录库一趟：只删 project_id IS NULL 的全局行（任何挂载状态都清）
+        int globalRows = globalPass(cutoff);
+        // ③ 文件副本（全局，无世界语义）
+        int files = 0;
+        try {
+            files = deleteExpiredFiles(cutoff);
+        } catch (Exception e) {
+            log.warn("[AI-Log保留] 文件副本清理失败（不影响主流程）: {}", e.getMessage());
+        }
+        if (worldRows > 0 || globalRows > 0 || files > 0) {
+            log.info("[AI-Log保留] 两趟滚动清理完成：世界库 {} 行 / 目录库全局 {} 行 / 文件副本 {} 个"
+                    + "（截止 {}，保留 {} 天）", worldRows, globalRows, files, cutoff, retentionDays);
+        }
+    }
+
+    /**
+     * ① 当前世界库一趟（闸门内）。
+     *
+     * @param cutoff 截止时刻
+     *
+     * @return 删除行数；世界未挂载返回 0
+     */
+    private int worldPass(LocalDateTime cutoff) {
+        if (worldGate == null) {
+            return repository.deleteByCreatedAtBefore(cutoff);
+        }
+        return worldGate.tryMaintenanceWithResult("AiCallLogRetentionService.worldPass",
+                () -> repository.deleteByCreatedAtBefore(cutoff)).orElse(0);
+    }
+
+    /**
+     * ② 目录库全局行一趟：{@code project_id IS NULL} 的 AI 调用日志属于"不属于任何世界"的观测数据。
+     *
+     * <p>为什么直连目录库（而不是切 GLOBAL 走仓库）：见 {@link #registryDataSource} 注释——本方法
+     * 运行在外层事务之内，事务已绑定世界库连接，切上下文也换不掉那条连接。</p>
+     *
+     * <p>为什么必须带 {@code project_id IS NULL}：目录库与世界库的该表<b>同构</b>，
+     * 少了这个条件，一旦目录库里混进过带 project_id 的行（手工排障/旧数据），
+     * 就会被当成全局行误删——而世界库里的那份才是权威副本。</p>
+     *
+     * @param cutoff 截止时刻
+     *
+     * @return 删除行数（未装配目录库数据源/失败返回 0）
+     */
+    private int globalPass(LocalDateTime cutoff) {
+        if (registryDataSource == null) {
+            return 0;
+        }
+        String sql = "delete from actor_ai_call_log where project_id is null and created_at < ?";
+        try (Connection c = registryDataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setTimestamp(1, Timestamp.valueOf(cutoff));
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            log.warn("[AI-Log保留] 目录库全局行清理失败（不影响主流程）: {}", e.getMessage());
+            return 0;
         }
     }
 
     /**
      * 执行一次滚动清理：删除创建时间早于 {@code now - retentionDays} 的 DB 行，
      * 再删除 {@code <data-dir>/ai-call-logs/} 下修改时间早于同一截止时刻的文件副本。
+     *
+     * <p>手动端点/测试直接调用；定时入口 {@link #scheduledMaintenance()} 走两趟口径，
+     * 不再调用本方法（避免世界库被清理两次）。</p>
      *
      * @return 删除的 DB 行数（文件副本删除数记日志）
      */

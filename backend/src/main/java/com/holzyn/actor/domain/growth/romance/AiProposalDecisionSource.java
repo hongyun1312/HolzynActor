@@ -27,7 +27,7 @@ import tools.jackson.databind.JsonNode;
 import java.util.List;
 
 /**
- * 求婚判定默认实现（Qwen AI 主 + 程序化兜底；NanoJev 替换实现类即可）。
+ * 求婚判定默认实现（Qwen AI 主 + 程序化兜底；决策模型 替换实现类即可）。
  * <p><b>AI 判定</b>（scene=growth_proposal_decision，SCHEMA_JSON 0.4/300）：输入恋爱时长 +
  * 候选对象摘要，输出 {@code {propose:boolean, target_ref, reason}}。</p>
  * <p><b>程序化兜底</b>（AI 失败/非法 → 不推进，零阻断；{@code programmaticFallback=true} 时
@@ -41,26 +41,26 @@ public class AiProposalDecisionSource implements ProposalDecisionSource {
     private final AiDecisionSourceSupport support;
 
     /**
-     * NanoJev 求婚判定（默认关场景；开启且采纳时优先，失败/升级回退本 Qwen 实现；
+     * 决策模型 求婚判定（默认关场景；开启且采纳时优先，失败/升级回退本 Qwen 实现；
      * 字段注入保持构造器不变，null=未装配[单测]直接走 Qwen）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevProposalDecision nanoJevDecision;
+    private com.holzyn.actor.ai.decision.gate.ProposalJudge decisionJudge;
 
     @Override
     public RomanceDecisions.ProposalDecision decide(RomanceDecisions.ProposalContext ctx) {
         if (ctx == null || ctx.npcRef() == null) {
             return RomanceDecisions.ProposalDecision.of(false, null, "参数缺失，视为不推进", "programmatic");
         }
-        // ：NanoJev 优先（逐场景开关默认关；采纳即用，否则回退 Qwen）
-        if (nanoJevDecision != null) {
+        // ：决策模型 优先（逐场景开关默认关；采纳即用，否则回退 Qwen）
+        if (decisionJudge != null) {
             try {
-                RomanceDecisions.ProposalDecision nano = nanoJevDecision.decide(ctx);
+                RomanceDecisions.ProposalDecision nano = decisionJudge.decide(ctx);
                 if (nano != null) {
                     return nano;
                 }
             } catch (Exception e) {
-                log.warn("[婚育] NanoJev 求婚判定异常（回退 Qwen）: {} : {}", ctx.npcName(), e.getMessage());
+                log.warn("[婚育] 决策模型 求婚判定异常（回退 Qwen）: {} : {}", ctx.npcName(), e.getMessage());
             }
         }
         String content = support.call(ctx.projectId(), NpcRefs.idOf(ctx.npcRef()), SCENE, AiDecisionSourceSupport.ph(

@@ -51,7 +51,7 @@ import java.util.Set;
  * <li><b>null 对象（=独处/无社交对象，如决策场景）</b>：只给场合码。</li>
  * </ul>
  * <p>判定点设计（N 轨道预留）：本类被 {@link MaskService} 经 {@link MaskContextSource} 接口调用；
- * 之后 NanoJev 接入只替换实现（choice 题型），不重改面具主流程。</p>
+ * 之后 决策模型 接入只替换实现（choice 题型），不重改面具主流程。</p>
  */
 @Slf4j
 @Component
@@ -80,11 +80,11 @@ public class ProgrammaticMaskContextResolver implements MaskContextSource {
     private final ActorCharacterRelationRepository relationRepository;
 
     /**
-     * NanoJev 面具情境判定（默认关场景；开启且采纳时优先，失败/升级回退本程序化实现；
+     * 决策模型 面具情境判定（默认关场景；开启且采纳时优先，失败/升级回退本程序化实现；
      * 字段注入保持构造器不变，null=未装配[单测]直接走程序化）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevMaskContextDecision nanoJevDecision;
+    private com.holzyn.actor.ai.decision.gate.MaskContextJudge decisionJudge;
 
     @Override
     public List<String> resolve(Long projectId, String selfRef, List<String> partnerRefs, Long gameSecond) {
@@ -117,20 +117,20 @@ public class ProgrammaticMaskContextResolver implements MaskContextSource {
 
     /**
      * 单人判定（优先级：权威 > 仇怨 > 伴侣 > 子女 > 陌生人 > 同伴；
-     * NanoJev 优先——开启且采纳时用 NanoJev 情境码，否则程序化）。
+     * 决策模型 优先——开启且采纳时用 决策模型 情境码，否则程序化）。
      */
     private String contextOfPartner(Long projectId, ActorCharacter self, String partnerRef) {
-        // ：NanoJev 面具情境判定（对象码；默认关场景）
-        if (nanoJevDecision != null) {
+        // ：决策模型 面具情境判定（对象码；默认关场景）
+        if (decisionJudge != null) {
             try {
                 ActorCharacter partner = characterRepository.findById(NpcRefs.idOf(partnerRef)).orElse(null);
-                String code = nanoJevDecision.decide(projectId, NpcRefs.of(self.getId()),
+                String code = decisionJudge.decide(projectId, NpcRefs.of(self.getId()),
                         self == null ? null : self.getName(), partnerDescription(projectId, self, partner, partnerRef));
                 if (code != null && MaskContextCode.isValid(code)) {
                     return code;
                 }
             } catch (Exception e) {
-                log.warn("[面具] NanoJev 情境判定异常（回退程序化）: ref={} : {}", selfRefOf(self), e.getMessage());
+                log.warn("[面具] 决策模型 情境判定异常（回退程序化）: ref={} : {}", selfRefOf(self), e.getMessage());
             }
         }
         ActorCharacter partner = characterRepository.findById(NpcRefs.idOf(partnerRef)).orElse(null);
@@ -159,7 +159,7 @@ public class ProgrammaticMaskContextResolver implements MaskContextSource {
         return MaskContextCode.BEFORE_STRANGER;
     }
 
-    /** 对方描述（NanoJev 情境判定输入：姓名/身份/年龄/关系好感；程序化解析辅助）。 */
+    /** 对方描述（决策模型 情境判定输入：姓名/身份/年龄/关系好感；程序化解析辅助）。 */
     private String partnerDescription(Long projectId, ActorCharacter self, ActorCharacter partner,
                                       String partnerRef) {
         StringBuilder sb = new StringBuilder();

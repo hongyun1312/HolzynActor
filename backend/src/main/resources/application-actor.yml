@@ -878,7 +878,7 @@ holzyn:
       # 即时决策总开关（false=RealTimeDecisionService 全部入口直接跳过）
       enabled: ${HOLOZYN_ACTOR_REALTIME_DECISION_ENABLED:true}
       # 实时决策激活闸门：后端启动默认不自动运行——项目级激活 = 手动常开 ∪ 沙盘页打开 ∪ 演化会话进行
-      # （前端经 PUT /api/projects/{id}/realtime-decision 驱动）；未激活时世界引擎跳过该项目（不耗 AI）
+      # （前端经 PUT /api/worlds/{id}/realtime-decision 驱动）；未激活时世界引擎跳过该项目（不耗 AI）
       # 事件重要度阈值（事件重要度 ≥ 此值才触发在场/相关角色即时决策）
       event-importance-threshold: ${HOLOZYN_ACTOR_REALTIME_EVENT_IMPORTANCE:3}
       # 每角色即时决策冷却（游戏分钟；紧急状态 urgency≥2 可突破；世界暂停时冷却自然冻结）

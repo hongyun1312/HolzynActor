@@ -119,7 +119,7 @@ class RoutingYamlMaxTokensTest {
         assertEquals(0.4, dblAt(env, P + "scenes.persona_bootstrap_fill_a.temperature"), 1e-9);
         assertEquals(0.5, dblAt(env, P + "scenes.persona_bootstrap_fill_b.temperature"), 1e-9);
         for (String scene : new String[]{"agent_decision", "agent_learning", "attention", "growth_space_generate",
-                "mask_breach", "micro_decision", "nanojev_sample", "relation_delta", "social_willingness",
+                "mask_breach", "micro_decision", "decision_sample", "relation_delta", "social_willingness",
                 "space_decision", "space_trigger"}) {
             assertEquals(0.5, dblAt(env, P + "scenes." + scene + ".temperature"), 1e-9,
                     scene + " 温度被改动（本轮只允许改 max-tokens）");

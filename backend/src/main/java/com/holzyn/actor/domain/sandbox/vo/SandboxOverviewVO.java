@@ -23,7 +23,7 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * 世界沙盘总览视图对象（世界沙盘 S1，读接口 GET /api/projects/{id}/sandbox/overview）。
+ * 世界沙盘总览视图对象（世界沙盘 S1，读接口 GET /api/worlds/{id}/sandbox/overview）。
  * <p>职责：沙盘页一次拿全——项目沙盘场景列表（含主场景）+ 全部 NPC 沙盘状态
  * （特殊 + 普通人群，含名称/坐标/动作等），供空态页与位置模拟展示。</p>
  */

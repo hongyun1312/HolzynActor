@@ -19,10 +19,7 @@
 package com.holzyn.actor.domain.project.controller;
 
 import com.holzyn.actor.common.R;
-import com.holzyn.actor.domain.project.dto.ProjectDTO;
 import com.holzyn.actor.domain.world.dto.WorldSettingDTO;
-import com.holzyn.actor.common.PageResult;
-import com.holzyn.actor.domain.project.vo.ProjectVO;
 import com.holzyn.actor.domain.world.vo.WorldSettingVO;
 import com.holzyn.actor.domain.character.service.CharacterCardService;
 import com.holzyn.actor.domain.project.service.ProjectService;
@@ -34,83 +31,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 项目与世界观管理控制器（A-）。
- * <p>职责：提供项目（作品）CRUD、世界观设定读取/保存（覆盖更新）、一键生成角色卡等接口。
- * 所有接口统一返回 R&lt;T&gt;，归属以当前登录用户为准（服务层校验）。</p>
+ * 世界观设定与角色卡生成控制器（A-；V1.1.2-beta.1 M5 起挂在 {@code /api/worlds} 下）。
+ *
+ * <p>职责收窄：只保留"世界内"的两件事——世界观设定读写、一键生成角色卡。
+ * 存档列表/详情/新建/改名/删除已全部迁到 {@link com.holzyn.actor.domain.worldstore.WorldLifecycleController}
+ * （那是目录库语义，与当前挂载哪个世界无关，混在本类里会被路由到世界库）。</p>
  */
 @RestController
-@RequestMapping("/api/projects")
+@RequestMapping("/api/worlds")
 @RequiredArgsConstructor
 public class ProjectController {
 
     private final ProjectService projectService;
     private final CharacterCardService characterCardService;
-
-    /**
-     * 项目列表（分页，按更新时间倒序）。
-     *
-     * @param page 页码（默认 1）
-     *
-     * @param size 每页条数（默认 12）
-     *
-     * @return 分页结果（含每个项目角色数）
-     */
-    @GetMapping
-    public R<PageResult<ProjectVO>> list(@RequestParam(name = "page", defaultValue = "1") int page,
-                                         @RequestParam(name = "size", defaultValue = "12") int size) {
-        return R.ok(projectService.list(page, size));
-    }
-
-    /**
-     * 创建项目。
-     *
-     * @param dto 项目入参（name 必填）
-     *
-     * @return 创建后的项目
-     */
-    @PostMapping
-    public R<ProjectVO> create(@Valid @RequestBody ProjectDTO dto) {
-        return R.ok(projectService.create(dto));
-    }
-
-    /**
-     * 项目详情。
-     *
-     * @param id 项目主键
-     *
-     * @return 项目详情
-     */
-    @GetMapping("/{id}")
-    public R<ProjectVO> detail(@PathVariable("id") Long id) {
-        return R.ok(projectService.detail(id));
-    }
-
-    /**
-     * 编辑项目。
-     *
-     * @param id 项目主键
-     *
-     * @param dto 项目入参
-     *
-     * @return 更新后的项目
-     */
-    @PutMapping("/{id}")
-    public R<ProjectVO> update(@PathVariable("id") Long id, @Valid @RequestBody ProjectDTO dto) {
-        return R.ok(projectService.update(id, dto));
-    }
-
-    /**
-     * 删除项目（软删除）。
-     *
-     * @param id 项目主键
-     *
-     * @return 删除确认
-     */
-    @DeleteMapping("/{id}")
-    public R<Map<String, Object>> delete(@PathVariable("id") Long id) {
-        projectService.delete(id);
-        return R.ok(Map.of("id", id, "deleted", true));
-    }
 
     /**
      * 读取项目最新版本世界观设定。

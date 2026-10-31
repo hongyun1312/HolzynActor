@@ -35,6 +35,6 @@ export const markAllNotificationsRead = () => http.put('/api/notifications/read-
  * AI 调用记录分页查询（只读，零 AI 成本）。
  * <p>复用既有的调试域只读接口 `GET /api/debug/ai-calls`：本轮先用它驱动顶栏的
  * 「推理中 / 最近调用 / 失败数」快照；批次③ 会新增面向主前端的聚合只读接口
- * `GET /api/projects/{projectId}/ai-runtime/status` 并切换到它（见设计规格 §8.2）。</p>
+ * `GET /api/worlds/{projectId}/ai-runtime/status` 并切换到它（见设计规格 §8.2）。</p>
  */
 export const fetchAiCalls = (params) => http.get('/api/debug/ai-calls', { params, timeout: 8000 })

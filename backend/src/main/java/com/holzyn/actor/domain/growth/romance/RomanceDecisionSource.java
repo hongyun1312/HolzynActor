@@ -23,8 +23,8 @@ package com.holzyn.actor.domain.growth.romance;
  * <p><b>判定语义</b>：一个未婚适龄角色对某个候选对象（同村、异性、适龄、无血亲、无婚姻边、
  * 好感已程序化预筛达标）是否「动心」——产生浪漫兴趣。</p>
  * SCHEMA_JSON）；AI 失败/禁用 → 程序化兜底（好感 ≥ 门槛 → 动心，确定性 0.6）。</p>
- * <p><b>NanoJev 替换契约（N 轨道）</b>：本判定可序列化为
- * {@code POST /v1/nanojev/evaluate} 的单个 boolean question——
+ * <p><b>决策模型 替换契约（N 轨道）</b>：本判定可序列化为
+ * {@code 决策模型 evaluate 端点} 的单个 boolean question——
  * {@code state: "角色{npcName}与{partnerName}同村，好感{affinity}，最近{interactionEvidence}"}，
  * {@code question: {type:"boolean", instructions:"{npcName}是否对{partnerName}产生浪漫兴趣？"}}，
  * 输出概率分布 P(attracted=true) ≥ 阈值 → 动心。N 轨道只换实现类，主流程零改动。</p>

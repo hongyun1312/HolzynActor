@@ -75,6 +75,9 @@ public class MapArtifactStore {
     /** 高度图文件名 */
     private static final String HEIGHT = "height.png";
 
+    /** 导航栅格文件名（运行期寻路用；水/坡/林/海拔四份事实） */
+    private static final String NAV = "nav.bin";
+
     private final Path root;
 
     /** 主图分辨率倍率（相对 1 米 1 格的地形栅格；默认 4 像素 1 米，可配置）。 */
@@ -281,6 +284,51 @@ public class MapArtifactStore {
             throw new BizException(500, "地形渲染失败");
         }
         return writeTerrain(mapId, img);
+    }
+
+    /**
+     * 写导航栅格（{@code nav.bin}，运行期寻路的水/坡/林/海拔四份事实）。
+     *
+     * <p>为什么和 PNG 一样只存文件：它同样是<b>可由 S1 重建的派生产物</b>，
+     * 但和 PNG 不同的是它是<b>算法输入</b>——一格的错就等价于「人能走进湖里」，
+     * 所以用定长二进制而不是图片格式，读回来必须逐格相等。</p>
+     *
+     * @param mapId 地图 ID
+     * @param data  编码后的字节（见 NavGridCodec）
+     * @return 相对路径（{@code <mapId>/nav.bin}）
+     * @throws IOException 写失败
+     */
+    public String writeNavGrid(Long mapId, byte[] data) throws IOException {
+        Path dir = dirOf(mapId);
+        Path target = dir.resolve(NAV);
+        Path tmp = dir.resolve(NAV + ".tmp");
+        Files.write(tmp, data);
+        try {
+            Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        return mapId + "/" + NAV;
+    }
+
+    /**
+     * 读导航栅格字节。
+     *
+     * @param mapId 地图 ID
+     * @return 字节；不存在/读失败返回 null（调用方据此重建，而不是让地图页报错）
+     */
+    public byte[] readNavGrid(Long mapId) {
+        Path file = root.resolve(String.valueOf(mapId)).resolve(NAV);
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            return Files.readAllBytes(file);
+        } catch (IOException e) {
+            log.warn("[mapgen] 读导航栅格失败：map={}（{}）", mapId, e.getMessage());
+            return null;
+        }
     }
 
     /**

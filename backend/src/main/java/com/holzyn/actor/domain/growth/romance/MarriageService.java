@@ -69,7 +69,7 @@ import java.util.concurrent.Executors;
  * <p><b>程序化硬门控（零 AI，不可被 AI 覆盖）</b>：适龄（YOUTH~MIDDLE=18~60 岁）/ 在世 /
  * 同村 / 异性 / 无婚姻边 / <b>三代内血亲禁婚</b>（{@code LineageService.isBloodRelated}）/
  * 好感 ≥ 60 / 恋爱 ≥ 30 游戏日 / 生育冷却 180 游戏日 / 人口上限 50。</p>
- * <p><b>三插拔点（NanoJev 预留）</b>：{@link RomanceDecisionSource} / {@link ProposalDecisionSource} /
+ * <p><b>三插拔点（决策模型 预留）</b>：{@link RomanceDecisionSource} / {@link ProposalDecisionSource} /
  * {@link FertilityDecisionSource}——AI 主判定，程序化兜底，N 轨道换实现零重写主流程。</p>
  * <p><b>架构不变量</b>：本类公开方法<b>不含</b>{@code @Transactional}（日检含 AI 判定，事务内
  * 持锁会堵世界）；婚礼叙事在虚拟线程异步执行；任何一步失败只告警不阻断日检。</p>

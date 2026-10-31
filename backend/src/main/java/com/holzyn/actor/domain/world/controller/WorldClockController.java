@@ -71,7 +71,7 @@ public class WorldClockController {
      *
      * @return 时钟 VO
      */
-    @GetMapping("/projects/{projectId}/world-clock")
+    @GetMapping("/worlds/{projectId}/world-clock")
     public R<WorldClockVO> get(@PathVariable("projectId") Long projectId) {
         return R.ok(worldClockService.getClock(projectId, currentUserProvider.currentUserId()));
     }
@@ -85,7 +85,7 @@ public class WorldClockController {
      *
      * @return 更新后的时钟 VO
      */
-    @PutMapping("/projects/{projectId}/world-clock")
+    @PutMapping("/worlds/{projectId}/world-clock")
     public R<WorldClockVO> update(@PathVariable("projectId") Long projectId, @Valid @RequestBody WorldClockDTO dto) {
         return R.ok(worldClockService.updateClock(projectId, currentUserProvider.currentUserId(), dto));
     }
@@ -99,7 +99,7 @@ public class WorldClockController {
      *
      * @return 推进结果（advancedHours/gameHour/actions/crowds/events/summary）
      */
-    @PostMapping("/projects/{projectId}/world-clock/advance")
+    @PostMapping("/worlds/{projectId}/world-clock/advance")
     public R<Map<String, Object>> advance(@PathVariable("projectId") Long projectId) {
         // 归属校验（同时懒创建时钟行），随后执行推进（强制模式绕过激活闸门）
         worldClockService.getClock(projectId, currentUserProvider.currentUserId());
@@ -116,7 +116,7 @@ public class WorldClockController {
      *
      * @return {generated=是否生成/更新（false=跳过或降级）}
      */
-    @PostMapping("/projects/{projectId}/world-common-knowledge")
+    @PostMapping("/worlds/{projectId}/world-common-knowledge")
     public R<Map<String, Object>> regenerateCommonKnowledge(@PathVariable("projectId") Long projectId) {
         if (worldCommonKnowledgeService == null) {
             return R.ok(Map.of("generated", false, "reason", "服务未装配"));

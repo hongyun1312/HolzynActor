@@ -18,11 +18,11 @@
 
 package com.holzyn.actor.domain.growth.attention;
 
-import com.holzyn.actor.ai.nanojev.NanoJevQuestion;
-import com.holzyn.actor.ai.nanojev.NanoJevState;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionTemplates;
+import com.holzyn.actor.ai.decision.DecisionQuestion;
+import com.holzyn.actor.ai.decision.DecisionState;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
+import com.holzyn.actor.ai.decision.gate.DecisionTemplates;
 import com.holzyn.actor.domain.growth.config.GrowthProperties;
 import com.holzyn.actor.domain.growth.lod.BrainTierService;
 import com.holzyn.actor.domain.growth.stage.GrowthStage;
@@ -49,7 +49,7 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * 认知注意力服务。
  * <p><b>定位</b>：把「每 tick 全 NPC 批量注意力打分 + 高频微决策」做成真实心智活动的语义层——
- * 真人不会每小时才想一次「我该干嘛」，而是每时每刻都有注意力起伏、偶尔冒出念头。NanoJev
+ * 真人不会每小时才想一次「我该干嘛」，而是每时每刻都有注意力起伏、偶尔冒出念头。决策模型
  * 亚秒级批量判定使每 2 tick（≈10 游戏分钟）全 NPC 一次前向成为现实（20 NPC × 2 题 ≤ 96 上限）。</p>
  * <p><b>两条通道</b>：</p>
  * <ul>
@@ -64,7 +64,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * </ul>
  * <p><b>执行模型</b>：异步虚拟线程执行、<b>不进 tick 屏障</b>（真实心智活动
  * 本就有延迟，结果滞后一两个 tick 可接受；不拖慢世界推进）；任何失败 fail-closed 零阻断
- * （未启用/场景关/调用失败 → 静默跳过）。含 NanoJev 调用，<b>不带 {@code @Transactional}</b>
+ * （未启用/场景关/调用失败 → 静默跳过）。含 决策模型 调用，<b>不带 {@code @Transactional}</b>
  * （AiCallOutsideTransactionTest 反射守护）。</p>
  */
 @Slf4j
@@ -308,9 +308,9 @@ public class CognitiveAttentionService implements AttentionLevelProvider {
 
     // ==================== 依赖（字段注入，构造器不变——治理纪律） ====================
 
-    /** NanoJev 判定门 */
+    /** 决策模型 判定门 */
     @Autowired(required = false)
-    private NanoJevDecisionGate nanoJevDecisionGate;
+    private DecisionGate decisionGate;
 
     /** 认知 LOD（语义通道消费方；null=未装配跳过） */
     @Autowired(required = false)
@@ -409,8 +409,8 @@ public class CognitiveAttentionService implements AttentionLevelProvider {
         if (event.getImportance() == null || event.getImportance() < 2) {
             return; // 琐碎事件不值得注意力评估
         }
-        if (nanoJevDecisionGate == null || !nanoJevDecisionGate.isEnabled(
-                NanoJevDecisionScenes.ATTENTION)) {
+        if (decisionGate == null || !decisionGate.isEnabled(
+                DecisionScenes.ATTENTION)) {
             return; // attention 场景未启用 → 零成本跳过
         }
         executor.submit(() -> {
@@ -434,27 +434,27 @@ public class CognitiveAttentionService implements AttentionLevelProvider {
         Long clock = currentEngineSecond(projectId, gameSecond);
         String recentEvent = recentEventText(projectId);
         // ① 每个 NPC 一个 state：情境文本（名称/当前行动/地点/时刻/需求/在场者/近期见闻）
-        Map<String, NanoJevState> attentionStates = new LinkedHashMap<>();
-        Map<String, NanoJevState> microStates = new LinkedHashMap<>();
+        Map<String, DecisionState> attentionStates = new LinkedHashMap<>();
+        Map<String, DecisionState> microStates = new LinkedHashMap<>();
         for (ActorCharacter ch : chars) {
             String npcRef = com.holzyn.actor.common.NpcRefs.of(ch.getId());
             String text = buildStateText(projectId, ch, clock, recentEvent);
-            Map<String, NanoJevQuestion> attentionQuestions = NanoJevState.newQuestions();
-            attentionQuestions.put(QID_ATTENTION_STATE, NanoJevDecisionTemplates.attentionStateQuestion());
-            attentionStates.put(npcRef, NanoJevState.text(npcRef, text, attentionQuestions));
-            Map<String, NanoJevQuestion> microQuestions = NanoJevState.newQuestions();
-            microQuestions.put(QID_MICRO_INTENT, NanoJevDecisionTemplates.microIntentQuestion());
-            microStates.put(npcRef, NanoJevState.text(npcRef, text, microQuestions));
+            Map<String, DecisionQuestion> attentionQuestions = DecisionState.newQuestions();
+            attentionQuestions.put(QID_ATTENTION_STATE, DecisionTemplates.attentionStateQuestion());
+            attentionStates.put(npcRef, DecisionState.text(npcRef, text, attentionQuestions));
+            Map<String, DecisionQuestion> microQuestions = DecisionState.newQuestions();
+            microQuestions.put(QID_MICRO_INTENT, DecisionTemplates.microIntentQuestion());
+            microStates.put(npcRef, DecisionState.text(npcRef, text, microQuestions));
         }
         // ② 注意力批量（attention 场景 score）+ 微决策批量（micro_decision 场景 choice）
         Map<String, Map<String, Object>> attention =
-                nanoJevDecisionGate == null ? Map.of()
-                        : nanoJevDecisionGate.mixedBatchDecisions(projectId, NanoJevDecisionScenes.ATTENTION,
-                        attentionStates, Map.of(QID_ATTENTION_STATE, NanoJevQuestion.TYPE_SCORE));
+                decisionGate == null ? Map.of()
+                        : decisionGate.mixedBatchDecisions(projectId, DecisionScenes.ATTENTION,
+                        attentionStates, Map.of(QID_ATTENTION_STATE, DecisionQuestion.TYPE_SCORE));
         Map<String, Map<String, Object>> micro =
-                nanoJevDecisionGate == null ? Map.of()
-                        : nanoJevDecisionGate.mixedBatchDecisions(projectId, NanoJevDecisionScenes.MICRO_DECISION,
-                        microStates, Map.of(QID_MICRO_INTENT, NanoJevQuestion.TYPE_CHOICE));
+                decisionGate == null ? Map.of()
+                        : decisionGate.mixedBatchDecisions(projectId, DecisionScenes.MICRO_DECISION,
+                        microStates, Map.of(QID_MICRO_INTENT, DecisionQuestion.TYPE_CHOICE));
         // ③ 消费结果（逐 NPC）
         int promoted = 0;
         int demoted = 0;
@@ -463,10 +463,10 @@ public class CognitiveAttentionService implements AttentionLevelProvider {
         for (ActorCharacter ch : chars) {
             String npcRef = com.holzyn.actor.common.NpcRefs.of(ch.getId());
             Map<String, Object> att = attention.get(npcRef);
-            if (att != null && att.get(QID_ATTENTION_STATE) instanceof NanoJevDecisionGate.ScoreOutcome so
+            if (att != null && att.get(QID_ATTENTION_STATE) instanceof DecisionGate.ScoreOutcome so
                     && so.adopted()) {
                 if (brainTierService != null) {
-                    // 注意力合成（，三项认知 LOD 深化）：NanoJev 语义档位 →
+                    // 注意力合成（，三项认知 LOD 深化）：决策模型 语义档位 →
                     // ① 参与度回灌（参与度≥2 档 +1 封顶 3——「正在聊的人更投入」）→
                     // ② 相机注意力聚焦（近处角色程序化基线，取 max 只抬不压——Unity 相机聚焦）
                     int level = so.level();
@@ -500,7 +500,7 @@ public class CognitiveAttentionService implements AttentionLevelProvider {
                 }
             }
             Map<String, Object> mic = micro.get(npcRef);
-            if (mic != null && mic.get(QID_MICRO_INTENT) instanceof NanoJevDecisionGate.ChoiceOutcome co
+            if (mic != null && mic.get(QID_MICRO_INTENT) instanceof DecisionGate.ChoiceOutcome co
                     && co.adopted() && co.chosen() != null && !co.chosen().isBlank()) {
                 if (!"continue_current".equals(co.chosen())) {
                     microNonContinueCount.incrementAndGet();
@@ -531,28 +531,28 @@ public class CognitiveAttentionService implements AttentionLevelProvider {
             return;
         }
         String eventText = event.getContent().trim();
-        Map<String, NanoJevState> states = new LinkedHashMap<>();
+        Map<String, DecisionState> states = new LinkedHashMap<>();
         for (ActorCharacter ch : chars) {
             String npcRef = com.holzyn.actor.common.NpcRefs.of(ch.getId());
             String text = buildStateText(projectId, ch, event.getGameHour() == null ? null
                     : event.getGameHour() * 3600L, null)
                     + " 事件：" + truncate(eventText, 80);
-            Map<String, NanoJevQuestion> questions = NanoJevState.newQuestions();
+            Map<String, DecisionQuestion> questions = DecisionState.newQuestions();
             questions.put(QID_EVENT_RELEVANCE,
-                    NanoJevDecisionTemplates.eventRelevanceQuestion(truncate(eventText, 100)));
-            states.put(npcRef, NanoJevState.text(npcRef, text, questions));
+                    DecisionTemplates.eventRelevanceQuestion(truncate(eventText, 100)));
+            states.put(npcRef, DecisionState.text(npcRef, text, questions));
         }
         Map<String, Map<String, Object>> results =
-                nanoJevDecisionGate == null ? Map.of()
-                        : nanoJevDecisionGate.mixedBatchDecisions(projectId, NanoJevDecisionScenes.ATTENTION,
-                        states, Map.of(QID_EVENT_RELEVANCE, NanoJevQuestion.TYPE_SCORE));
+                decisionGate == null ? Map.of()
+                        : decisionGate.mixedBatchDecisions(projectId, DecisionScenes.ATTENTION,
+                        states, Map.of(QID_EVENT_RELEVANCE, DecisionQuestion.TYPE_SCORE));
         int promoteLevel = attentionConfig() == null ? 3 : attentionConfig().getEventRelevancePromoteLevel();
         int memoryLevel = attentionConfig() == null ? 2 : attentionConfig().getEventRelevanceMemoryLevel();
         int promoted = 0;
         for (ActorCharacter ch : chars) {
             String npcRef = com.holzyn.actor.common.NpcRefs.of(ch.getId());
             Map<String, Object> r = results.get(npcRef);
-            if (r == null || !(r.get(QID_EVENT_RELEVANCE) instanceof NanoJevDecisionGate.ScoreOutcome so)
+            if (r == null || !(r.get(QID_EVENT_RELEVANCE) instanceof DecisionGate.ScoreOutcome so)
                     || !so.adopted()) {
                 continue;
             }
@@ -841,9 +841,9 @@ public class CognitiveAttentionService implements AttentionLevelProvider {
             return false;
         }
         // 两场景全关时也跳过（无判定可做）
-        return nanoJevDecisionGate != null
-                && (nanoJevDecisionGate.isEnabled(NanoJevDecisionScenes.ATTENTION)
-                || nanoJevDecisionGate.isEnabled(NanoJevDecisionScenes.MICRO_DECISION));
+        return decisionGate != null
+                && (decisionGate.isEnabled(DecisionScenes.ATTENTION)
+                || decisionGate.isEnabled(DecisionScenes.MICRO_DECISION));
     }
 
     /** 档位高低（focus=2/ambient=1/dormant=0）。 */

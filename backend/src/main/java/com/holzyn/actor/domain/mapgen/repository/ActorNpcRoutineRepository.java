@@ -38,6 +38,14 @@ public interface ActorNpcRoutineRepository extends JpaRepository<ActorNpcRoutine
     List<ActorNpcRoutine> findByProjectIdAndMapIdOrderByNpcRefAscSeqAsc(Long projectId, Long mapId);
 
     /**
+     * 某张图的全部日程（按地图，不要求项目——布局手改回写落点时只拿得到 mapId）。
+     *
+     * @param mapId 地图 ID
+     * @return 日程段
+     */
+    List<ActorNpcRoutine> findByMapIdOrderByNpcRefAscSeqAsc(Long mapId);
+
+    /**
      * 清掉某张图的日程（整图重生成时先删后写，快照语义）。
      *
      * @param mapId 地图 ID

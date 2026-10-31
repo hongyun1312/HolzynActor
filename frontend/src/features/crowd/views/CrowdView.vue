@@ -121,26 +121,26 @@
       @selection-change="sel => (selection = sel)" @sort-change="onSortChange"
       empty-text="暂无普通型 NPC，点击右上角「AI 生成居民」开始">
       <el-table-column type="selection" width="46" />
-      <el-table-column prop="name" label="名称" width="120" sortable="custom" show-overflow-tooltip />
-      <el-table-column prop="gender" label="性别" width="70" sortable="custom" />
-      <el-table-column prop="race" label="种族" width="90" sortable="custom" show-overflow-tooltip />
-      <el-table-column prop="subRace" label="次级种族" width="100" sortable="custom" show-overflow-tooltip />
-      <el-table-column prop="age" label="年龄" width="70" sortable="custom" />
-      <el-table-column prop="affiliation" label="归属" width="130" sortable="custom" show-overflow-tooltip />
-      <el-table-column prop="occupation" label="职业" width="110" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="所在地" width="150" sortable="custom" prop="location" show-overflow-tooltip>
+      <el-table-column prop="name" label="名称" width="100" sortable="custom" show-overflow-tooltip />
+      <el-table-column prop="gender" label="性别" width="56" sortable="custom" />
+      <el-table-column prop="race" label="种族" width="76" sortable="custom" show-overflow-tooltip />
+      <el-table-column prop="subRace" label="次级种族" width="86" sortable="custom" show-overflow-tooltip />
+      <el-table-column prop="age" label="年龄" width="60" sortable="custom" />
+      <el-table-column prop="affiliation" label="归属" width="110" sortable="custom" show-overflow-tooltip />
+      <el-table-column prop="occupation" label="职业" width="90" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="所在地" width="120" sortable="custom" prop="location" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.location">{{ row.location }}<el-tag v-if="row.locationId" size="small" type="success" effect="plain">已归一</el-tag></span>
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column prop="detail" label="角色详情" min-width="200" show-overflow-tooltip />
-      <el-table-column label="状态" width="80">
+      <el-table-column prop="detail" label="角色详情" min-width="100" show-overflow-tooltip />
+      <el-table-column label="状态" width="70">
         <template #default="{ row }">
           <el-tag size="small" :type="stateType(row.state)" effect="plain">{{ stateText(row.state) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="关系" width="150" fixed="right">
+      <el-table-column label="关系" width="110" fixed="right">
         <template #default="{ row }">
           <el-button size="small" text type="primary" @click="openRelation(row, false)">
             <el-icon><HIcon name="Document" /></el-icon>&nbsp;查看
@@ -150,7 +150,7 @@
           </el-button>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
+      <el-table-column label="操作" width="80" fixed="right">
         <template #default="{ row }">
           <el-button size="small" text type="primary" @click="openEdit(row)">
             <el-icon><HIcon name="Edit" /></el-icon>
@@ -444,7 +444,7 @@
  * 手动增删行）；统计按主/次分类字段分布 + 归属分布；AI 分批生成（SSE 逐条 + 前置校验字段字典）；
  * 普通 NPC 关系单独生成（复用角色关系生成流程，写 actor_character_relation，可查看/手动增删）；
  * 两级 AI 调度（项目级按主次分类字段分组 + 归属下发指令 → 归属级合并执行）/ 程序化调度 / 定时开关 / 环境摘要。</p>
- * <p>数据来源：/api/projects/{id}/ordinary-npcs 系列接口 + /api/projects/{id}/character-relations。</p>
+ * <p>数据来源：/api/worlds/{id}/ordinary-npcs 系列接口 + /api/worlds/{id}/character-relations。</p>
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'

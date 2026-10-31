@@ -47,7 +47,7 @@ import java.util.function.Consumer;
 
 /**
  * 世界观地点表服务。
- * <p>职责：承载 /api/projects/{id}/world-locations 全部业务逻辑——
+ * <p>职责：承载 /api/worlds/{id}/world-locations 全部业务逻辑——
  * ① 项目级地点 CRUD（列表/新增/修改/删除/编辑模式全量保存）；
  * ② AI 地点提取：从世界观「地理设定」文本识别地点并生成名称/类型/简介/重要度
  * （供新建项目解析流程与「地点详情」手动重新提取复用）。</p>

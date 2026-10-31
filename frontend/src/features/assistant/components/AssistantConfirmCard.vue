@@ -197,7 +197,7 @@ function submitRevise() {
   border-bottom: 1px solid var(--border-l1, #eef1f6);
 }
 .assistant-confirm-type {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--color-warning, #f0a020);
   background: color-mix(in srgb, var(--color-warning, #f0a020) 14%, transparent);
   border-radius: 999px;
@@ -214,7 +214,7 @@ function submitRevise() {
   white-space: nowrap;
 }
 .assistant-confirm-risk {
-  font-size: 11px;
+  font-size: 12.5px;
   padding: 1px 8px;
   border-radius: 999px;
   white-space: nowrap;

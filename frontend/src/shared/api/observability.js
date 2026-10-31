@@ -31,7 +31,7 @@ import http from './http'
  * @returns {Promise<object>} 状态视图（trace 未开启时 traceEnabled=false）
  */
 export const fetchAiRuntimeStatus = (projectId, windowMinutes = 30) =>
-  http.get(`/api/projects/${projectId}/ai-runtime/status`, {
+  http.get(`/api/worlds/${projectId}/ai-runtime/status`, {
     params: { windowMinutes },
     timeout: 8000
   })
@@ -50,7 +50,7 @@ export const fetchAiRuntimeStatus = (projectId, windowMinutes = 30) =>
  * @returns {Promise<object>} 分组命中结果
  */
 export const fetchGlobalSearch = (projectId, { q, types, limit } = {}) =>
-  http.get(`/api/projects/${projectId}/search`, {
+  http.get(`/api/worlds/${projectId}/search`, {
     params: { q, types, limit },
     timeout: 8000
   })

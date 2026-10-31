@@ -20,14 +20,14 @@
 import http from './http'
 
 // 前瞻推演记录列表（npcRef 可空=全项目；limit 截断）
-export const fetchForesightRecords = (projectId, params) => http.get(`/api/projects/${projectId}/decision/foresight`, { params })
+export const fetchForesightRecords = (projectId, params) => http.get(`/api/worlds/${projectId}/decision/foresight`, { params })
 // 前瞻触发+段落预览（不开会话不落库；{stimulusText?, importance?, urgent?, type?}）
-export const previewForesight = (projectId, params) => http.get(`/api/projects/${projectId}/decision/foresight/preview`, { params })
+export const previewForesight = (projectId, params) => http.get(`/api/worlds/${projectId}/decision/foresight/preview`, { params })
 // 决策 state delta 回看（npcRef 可空=全项目）
-export const fetchStateDeltas = (projectId, params) => http.get(`/api/projects/${projectId}/decision/state-deltas`, { params })
+export const fetchStateDeltas = (projectId, params) => http.get(`/api/worlds/${projectId}/decision/state-deltas`, { params })
 // 冲突检测记录列表（npcRef 可空=全项目）
-export const fetchConflictRecords = (projectId, params) => http.get(`/api/projects/${projectId}/decision/conflicts`, { params })
+export const fetchConflictRecords = (projectId, params) => http.get(`/api/worlds/${projectId}/decision/conflicts`, { params })
 // 资源占用登记列表（全项目）
-export const fetchOccupancy = (projectId, params) => http.get(`/api/projects/${projectId}/decision/occupancy`, { params })
+export const fetchOccupancy = (projectId, params) => http.get(`/api/worlds/${projectId}/decision/occupancy`, { params })
 // ToM 推断深度档位预览（{personaJson?}）
-export const fetchTomPreview = (projectId, params) => http.get(`/api/projects/${projectId}/decision/tom`, { params })
+export const fetchTomPreview = (projectId, params) => http.get(`/api/worlds/${projectId}/decision/tom`, { params })

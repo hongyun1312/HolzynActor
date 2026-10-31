@@ -35,7 +35,7 @@ import http from './http'
  * @returns {Promise<object>} { sceneSize, regions[], roads[], placements[], homes[] }
  */
 export const fetchHomeWorldMap = async (projectId) => {
-  const vo = await http.get(`/api/projects/${projectId}/world-map`)
+  const vo = await http.get(`/api/worlds/${projectId}/world-map`)
   const size = Number(vo?.sceneSize) || 500
   const centered = (c) => (Number.isFinite(Number(c)) ? Number(c) - size / 2 : 0)
   return {
@@ -78,7 +78,7 @@ export const fetchHomeWorldMap = async (projectId) => {
  * @returns {Promise<object>} WorldMapLocationVO（地图坐标域原值）
  */
 export const fetchHomeLocationDetail = (projectId, locationId) =>
-  http.get(`/api/projects/${projectId}/world-map/location/${locationId}`)
+  http.get(`/api/worlds/${projectId}/world-map/location/${locationId}`)
 
 /**
  * 单角色住所（无住所返回 null；坐标中心化）。
@@ -88,7 +88,7 @@ export const fetchHomeLocationDetail = (projectId, locationId) =>
  * @returns {Promise<object|null>} HomeVO 或 null
  */
 export const fetchHomeNpcHome = async (projectId, ref) => {
-  const vo = await http.get(`/api/projects/${projectId}/world-map/npc/${encodeURIComponent(ref)}/home`)
+  const vo = await http.get(`/api/worlds/${projectId}/world-map/npc/${encodeURIComponent(ref)}/home`)
   if (!vo) return null
   const size = Number(vo?.sceneSize) || 500
   const centered = (c) => (Number.isFinite(Number(c)) ? Number(c) - size / 2 : 0)
@@ -105,7 +105,7 @@ export const fetchHomeNpcHome = async (projectId, ref) => {
  * @param {number|string} projectId 项目 ID
  * @returns {Promise<Array>} MovementVO[]
  */
-export const fetchHomeMovements = (projectId) => http.get(`/api/projects/${projectId}/world-map/movements`)
+export const fetchHomeMovements = (projectId) => http.get(`/api/worlds/${projectId}/world-map/movements`)
 
 // ==================== 沙盘（状态/干预/实时决策，复用既有 sandbox.js 出口） ====================
 

@@ -26,7 +26,7 @@ import java.util.List;
  * 世界事件总线（，domain/agent/event）——自治环通信主干。
  * <p>目标：一切「世界发生了什么」（行动/居民活动/世界事件/
  * 演化归档/系统节点）统一经本总线落 {@code actor_event} + 广播；写一次、多方读。</p>
- * <p>广播通道：① 前端 SSE（{@link WorldEventSseHub}，/api/projects/{id}/world-events/stream）；
+ * <p>广播通道：① 前端 SSE（{@link WorldEventSseHub}，/api/worlds/{id}/world-events/stream）；
  * ② 引擎 WS 预留；③ 订阅者（{@link WorldEventSubscriber}，
  * 调试前端事件流 DebugEventHub 注册为订阅者——调试事件流与业务事件流同源，消 -5 分叉）。</p>
  * <p>依赖方向约定（R1）：agent 域单向依赖既有域（读世界时钟/事件仓库）；既有域的行动/事件产出经

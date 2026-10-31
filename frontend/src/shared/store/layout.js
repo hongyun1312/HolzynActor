@@ -21,8 +21,8 @@ import { defineStore } from 'pinia'
 /** 布局偏好的 localStorage 键（独立键，不污染主题键 holzyn-actor.theme.v1） */
 export const LAYOUT_STORAGE_KEY = 'holzyn.ui.layout.v1'
 
-/** 侧栏宽度默认值与边界（与 variables.css 的 --shell-side-w* 保持一致） */
-export const SIDEBAR_DEFAULT_WIDTH = 264
+/** 侧栏宽度默认值与边界（与 variables.css 的 --shell-side-w* 保持一致；默认 210 = 基准 1280 下更紧凑的左栏） */
+export const SIDEBAR_DEFAULT_WIDTH = 210
 export const SIDEBAR_MIN_WIDTH = 208
 export const SIDEBAR_MAX_WIDTH = 360
 export const SIDEBAR_COLLAPSED_WIDTH = 56

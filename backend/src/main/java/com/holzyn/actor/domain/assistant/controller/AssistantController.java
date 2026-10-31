@@ -76,13 +76,13 @@ public class AssistantController {
     // ==================== 会话 CRUD ====================
 
     /** 项目会话列表（按更新时间倒序）。 */
-    @GetMapping("/projects/{projectId}/sessions")
+    @GetMapping("/worlds/{projectId}/sessions")
     public R<List<AssistantSessionVO>> sessions(@PathVariable Long projectId) {
         return R.ok(sessionService.list(projectId));
     }
 
     /** 新建会话。 */
-    @PostMapping("/projects/{projectId}/sessions")
+    @PostMapping("/worlds/{projectId}/sessions")
     public R<AssistantSessionVO> create(@PathVariable Long projectId,
                                         @RequestBody(required = false) Map<String, Object> body) {
         String title = body == null ? null : str(body.get("title"));
@@ -97,20 +97,20 @@ public class AssistantController {
     }
 
     /** 单会话。 */
-    @GetMapping("/projects/{projectId}/sessions/{sessionId}")
+    @GetMapping("/worlds/{projectId}/sessions/{sessionId}")
     public R<AssistantSessionVO> one(@PathVariable Long projectId, @PathVariable Long sessionId) {
         return R.ok(sessionService.get(projectId, sessionId));
     }
 
     /** 删除会话（级联消息）。 */
-    @DeleteMapping("/projects/{projectId}/sessions/{sessionId}")
+    @DeleteMapping("/worlds/{projectId}/sessions/{sessionId}")
     public R<Map<String, Object>> delete(@PathVariable Long projectId, @PathVariable Long sessionId) {
         sessionService.delete(projectId, sessionId);
         return R.ok(Map.of("deleted", true));
     }
 
     /** 更新会话默认回答模式。 */
-    @PostMapping("/projects/{projectId}/sessions/{sessionId}/mode")
+    @PostMapping("/worlds/{projectId}/sessions/{sessionId}/mode")
     public R<AssistantSessionVO> updateMode(@PathVariable Long projectId, @PathVariable Long sessionId,
                                             @RequestBody(required = false) Map<String, Object> body) {
         String mode = body == null ? null : str(body.get("mode"));
@@ -122,7 +122,7 @@ public class AssistantController {
     }
 
     /** 更新会话干预确认粒度（strict 严格 / standard 标准 / trust 信任，M4）。 */
-    @PostMapping("/projects/{projectId}/sessions/{sessionId}/confirm-mode")
+    @PostMapping("/worlds/{projectId}/sessions/{sessionId}/confirm-mode")
     public R<AssistantSessionVO> updateConfirmMode(@PathVariable Long projectId, @PathVariable Long sessionId,
                                                    @RequestBody(required = false) Map<String, Object> body) {
         String mode = body == null ? null : str(body.get("mode"));
@@ -136,7 +136,7 @@ public class AssistantController {
     // ==================== M4：干预确认 / 取消 ====================
 
     /** 确认并执行待确认干预计划（复用沙盘既有服务）。 */
-    @PostMapping("/projects/{projectId}/sessions/{sessionId}/interventions/{planId}/confirm")
+    @PostMapping("/worlds/{projectId}/sessions/{sessionId}/interventions/{planId}/confirm")
     public R<Map<String, Object>> confirmIntervention(@PathVariable Long projectId, @PathVariable Long sessionId,
                                                       @PathVariable Long planId) {
         AssistantInterventionService.ConfirmResult r = interventionService.confirm(projectId, sessionId, planId);
@@ -151,7 +151,7 @@ public class AssistantController {
     }
 
     /** 取消待确认干预计划。 */
-    @PostMapping("/projects/{projectId}/sessions/{sessionId}/interventions/{planId}/cancel")
+    @PostMapping("/worlds/{projectId}/sessions/{sessionId}/interventions/{planId}/cancel")
     public R<Map<String, Object>> cancelIntervention(@PathVariable Long projectId, @PathVariable Long sessionId,
                                                      @PathVariable Long planId) {
         AssistantInterventionService.ConfirmResult r = interventionService.cancel(projectId, sessionId, planId);
@@ -164,7 +164,7 @@ public class AssistantController {
     }
 
     /** 修改后执行（M5，设计 §6.2）：修改待确认计划参数后直接执行。 */
-    @PostMapping("/projects/{projectId}/sessions/{sessionId}/interventions/{planId}/revise")
+    @PostMapping("/worlds/{projectId}/sessions/{sessionId}/interventions/{planId}/revise")
     public R<Map<String, Object>> reviseIntervention(@PathVariable Long projectId, @PathVariable Long sessionId,
                                                      @PathVariable Long planId,
                                                      @RequestBody(required = false) Map<String, Object> body) {
@@ -183,7 +183,7 @@ public class AssistantController {
     }
 
     /** 会话消息列表（时间正序）。 */
-    @GetMapping("/projects/{projectId}/sessions/{sessionId}/messages")
+    @GetMapping("/worlds/{projectId}/sessions/{sessionId}/messages")
     public R<List<AssistantMessageVO>> messages(@PathVariable Long projectId, @PathVariable Long sessionId) {
         return R.ok(sessionService.messages(projectId, sessionId));
     }
@@ -198,7 +198,7 @@ public class AssistantController {
      *
      * @return SseEmitter（事件契约见类注释）
      */
-    @PostMapping(value = "/projects/{projectId}/sessions/{sessionId}/chat",
+    @PostMapping(value = "/worlds/{projectId}/sessions/{sessionId}/chat",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@PathVariable Long projectId, @PathVariable Long sessionId,
                            @RequestBody(required = false) AssistantChatRequestDTO dto) {

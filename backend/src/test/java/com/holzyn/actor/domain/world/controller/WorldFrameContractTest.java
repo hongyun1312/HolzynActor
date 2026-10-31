@@ -16,7 +16,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * {@code GET /api/projects/{id}/world-frame} 契约测试（UI V2.0 §8.4，2026-10-15）。
+ * {@code GET /api/worlds/{id}/world-frame} 契约测试（UI V2.0 §8.4，2026-10-15）。
  *
  * <p><b>为什么必须有这个测试</b>：该接口原设计「无 active 帧 → 404」，是采集轮里唯一的 4xx
  * 来源（每轮 6 条 DevTools 红字）。契约改判为「<b>恒 200</b> + {@code generated} 显式字段」后，

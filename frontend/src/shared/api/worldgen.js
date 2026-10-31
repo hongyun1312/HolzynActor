@@ -103,4 +103,4 @@ export const worldgenPipelineStream = async (buildTaskId, handlers = {}) => {
 // 项目故事规划列表（版本链升序）：每版含 storyPlanJson/styleProfileJson JSON 原文 +
 // storyPlanMd/styleProfileMd Markdown 渲染 + atmosphereSegment 世界氛围片段 + createdAt。
 // 供世界详情页「故事规划展示区」（含历史版本切换）与「生成故事规划」按钮完成态刷新。
-export const fetchStoryPlans = (projectId) => http.get(`/api/worldgen/projects/${projectId}/story-plans`)
+export const fetchStoryPlans = (projectId) => http.get(`/api/worldgen/worlds/${projectId}/story-plans`)

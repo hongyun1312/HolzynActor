@@ -21,7 +21,7 @@ package com.holzyn.actor.domain.worldmap.vo;
 import lombok.Data;
 
 /**
- * 在途移动 VO（GET /api/projects/{id}/movements；位置移动与地图生成系统 · M2）。
+ * 在途移动 VO（GET /api/worlds/{id}/movements；位置移动与地图生成系统 · M2）。
  * <p>载荷：移动中角色引用 + 起止坐标（沙盘中心化域，与沙盘 SSE 一致）+ 出发/到达游戏秒 +
  * 进度（0~1）+ 速度 + 触发源 + 目标地点。供沙盘页 / 新首页渲染「移动中角色 + 轨迹」。</p>
  */

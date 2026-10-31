@@ -24,7 +24,6 @@ import com.holzyn.actor.domain.world.service.TimelineService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -45,7 +44,11 @@ public class TimelineController {
     private final CurrentUserProvider currentUserProvider;
 
     /**
-     * 项目统一时间线（事件/行动/记忆聚合，时间倒序）。
+     * 项目统一时间线（事件/行动/记忆聚合，新→旧，分页）。
+     *
+     * <p><b>分页契约</b>：返回 {@code {nodes, total, limit, offset, hasMore}}——{@code total}
+     * 是过滤后的总条数；{@code hasMore=false} 表示到底了。不传 {@code limit} 时后端按 100 条返回，
+     * 传 0/负数同样按 100；上限 500（前端续加载按批取，不要一次要全量）。</p>
      *
      * @param projectId 项目 ID
      *
@@ -57,18 +60,24 @@ public class TimelineController {
      *
      * @param endDate 结束日期（可空）
      *
-     * @return 统一时间线节点列表
+     * @param limit 本批条数（可空=100，上限 500）
+     *
+     * @param offset 起始偏移（可空=0）
+     *
+     * @return 分页结果（nodes/total/limit/offset/hasMore）
      */
-    @GetMapping("/projects/{projectId}/timeline")
-    public R<List<Map<String, Object>>> timeline(
+    @GetMapping("/worlds/{projectId}/timeline")
+    public R<Map<String, Object>> timeline(
             @PathVariable("projectId") Long projectId,
             @RequestParam(name = "types", required = false) String types,
             @RequestParam(name = "characterId", required = false) Long characterId,
             @RequestParam(name = "startDate", required = false) String startDate,
-            @RequestParam(name = "endDate", required = false) String endDate) {
+            @RequestParam(name = "endDate", required = false) String endDate,
+            @RequestParam(name = "limit", required = false) Integer limit,
+            @RequestParam(name = "offset", required = false) Integer offset) {
         Set<String> typeSet = types == null || types.isBlank() ? null
                 : java.util.Arrays.stream(types.split(",")).map(String::trim).collect(java.util.stream.Collectors.toSet());
-        return R.ok(timelineService.aggregate(projectId, typeSet, characterId, startDate, endDate));
+        return R.ok(timelineService.aggregatePage(projectId, typeSet, characterId, startDate, endDate, limit, offset));
     }
 
     /**
@@ -80,7 +89,7 @@ public class TimelineController {
      *
      * @return 新增的事件视图
      */
-    @PostMapping("/projects/{projectId}/events")
+    @PostMapping("/worlds/{projectId}/events")
     public R<Map<String, Object>> createEvent(@PathVariable("projectId") Long projectId,
                                               @RequestBody(required = false) Map<String, Object> body) {
         return R.ok(timelineService.createEvent(projectId, body));
@@ -93,7 +102,7 @@ public class TimelineController {
      *
      * @return 生成的事件视图
      */
-    @PostMapping("/projects/{projectId}/events/ai-generate")
+    @PostMapping("/worlds/{projectId}/events/ai-generate")
     public R<Map<String, Object>> aiGenerate(@PathVariable("projectId") Long projectId) {
         Long userId = currentUserProvider.currentUserId();
         return R.ok(timelineService.aiGenerateEvent(userId, projectId));

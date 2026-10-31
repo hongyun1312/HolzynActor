@@ -119,11 +119,11 @@ public class DecisionService {
     private com.holzyn.actor.domain.growth.metrics.GrowthMetricsService growthMetrics;
 
     /**
-     * NanoJev 判定门（space_decision 场景——特殊 NPC action 决策前置空间候选
+     * 决策模型 判定门（space_decision 场景——特殊 NPC action 决策前置空间候选
      * 选择；字段注入保持构造器不变，null=未装配[单测]跳过 路径回退 Qwen 现状）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate nanoJevDecisionGate;
+    private com.holzyn.actor.ai.decision.gate.DecisionGate decisionGate;
 
     /**
      * C 层社交聚集（社会对话层修复 C 层 独处 NPC 自发流向社交中心[茶馆/集市/村口…]，
@@ -164,7 +164,7 @@ public class DecisionService {
      * 主动记忆检索（ProactAgent「Ask Only When Needed」，P1 ②-1）：决策全局自问环节——
      * AI 按情境判定是否需要主动想起/查证，需要时定向检索三源（角色记忆+世界大事记+知识卡）
      * 组装【主动想起】段，经 {@link AiCallContext} holder 传递给决策路径（AI 深思
-     * {{proactive_memory}} 占位符 / NanoJev 快判情境文本）；programmatic 档 0 AI 除外；
+     * {{proactive_memory}} 占位符 / 决策模型 快判情境文本）；programmatic 档 0 AI 除外；
      * fail-open 零阻断；字段注入保持构造器不变，null=未装配[单测]跳过自问）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -174,7 +174,7 @@ public class DecisionService {
     /**
      * 潜在世界预测注入（P1 ③-2）：角色「脑内预演世界走向」——程序化趋势摘要（历史快照环比）
      * + AI 预测【未来一天世界走向】段（缓存至下一游戏日）；AI 深思经 action_gen
-     * {{world_outlook}} 占位符（8 参重载）/ NanoJev 快判情境文本首部（仅程序化趋势摘要，零 AI）
+     * {{world_outlook}} 占位符（8 参重载）/ 决策模型 快判情境文本首部（仅程序化趋势摘要，零 AI）
      * 注入；fail-open 零阻断；字段注入保持构造器不变，null=未装配[单测]跳过预测）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -247,7 +247,7 @@ public class DecisionService {
         try {
             // 主动记忆检索自问环节（决策全局挂载，P1 ②-1）：AI 按情境判定是否需要主动想起/查证，
             // 需要时定向检索三源并组装【主动想起】段（经 AiCallContext holder 传递给 AI 深思
-            // {{proactive_memory}} 占位符与 NanoJev 快判情境文本）；programmatic 档 0 AI 除外；
+            // {{proactive_memory}} 占位符与 决策模型 快判情境文本）；programmatic 档 0 AI 除外；
             // 判定失败/冷却中/无命中 → 不注入（fail-open 零阻断，含异常隔离）
             runProactiveRetrieval(ch, userId, situation, brainLevel);
             // BrainStrategy 可插拔决策策略链（P2-3）：router 装配时按角色类型+脑力档位组链
@@ -295,8 +295,8 @@ public class DecisionService {
                 return DecisionSources.tag(programmaticDecision(ch), DecisionSource.FALLBACK_PROGRAMMATIC);
             }
             // 空间候选选择：空间有效 + space_decision 场景开时，特殊 NPC 的 action 决策
-            // 由 NanoJev 在空间 possible_actions + 通用三项内亚秒选择（40s→亚秒 ≈40×）——Qwen 只负责
-            // 低频生成空间（语义质量），NanoJev 做「此刻挑一个」的高频快判（差异=真人随机波动）。
+            // 由 决策模型 在空间 possible_actions + 通用三项内亚秒选择（40s→亚秒 ≈40×）——Qwen 只负责
+            // 低频生成空间（语义质量），决策模型 做「此刻挑一个」的高频快判（差异=真人随机波动）。
             // 判定失败/未启用/空间无效 → 回退 Qwen 生成式决策（零阻断）。
             // （决策前空间保障已内置于 trySpaceDecision：空间缺失/过期才 AI 生成，有效直接复用零成本）
             Map<String, Object> spaceDecision = trySpaceDecision(ch, situation);
@@ -323,7 +323,7 @@ public class DecisionService {
     /**
      * 主动记忆检索自问环节（决策全局挂载）：委托 {@link ProactiveRetrievalService#maybeRetrieve}，
      * 命中结果【主动想起】段经 {@link AiCallContext#holdProactiveSegment} 持有，供
-     * {@link #trySpaceDecision}（NanoJev 快判情境文本）与 {@link #deliberateDecision}
+     * {@link #trySpaceDecision}（决策模型 快判情境文本）与 {@link #deliberateDecision}
      * （{{proactive_memory}} 占位符）读取。programmatic 档（0 AI 语义）不执行；
      * 一切失败静默跳过（fail-open 零阻断）。
      */
@@ -772,7 +772,7 @@ public class DecisionService {
 
     /**
      * 空间候选选择（公开，BrainStrategy SpaceChoiceStrategy 委托）：空间有效 +
-     * space_decision 场景开时，特殊 NPC 的 action 决策由 NanoJev 在空间 possible_actions +
+     * space_decision 场景开时，特殊 NPC 的 action 决策由 决策模型 在空间 possible_actions +
      * 通用三项内选择（sample 直接采纳，无升级阈值——沿 crowd 先例；差异=真人随机波动）。
      * precondition 程序化优先 + 语义条件 boolean 批量（1 state 多题一次前向）；
      * 选中候选纯程序化映射 ReAct 决策 Map（{@link SpaceChoiceMapper}）。
@@ -786,12 +786,12 @@ public class DecisionService {
      * @return 内部规范决策 Map（null=未启用/空间无效/判定失败 → 调用方回退 Qwen 现状）
      */
     public Map<String, Object> trySpaceDecision(ActorCharacter ch, String situation) {
-        if (nanoJevDecisionGate == null || growthSpaceService == null || ch == null
+        if (decisionGate == null || growthSpaceService == null || ch == null
                 || ch.getProjectId() == null) {
             return null;
         }
         try {
-            // 主动记忆检索【主动想起】段（决策全局自问命中时）：拼入 NanoJev 判定情境文本
+            // 主动记忆检索【主动想起】段（决策全局自问命中时）：拼入 决策模型 判定情境文本
             // 首部（buildSpaceStateText 对 situation 尾部截断 300 字——段在首部保活，快判
             // 路径也能被「主动想起的记忆」影响；未命中/无段 → 原样行为零影响）
             String proactive = com.holzyn.actor.domain.debug.service.AiCallContext.readProactiveSegment();
@@ -800,14 +800,14 @@ public class DecisionService {
                         ? proactive : proactive + "\n" + situation;
             }
             // MUSE 策略切换【策略偏好】段（策略链内 FamiliarityStrategy 命中时）：同样拼入
-            // NanoJev 判定情境文本首部（快判路径也被「保守/激进」偏好引导；未命中/均衡 →
+            // 决策模型 判定情境文本首部（快判路径也被「保守/激进」偏好引导；未命中/均衡 →
             // 原样行为零影响）
             String strategyPreference = com.holzyn.actor.domain.debug.service.AiCallContext.readStrategyPreference();
             if (strategyPreference != null && !strategyPreference.isBlank()) {
                 situation = situation == null || situation.isBlank()
                         ? strategyPreference : strategyPreference + "\n" + situation;
             }
-            // 潜在世界预测注入（P1 ③-2）：NanoJev 快判只拼程序化趋势摘要（零 AI 零缓存——
+            // 潜在世界预测注入（P1 ③-2）：决策模型 快判只拼程序化趋势摘要（零 AI 零缓存——
             // 历史快照环比，事实锚点；AI 预测段留给深思/前瞻通道，快判保持低延迟）。
             // 同样拼入判定情境文本首部（快判路径也能感知「世界在变」；无趋势 → 原样零影响）
             if (worldOutlookService != null) {
@@ -824,8 +824,8 @@ public class DecisionService {
             }
             Long projectId = ch.getProjectId();
             String npcRef = com.holzyn.actor.common.NpcRefs.of(ch.getId());
-            if (!nanoJevDecisionGate.isEnabled(
-                    com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes.SPACE_DECISION)) {
+            if (!decisionGate.isEnabled(
+                    com.holzyn.actor.ai.decision.gate.DecisionScenes.SPACE_DECISION)) {
                 return null;
             }
             // 决策前空间保障：空间缺失/过期才 AI 生成，有效直接复用（零成本）；感知情境里的
@@ -891,7 +891,7 @@ public class DecisionService {
             // 判定编排（一次前向）→ 选中候选
             com.holzyn.actor.domain.growth.space.SpaceDecisionCandidates.SpaceCandidate chosen =
                     com.holzyn.actor.domain.growth.space.SpaceDecisionServiceUtils.decide(
-                            nanoJevDecisionGate, projectId, ch.getId(), candidates, pctx,
+                            decisionGate, projectId, ch.getId(), candidates, pctx,
                             buildSpaceStateText(ch, st, doc, situation));
             if (chosen == null) {
                 return null;
@@ -909,9 +909,9 @@ public class DecisionService {
                 return null;
             }
             AiCallContext.recordStep(projectId, "agent_decision", "thinking",
-                    "空间候选选择（NanoJev space_decision）：候选 " + candidates.size()
+                    "空间候选选择（决策模型 space_decision）：候选 " + candidates.size()
                             + " 项 → 选中「" + truncate(String.valueOf(chosen.action()), 40) + "」", 0);
-            log.info("[Thinking] 空间候选选择（NanoJev）: char={} 选中={} 候选={} 项",
+            log.info("[Thinking] 空间候选选择（决策模型）: char={} 选中={} 候选={} 项",
                     ch.getId(), chosen.action(), candidates.size());
             return decision;
         } catch (Exception e) {

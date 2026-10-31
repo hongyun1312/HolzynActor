@@ -12,7 +12,10 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <aside class="dialogue-context">
+  <!-- data-tour：新手引导「对谈：右侧对谈详情」的聚光灯目标。
+       窄屏（<1024）时本面板收进覆盖式抽屉、默认不可见，同名的属性也打在
+       DialogueView 顶部那个「对谈详情」切换按钮上——引导按 DOM 顺序取第一个可见元素。 -->
+  <aside class="dialogue-context" data-tour="dlg-context">
     <!-- ============ 空态：**一行提示**，不再是第二张空态卡 + 第二个主 CTA ============
          V2.0（§5.6 空态规范）：① 侧栏/上下文面板不得放独立空态卡；
          ② 同一屏不得出现两次同一个 CTA——本面板原有一个「+ 新建对谈」按钮，
@@ -338,8 +341,8 @@
  * ⑤ 未选会话时只显示一张引导卡（原来 6 张空卡）；⑥ 世界书/作者注释/用量补一句人话解释，
  * 不再是酒馆黑话。</p>
  *
- * <p>数据：/api/player-profile + /api/projects/{id}/player-profile/relations（M3）；
- * /api/projects/{id}/dialogue/sessions/{sid}/worldbook|context-config|usage（M4）。</p>
+ * <p>数据：/api/player-profile + /api/worlds/{id}/player-profile/relations（M3）；
+ * /api/worlds/{id}/dialogue/sessions/{sid}/worldbook|context-config|usage（M4）。</p>
  */
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -546,7 +549,7 @@ async function saveRelEdit() {
 
 /** 跳转对谈界面玩家档案页（完整编辑；P0-1 玩家档案已移入对谈独立界面） */
 function goRelSettings() {
-  router.push(`/project/${projectId}/dialogue/player-profile`)
+  router.push(`/world/${projectId}/dialogue/player-profile`)
 }
 
 // ==================== M4：世界书 ====================

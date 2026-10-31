@@ -21,7 +21,7 @@
  * 让 Teleport 到 body 的浮层（el-dialog / message-box / message / popper / 引导气泡）
  * 也吃到深色玻璃令牌（见 global.css `body.holzyn-glass`）。
  *
- * <p>用法：云间列车背景页（首次设置向导 / 项目画廊）的 setup 中调用
+ * <p>用法：云间列车背景页（首次设置向导 / 世界画廊）的 setup 中调用
  * `useGlassScene()`；页面卸载自动移除。</p>
  */
 import { onBeforeUnmount, onMounted } from 'vue'

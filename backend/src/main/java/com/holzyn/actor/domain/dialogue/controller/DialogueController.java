@@ -70,7 +70,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/projects/{projectId}/dialogue")
+@RequestMapping("/api/worlds/{projectId}/dialogue")
 public class DialogueController {
 
     /** 会话服务 */

@@ -34,8 +34,10 @@ import com.holzyn.actor.domain.project.vo.WorldParseResultVO;
 import com.holzyn.actor.domain.settings.service.PromptTemplateService;
 import com.holzyn.actor.domain.usage.service.UsageLogService;
 import com.holzyn.actor.domain.world.dto.WorldSettingDTO;
+import com.holzyn.actor.domain.worldstore.WorldLifecycleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -117,6 +119,16 @@ public class WorldParseService {
     private final PromptTemplateService templateService;
     private final UsageLogService usageLogService;
     private final ObjectMapper objectMapper;
+
+    /**
+     * 世界存档壳（V1.1.2-beta.1 M5，字段注入而非构造器注入：AGENTS §8.1.2 禁止改既有构造器）。
+     *
+     * <p>本服务同样走老的 {@code ProjectService.create}，插出来的行没有 {@code project_uid}，
+     * 分档存储下打不开；{@link WorldLifecycleService#mountNewWorld} 补壳并挂载后再写世界观/角色/知识。
+     * 测试里可为 null。</p>
+     */
+    @Autowired(required = false)
+    private WorldLifecycleService worldLifecycleService;
 
     /**
      * 解析工作流主入口：分段 → （可选）扩写 → 建项目落世界观表 → 知识库存储 → 角色分离入库。
@@ -278,7 +290,12 @@ public class WorldParseService {
         for (int attempt = 1; attempt <= MAX_RETRY; attempt++) {
             try {
                 String prompt = templateService.render(userId, null, PromptTemplateService.CODE_WORLD_SEGMENT,
-                        Map.of("files_content", truncate(filesContent, TOTAL_MAX)));
+                        Map.of("files_content", truncate(filesContent, TOTAL_MAX)))
+                        // 题材收敛到固定八类：提示词给选项（而不是让 AI 自由发挥），落库前还会
+                        // 再走一次 WorldCategory.normalize 兜底；映射不到就留空由用户在下拉里补选。
+                        + "\n\n【输出约束】genre 字段只能是以下八类之一："
+                        + String.join(" / ", com.holzyn.actor.domain.world.model.WorldCategory.labels())
+                        + "，不要输出这八类之外的任何分类名。";
                 AiChatRequest req = new AiChatRequest(null, List.of(
                         new AiChatRequest.ChatMessage("system", templateService.systemMessage(userId, null,
                                 PromptTemplateService.CODE_WORLD_SEGMENT,
@@ -502,8 +519,16 @@ public class WorldParseService {
     private ProjectVO createProjectAndWorld(Long userId, Segments seg) {
         ProjectDTO projectDto = new ProjectDTO(truncate(seg.projectName, 100), null, truncate(seg.projectSummary, 2000), null);
         ProjectVO project = projectService.create(projectDto);
+        // 分档存储（M5）：补世界壳并挂载，否则下面的世界观/角色/知识都写不进"这个世界的库"
+        if (worldLifecycleService != null) {
+            worldLifecycleService.mountNewWorld(project.id());
+        }
         WorldSettingDTO worldDto = new WorldSettingDTO(
-                truncate(seg.worldName, 100), truncate(seg.genre, 50), truncate(seg.era, 50),
+                truncate(seg.worldName, 100),
+                // 文件解析的题材由 AI 抽取，同样收敛到固定八类；映射不到留空由用户补选
+                com.holzyn.actor.domain.world.model.WorldCategory.normalize(seg.genre),
+                null,
+                truncate(seg.era, 50),
                 truncate(seg.geography, 100000), truncate(seg.factions, 100000), truncate(seg.magicSystem, 100000),
                 truncate(seg.culture, 100000), truncate(seg.history, 100000), truncate(seg.supplement, 200000));
         projectService.saveWorldSetting(project.id(), worldDto);

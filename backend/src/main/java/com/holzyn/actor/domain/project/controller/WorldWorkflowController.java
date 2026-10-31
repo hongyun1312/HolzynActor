@@ -54,16 +54,16 @@ import java.util.concurrent.Executors;
 /**
  * 新建项目「工作流」控制器（新建项目解析重构）。
  * <p>职责：提供两个 SSE 流式端点——
- * ① {@code POST /api/projects/import/workflow}：文件解析工作流（分段/扩写/建项目落表/知识库存储/角色分离入库），
+ * ① {@code POST /api/worlds/import/workflow}：文件解析工作流（分段/扩写/建项目落表/知识库存储/角色分离入库），
  * 逐条推送后端解析日志（log 事件）+ 阶段进度（stage 事件），完成后推送 result（含新建 projectId）；
- * ② {@code POST /api/projects/{id}/init/stream}：世界初始化工作流（地点/角色卡/字段字典+普通NPC/关系/世界时间/知识向量化），
+ * ② {@code POST /api/worlds/{id}/init/stream}：世界初始化工作流（地点/角色卡/字段字典+普通NPC/关系/世界时间/知识向量化），
  * 同样逐条推送日志与阶段，完成后推送 result。
  * 前端「文件解析」页与「世界初始化」页的控制台日志区域即消费这两个端点的 SSE 事件。</p>
  * <p>SSE 事件约定：{@code log}={level,message,time}（一行后端日志）；{@code stage}={name,index,total}；
  * {@code result}=各工作流结果 VO；{@code error}={message}。</p>
  */
 @RestController
-@RequestMapping("/api/projects")
+@RequestMapping("/api/worlds")
 @Slf4j
 @RequiredArgsConstructor
 public class WorldWorkflowController {

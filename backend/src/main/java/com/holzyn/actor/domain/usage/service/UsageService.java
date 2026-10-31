@@ -24,12 +24,22 @@ import com.holzyn.actor.domain.project.entity.ActorProject;
 import com.holzyn.actor.domain.usage.entity.ActorUsageLog;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import com.holzyn.actor.domain.usage.repository.ActorUsageLogRepository;
+import com.holzyn.actor.domain.worldstore.WorldSessionService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,7 +53,21 @@ import java.util.stream.Collectors;
  * AI 用量统计服务。
  * <p>职责：按当前用户聚合 actor_usage_log（项目/模型/场景/日期维度 + 明细分页），
  * 供首页「AI 用量」Tab 展示；所有数据按 userId 归属隔离。</p>
+ *
+ * <p><b>分档存储（V1.1.2-beta.1 M4）之后有两种形态</b>：</p>
+ * <ul>
+ *   <li><b>有世界挂载</b>：{@code actor_usage_log} 在当前世界库里，明细/场景/模型/日期全维度可用；</li>
+ *   <li><b>无世界挂载</b>：路由回落目录库，而目录库里<b>没有</b> {@code actor_usage_log} 这张表
+ *       （它是世界表）——直接查会 {@code Table "ACTOR_USAGE_LOG" not found} 500。
+ *       此时只能读目录库 {@code actor_project} 的摘要列
+ *       （{@code token_in_total/token_out_total/ai_call_count}，由世界关闭时回写），
+ *       给出跨世界的「总量 + 分世界」两段，明细维度留空。</li>
+ * </ul>
+ *
+ * <p>为什么摘要列在目录库而不是实时汇总：首页用量 Tab 是"浏览存档时"打开的页面，
+ * 而分档存储的第一条纪律就是<b>不为了看一眼数字去打开所有世界库</b>。</p>
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UsageService {
@@ -56,6 +80,26 @@ public class UsageService {
 
     /** 角色仓库（解析角色名，明细「角色ID → 角色名」） */
     private final ActorCharacterRepository characterRepository;
+
+    /**
+     * 世界会话（判断当前是否有世界挂载）。
+     *
+     * <p>{@code @Autowired(required=false)} 字段注入：本类是既有服务，构造器签名不许动
+     * （AGENTS §8.1.2）；单测里字段为 null 时按"有世界"处理，保持原测试语义不变。</p>
+     */
+    @Autowired(required = false)
+    private WorldSessionService worldSessionService;
+
+    /**
+     * 目录库数据源（无世界挂载时读 {@code actor_project} 摘要列）。
+     *
+     * <p>为什么用 JDBC 而不是给 {@code ActorProject} 实体加字段：摘要列是"索引表的附加列"，
+     * 加进实体后所有 {@code save()} 都会把它们一起写回（旧值覆盖新值），
+     * 而摘要列的唯一写入口必须是世界关闭时的回写。</p>
+     */
+    @Autowired(required = false)
+    @Qualifier("registryDataSource")
+    private DataSource registryDataSource;
 
     /**
      * 统计当前用户的 AI 用量（支持 projectId / scene / model / dateRange 筛选）。
@@ -74,6 +118,10 @@ public class UsageService {
      */
     public Map<String, Object> stats(Long userId, Long projectId, String scene, String model,
                                      String startDate, String endDate) {
+        if (!worldMounted()) {
+            // 无世界挂载：actor_usage_log 这张世界表在目录库里不存在，只能读摘要列（见类注释）
+            return registryStats(userId, projectId);
+        }
         LocalDateTime start = parseDate(startDate, true);
         LocalDateTime end = parseDate(endDate, false);
         List<ActorUsageLog> logs;
@@ -112,6 +160,94 @@ public class UsageService {
                                 l.getCharacterId() == null ? "项目级" : "角色 " + l.getCharacterId()),
                         sceneName(l.getScene())))
                 .toList());
+        return result;
+    }
+
+    /**
+     * 当前是否有世界挂载。
+     *
+     * <p>字段为 null（未装配 Spring 上下文的单测）时按"有世界"处理：老测试走原来的
+     * {@code actor_usage_log} 路径，语义不变。</p>
+     *
+     * @return true = 世界库可用，明细维度可查
+     */
+    boolean worldMounted() {
+        return worldSessionService == null || worldSessionService.isOpen();
+    }
+
+    /**
+     * 无世界挂载时的跨世界用量（只读目录库 {@code actor_project} 摘要列，<b>绝不打开世界库</b>）。
+     *
+     * <p>返回结构与 {@link #stats} 一致（summary / byProject / byScene / byModel / byDate / detail），
+     * 额外带 {@code mode=registry} 让前端知道"明细维度此时为空是正常的"。</p>
+     *
+     * @param userId    归属用户 ID
+     * @param projectId 项目筛选（可空）
+     *
+     * @return 用量 Map
+     */
+    Map<String, Object> registryStats(Long userId, Long projectId) {
+        List<Map<String, Object>> byProject = new ArrayList<>();
+        long tokenIn = 0;
+        long tokenOut = 0;
+        long count = 0;
+        if (registryDataSource != null && userId != null) {
+            StringBuilder sql = new StringBuilder("select id, name, coalesce(token_in_total, 0), "
+                    + "coalesce(token_out_total, 0), coalesce(ai_call_count, 0) from actor_project "
+                    + "where user_id = ? and coalesce(deleted, 0) = 0");
+            if (projectId != null) {
+                sql.append(" and id = ?");
+            }
+            try (Connection c = registryDataSource.getConnection();
+                 PreparedStatement ps = c.prepareStatement(sql.toString())) {
+                ps.setLong(1, userId);
+                if (projectId != null) {
+                    ps.setLong(2, projectId);
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        long tin = rs.getLong(3);
+                        long tout = rs.getLong(4);
+                        long n = rs.getLong(5);
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("key", String.valueOf(rs.getLong(1)));
+                        row.put("label", rs.getString(2));
+                        row.put("count", n);
+                        row.put("tokenIn", tin);
+                        row.put("tokenOut", tout);
+                        row.put("cacheHit", 0);
+                        row.put("cacheMiss", 0);
+                        row.put("cacheHitRate", 0.0);
+                        row.put("durationMs", 0);
+                        byProject.add(row);
+                        tokenIn += tin;
+                        tokenOut += tout;
+                        count += n;
+                    }
+                }
+            } catch (SQLException e) {
+                log.warn("[usage] 读目录库用量摘要失败（本次返回空汇总）：{}", e.getMessage());
+            }
+        }
+        byProject.sort((a, b) -> Long.compare((long) b.get("count"), (long) a.get("count")));
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("count", count);
+        summary.put("tokenIn", tokenIn);
+        summary.put("tokenOut", tokenOut);
+        summary.put("cacheHit", 0);
+        summary.put("cacheMiss", 0);
+        summary.put("cacheHitRate", 0.0);
+        summary.put("durationMs", 0);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("mode", "registry");
+        result.put("summary", summary);
+        result.put("byProject", byProject);
+        result.put("byScene", List.of());
+        result.put("byModel", List.of());
+        result.put("byDate", List.of());
+        result.put("detail", List.of());
         return result;
     }
 

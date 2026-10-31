@@ -91,7 +91,7 @@ class AiSpringChatGatewayGuardRoutingTest {
         OpenAiChatOptions defaultOptions = OpenAiChatOptions.builder().model("m").build();
         when(chatModel.getOptions()).thenReturn(defaultOptions);
         when(chatModel.getDefaultOptions()).thenReturn(defaultOptions);
-        when(modelApiService.resolveProviderConfig(any(), any(), any())).thenReturn(CONFIG);
+        when(modelApiService.resolveProviderConfig(any(), any(), any(), any())).thenReturn(CONFIG);
         // 语义缓存恒 miss（LLM 路径）
         when(semanticCacheService.lookup(any(), any(), any(), any(), any()))
                 .thenReturn(SemanticCacheService.Lookup.miss(null, null, null));
@@ -150,7 +150,7 @@ class AiSpringChatGatewayGuardRoutingTest {
         sceneRouter.putOverride("action", new SceneRoutingProperties.SceneRouteOverride(null, null, 67L));
         AiCallContext.run("action", 5L,
                 () -> gateway.chatCompletion(1L, 9L, null, request(null, null)));
-        verify(modelApiService).resolveProviderConfig(1L, 9L, 67L);
+        verify(modelApiService).resolveProviderConfig(1L, 9L, 67L, "decision");
     }
 
     @Test

@@ -57,7 +57,7 @@ function dismiss() {
 function goUpdateSettings() {
   dismissed.value = true
   const projectId = route.params?.id
-  const target = projectId ? `/project/${projectId}/settings/update` : '/settings/update'
+  const target = projectId ? `/world/${projectId}/settings/update` : '/settings/update'
   router.push(target)
 }
 </script>

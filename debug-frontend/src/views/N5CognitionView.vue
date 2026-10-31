@@ -14,7 +14,7 @@
     <!-- ① 注意力卡 -->
     <el-card shadow="never" class="card">
       <template #header>
-        <div class="card-title">① 注意力（每 {{ attentionConfig.periodTicks ?? 2 }} tick 全 NPC 批量 · 规则硬基线 + NanoJev 语义通道）</div>
+        <div class="card-title">① 注意力（每 {{ attentionConfig.periodTicks ?? 2 }} tick 全 NPC 批量 · 规则硬基线 + 决策模型语义通道）</div>
       </template>
       <div class="row">
         <el-table :data="tierRows" size="small" stripe max-height="280" class="tier-table">
@@ -84,7 +84,7 @@
     <!-- ③ 重算触发卡 -->
     <el-card shadow="never" class="card">
       <template #header>
-        <div class="card-title">③ 事件驱动重算触发（情绪漂移 / 关系跨档 / 面具情境切换 · NanoJev boolean + 程序化兜底）</div>
+        <div class="card-title">③ 事件驱动重算触发（情绪漂移 / 关系跨档 / 面具情境切换 · 决策模型 boolean + 程序化兜底）</div>
       </template>
       <el-table :data="triggers" size="small" stripe max-height="320">
         <el-table-column label="时间" width="90">
@@ -95,8 +95,8 @@
         <el-table-column label="角色" prop="npcRef" min-width="120" />
         <el-table-column label="判定来源" width="110" align="center">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.nanoJevActive ? 'success' : 'info'">
-              {{ row.nanoJevActive ? 'NanoJev' : '程序化兜底' }}
+            <el-tag size="small" :type="row.decisionActive ? 'success' : 'info'">
+              {{ row.decisionActive ? '决策模型' : '程序化兜底' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -176,7 +176,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="tip">程序化连续映射（近→高关注），与 NanoJev 语义档位取 max（只抬不压）；规则升档兜底保留。</div>
+      <div class="tip">程序化连续映射（近→高关注），与决策模型语义档位取 max（只抬不压）；规则升档兜底保留。</div>
     </el-card>
 
     <!-- ⑥ N6 记忆检索注意力加权卡（层间优先级修正 + 档位数量配额） -->

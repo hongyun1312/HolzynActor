@@ -27,7 +27,7 @@ import java.util.Map;
 
 /**
  * 空间候选选择 · 决策输出映射器。
- * <p><b>职责</b>：把 NanoJev choice 选中的候选映射为下游执行链消费的<b>内部规范决策 Map</b>
+ * <p><b>职责</b>：把 决策模型 choice 选中的候选映射为下游执行链消费的<b>内部规范决策 Map</b>
  * ——action_detail=候选原文、target=候选目标、
  * reasoning=简短程序化文本（思想气泡可见）、priority/duration 按类型默认；
  * 新键（actionType/actionDetail/reasoning/priority/expectedDurationMinutes/target）与

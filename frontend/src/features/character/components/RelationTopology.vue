@@ -365,10 +365,10 @@
  * <p>分工：数据与状态在本组件（唯一数据源）；画布、工具条、图例、详情栏都是受控子组件，
  * 只负责显示与抛出意图。这样「画布上看到的」「图例里数的」「详情栏里列的」永远同源。</p>
  *
- * <p>数据源：GET /api/projects/{id}/character-relations（后端返回 nodes[npc/crowd/ghost] + relations
+ * <p>数据源：GET /api/worlds/{id}/character-relations（后端返回 nodes[npc/crowd/ghost] + relations
  * + 角色 meta：头像/性别/年龄/阶段/归属/职业/地点/家族）。</p>
  *
- * <p>实时：GET /api/projects/{id}/world-events/stream 的 kind=relation 事件 →
+ * <p>实时：GET /api/worlds/{id}/world-events/stream 的 kind=relation 事件 →
  * 边闪烁 + 明细刷新（好感/信任/状态随之变化，粗细与颜色自动跟随）。</p>
  */
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
@@ -1491,7 +1491,9 @@ defineExpose({ reload: load, selectNode, setLayout: (v) => { layoutId.value = v 
   min-height: 420px;
   outline: none;
 }
-/* page 变体：整高工作台（画布铺满，浮层压在画布上） */
+/* page 变体：整高工作台（画布铺满，浮层压在画布上）
+   2026-10 布局审计：page 变体已收进外壳标准内容列（不再 fullbleed），
+   因此保留 .topo-work 的圆角/描边/底色——与本页之外的内容块（卡片）同材质。 */
 .relation-topology.page { flex: 1; min-height: 0; height: 100%; }
 .relation-topology.fullscreen { background: var(--bg-layer-1); }
 
@@ -1511,7 +1513,7 @@ defineExpose({ reload: load, selectNode, setLayout: (v) => { layoutId.value = v 
   border: 1px solid var(--border-light);
   background: var(--bg-layer-1);
 }
-.relation-topology.page .topo-work { border-radius: 0; border: none; }
+.relation-topology.page .topo-work { border-radius: var(--radius-md); border: 1px solid var(--border-light); }
 .topo-stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
 
 /* 内嵌（tab）变体：铺满可用高度——画布高度由父级（tab pane）决定，不再被 52vh 钉死；

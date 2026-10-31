@@ -63,7 +63,7 @@ public class GoalController {
      *
      * @return 目标列表
      */
-    @GetMapping("/projects/{projectId}/characters/{characterId}/goals")
+    @GetMapping("/worlds/{projectId}/characters/{characterId}/goals")
     public R<List<ActorCharacterGoal>> listGoals(@PathVariable("projectId") Long projectId,
                                                  @PathVariable("characterId") Long characterId) {
         requireCharacterInProject(characterId, projectId);
@@ -79,7 +79,7 @@ public class GoalController {
      *
      * @return 新建目标
      */
-    @PostMapping("/projects/{projectId}/characters/{characterId}/goals")
+    @PostMapping("/worlds/{projectId}/characters/{characterId}/goals")
     public R<ActorCharacterGoal> createGoal(@PathVariable("projectId") Long projectId,
                                             @PathVariable("characterId") Long characterId,
                                             @RequestBody Map<String, Object> body) {
@@ -100,7 +100,7 @@ public class GoalController {
      *
      * @return 新建目标数
      */
-    @PostMapping("/projects/{projectId}/characters/{characterId}/goals/generate")
+    @PostMapping("/worlds/{projectId}/characters/{characterId}/goals/generate")
     public R<Integer> generateGoal(@PathVariable("projectId") Long projectId,
                                    @PathVariable("characterId") Long characterId) {
         requireCharacterInProject(characterId, projectId);
@@ -145,7 +145,7 @@ public class GoalController {
      *
      * @param characterId 角色 ID
      */
-    @GetMapping("/projects/{projectId}/characters/{characterId}/goal-plan")
+    @GetMapping("/worlds/{projectId}/characters/{characterId}/goal-plan")
     public R<Map<String, Object>> goalPlan(@PathVariable("projectId") Long projectId,
                                            @PathVariable("characterId") Long characterId) {
         requireCharacterInProject(characterId, projectId);

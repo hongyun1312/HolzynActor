@@ -32,7 +32,7 @@ import java.time.LocalDateTime;
 /**
  * 长跑测试「AI 调用用量明细」实体，对应表 {@code actor_test_usage_log}。
  * <h2>⚠️ 性质声明：本表是<b>测试设施</b>，不是领域概念</h2>
- * <p>本表的唯一职责是服务长跑测试的计量：把每一次 AI 调用（主模型对话 / NanoJev / embedding /
+ * <p>本表的唯一职责是服务长跑测试的计量：把每一次 AI 调用（主模型对话 / 决策模型 / embedding /
  * Judge）的「用时 / 请求输入 / 模型输出 / 输入 token / 输出 token / 缓存 token」按<b>轮次标签</b>
  * 完整留档，供事后逐条复核与「每游戏日 token 消耗」聚合。</p>
  * <p>因此：</p>
@@ -100,7 +100,7 @@ public class TestUsageLog {
     @Column(name = "game_second")
     private Long gameSecond;
 
-    /** 调用场景码（action / dialog / plan_day / growth_space_generate / embedding / nanojev_* …） */
+    /** 调用场景码（action / dialog / plan_day / growth_space_generate / embedding / decision_* …） */
     @Column(length = 48)
     private String scene;
 
@@ -128,7 +128,7 @@ public class TestUsageLog {
     @Column(name = "provider_id")
     private Long providerId;
 
-    /** 实际使用的模型名（deepseek-flash / qwen3.6-35b-q4-un / nanojev / 向量模型 …） */
+    /** 实际使用的模型名（deepseek-flash / qwen3.6-35b-q4-un / 决策模型 / 向量模型 …） */
     @Column(length = 100)
     private String model;
 

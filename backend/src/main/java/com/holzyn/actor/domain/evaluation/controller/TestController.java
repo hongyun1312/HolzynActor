@@ -58,7 +58,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 专门测试接口控制器。
- * <p>统一前缀 {@code /api/projects/{projectId}/test}，五能力：</p>
+ * <p>统一前缀 {@code /api/worlds/{projectId}/test}，五能力：</p>
  * <ul>
  * phase_fastforward/phase_intensity）；</li>
  * <li><b>② 状态聚合</b>：GET /state（引擎推进/群聊活跃/预算/用量归因四块，时间窗可配）；</li>
@@ -70,7 +70,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/projects/{projectId}/test")
+@RequestMapping("/api/worlds/{projectId}/test")
 @RequiredArgsConstructor
 public class TestController {
 

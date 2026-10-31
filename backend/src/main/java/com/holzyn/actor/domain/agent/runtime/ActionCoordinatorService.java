@@ -107,11 +107,11 @@ public class ActionCoordinatorService {
     private AiIntensityGate aiIntensityGate;
 
     /**
-     * NanoJev 冲突仲裁判定（默认关场景；开启且采纳时优先，失败/升级回退 Qwen 协商；
+     * 决策模型 冲突仲裁判定（默认关场景；开启且采纳时优先，失败/升级回退 Qwen 协商；
      * 字段注入保持构造器不变，null=未装配[单测]直接走 Qwen）
      */
     @Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevNegotiateDecision nanoJevDecision;
+    private com.holzyn.actor.ai.decision.gate.NegotiateJudge decisionJudge;
 
     /** 世界时钟（游戏秒回退；null=纯数据单测/未装配） */
     @Autowired(required = false)
@@ -401,25 +401,25 @@ public class ActionCoordinatorService {
             Long userId = currentUserProvider == null ? 1L : currentUserProvider.currentUserId();
             String opponentNameText = (opponentName == null || opponentName.isBlank()) ? "对方" : opponentName;
             String myIntent = decision.path("action").asText("");
-            // ：NanoJev 冲突仲裁优先（默认关场景；采纳即用，否则回退 Qwen 协商）
-            if (nanoJevDecision != null) {
+            // ：决策模型 冲突仲裁优先（默认关场景；采纳即用，否则回退 Qwen 协商）
+            if (decisionJudge != null) {
                 try {
                     String stateText = "我（" + (npcName == null || npcName.isBlank() ? "该角色" : npcName)
                             + "）想去" + target + "（意图：" + abbreviate(myIntent, 120)
                             + "，紧要程度 " + myPriority + "），但" + opponentNameText + "也在使用/要去那里"
                             + "（紧要程度 " + opponentPriority + "，意图："
                             + abbreviate(opponentIntent(projectId, opponentRef, conflictType, target), 120) + "）。";
-                    String chosen = nanoJevDecision.decide(projectId, com.holzyn.actor.common.NpcRefs.idOf(npcRef),
+                    String chosen = decisionJudge.decide(projectId, com.holzyn.actor.common.NpcRefs.idOf(npcRef),
                             stateText);
                     if (chosen != null) {
-                        Map<String, Object> adjusted = nanoJevAdjusted(chosen, npcName, target, decision);
+                        Map<String, Object> adjusted = decisionAdjusted(chosen, npcName, target, decision);
                         if (adjusted != null) {
-                            log.info("[冲突协调] NanoJev 仲裁：ref={} → {}（目标 {}）", npcRef, chosen, target);
+                            log.info("[冲突协调] 决策模型 仲裁：ref={} → {}（目标 {}）", npcRef, chosen, target);
                         }
                         return adjusted; // proceed → null（原样执行放行）
                     }
                 } catch (Exception e) {
-                    log.warn("[冲突协调] NanoJev 仲裁异常（回退 Qwen 协商）: ref={} : {}", npcRef, e.getMessage());
+                    log.warn("[冲突协调] 决策模型 仲裁异常（回退 Qwen 协商）: ref={} : {}", npcRef, e.getMessage());
                 }
             }
             Map<String, Object> ph = new LinkedHashMap<>();
@@ -433,7 +433,7 @@ public class ActionCoordinatorService {
             String prompt = promptTemplateService.render(userId, projectId, CODE_NEGOTIATE(), ph);
             // 上下文注入（2026-10-07）：协商属「角色视角」判定——AI 以我方角色视角决定
             // 让路/等待/改道，前置世界观简报 + 我方角色核心卡（未装配/失败零阻断；
-            // NanoJev 仲裁路径已由 NanoJevDecisionGate 统一富化）
+            // 决策模型 仲裁路径已由 DecisionGate 统一富化）
             String injected = aiContextInjector == null ? ""
                     : aiContextInjector.compose(projectId, npcRef);
             String finalPrompt = injected.isBlank() ? prompt : injected + "\n\n" + prompt;
@@ -461,10 +461,10 @@ public class ActionCoordinatorService {
     }
 
     /**
-     * NanoJev 仲裁选择 → 调整后决策（proceed=null 放行 / wait / yield / redirect；
-     * 语义与 {@link #applyNegotiation} 各分支对齐，动作文本用 NanoJev 版默认措辞）。
+     * 决策模型 仲裁选择 → 调整后决策（proceed=null 放行 / wait / yield / redirect；
+     * 语义与 {@link #applyNegotiation} 各分支对齐，动作文本用 决策模型 版默认措辞）。
      */
-    private Map<String, Object> nanoJevAdjusted(String chosen, String npcName, String target,
+    private Map<String, Object> decisionAdjusted(String chosen, String npcName, String target,
                                                 JsonNode decision) {
         String who = npcName == null || npcName.isBlank() ? "我" : npcName;
         switch (chosen) {
@@ -476,7 +476,7 @@ public class ActionCoordinatorService {
                 adjusted.put("type", "rest");
                 adjusted.put("action", who + "在" + target + "附近稍候片刻，稍后再去");
                 adjusted.put("target", decision.path("target").asText(""));
-                adjusted.put("reason", "对方正在使用" + target + "（NanoJev 仲裁：稍候再去）");
+                adjusted.put("reason", "对方正在使用" + target + "（决策模型 仲裁：稍候再去）");
                 adjusted.put("urgency", decision.path("urgency").asInt(3));
                 adjusted.put("duration", decision.path("duration").asInt(30));
                 adjusted.put("params", Map.of("move", Map.of("to", target)));
@@ -489,7 +489,7 @@ public class ActionCoordinatorService {
                 adjusted.put("type", "custom");
                 adjusted.put("action", who + "改做别的事，暂不前往" + target);
                 adjusted.put("target", "驻地附近");
-                adjusted.put("reason", "把" + target + "让给对方（NanoJev 仲裁）");
+                adjusted.put("reason", "把" + target + "让给对方（决策模型 仲裁）");
                 adjusted.put("urgency", decision.path("urgency").asInt(3));
                 adjusted.put("duration", decision.path("duration").asInt(30));
                 adjusted.put("params", Map.of());
@@ -501,7 +501,7 @@ public class ActionCoordinatorService {
                 adjusted.put("type", "move");
                 adjusted.put("action", who + "改去别处");
                 adjusted.put("target", "驻地附近");
-                adjusted.put("reason", target + "被占用，改去他处（NanoJev 仲裁）");
+                adjusted.put("reason", target + "被占用，改去他处（决策模型 仲裁）");
                 adjusted.put("urgency", decision.path("urgency").asInt(3));
                 adjusted.put("duration", decision.path("duration").asInt(30));
                 adjusted.put("params", Map.of());

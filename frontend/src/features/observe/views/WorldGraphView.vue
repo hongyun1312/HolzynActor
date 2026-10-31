@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="world-graph-view">
+  <div class="world-graph-view project-col">
     <!-- 统一页头：标题 + 说明 + 页面级操作（刷新） -->
     <PageHeader
       title="世界图谱"
@@ -1229,7 +1229,7 @@ async function refresh() {
   white-space: nowrap;
 }
 .wg-list-tag {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   white-space: nowrap;
 }

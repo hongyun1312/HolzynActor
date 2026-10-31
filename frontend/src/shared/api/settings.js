@@ -36,6 +36,52 @@ export const fetchDefaultModelApi = (projectId) => http.get('/api/model-apis/def
 export const testModelApi = (data) => http.post('/api/model-apis/test', data)
 // 已保存配置连通性测试（使用解密后的真实 Key）
 export const testSavedModelApi = (id, projectId) => http.post(`/api/model-apis/${id}/test`, null, { params: { projectId: projectId || undefined } })
+// 全域 AI 就绪状态（{configured:boolean}）：合并「用户级 + 各世界项目级」供应商判定，
+// 世界画廊「还没接上模型」横幅据此显示/隐藏（不再只看 localStorage 的关闭标记）
+export const fetchAiReadiness = () => http.get('/api/model-apis/ready')
+
+// ==================== 供应商下的模型（文本 / 向量 / 决策） ====================
+// 新增模型（role: text/embedding/decision；isDefault=该角色默认）
+export const addProviderModel = (providerId, data, projectId) => http.post(
+  `/api/model-apis/${providerId}/models`, data, { params: { projectId: projectId || undefined } })
+// 编辑模型（可改名 / 改角色 / 启停 / 改默认）
+export const updateProviderModel = (providerId, modelId, data, projectId) => http.put(
+  `/api/model-apis/${providerId}/models/${modelId}`, data, { params: { projectId: projectId || undefined } })
+// 删除模型
+export const deleteProviderModel = (providerId, modelId, projectId) => http.delete(
+  `/api/model-apis/${providerId}/models/${modelId}`, { params: { projectId: projectId || undefined } })
+// 设为该角色的默认模型（同角色互斥）
+export const setDefaultProviderModel = (providerId, modelId, projectId) => http.put(
+  `/api/model-apis/${providerId}/models/${modelId}/default`, null, { params: { projectId: projectId || undefined } })
+// 拉取接口上的全部模型（已保存供应商）
+export const fetchRemoteProviderModels = (providerId, projectId) => http.get(
+  `/api/model-apis/${providerId}/models/remote`, { params: { projectId: projectId || undefined } })
+// 拉取接口上的全部模型（未保存供应商：body 传 baseUrl + apiKey）
+export const previewRemoteProviderModels = (data) => http.post('/api/model-apis/models/remote', data)
+// 测试某个具体模型（不是供应商默认文本模型）
+export const testProviderModel = (providerId, modelId, projectId) => http.post(
+  `/api/model-apis/${providerId}/models/${modelId}/test`, null, { params: { projectId: projectId || undefined } })
+
+// ==================== 决策模型本地部署（/settings/decision-models） ====================
+// 本机（用户级）配置：与项目无关，全局设置与项目设置共用同一份。
+// catalog = 三个适配器的清单 + 安装/运行状态 + 当前运行形态（api/local）。
+export const fetchDecisionModelCatalog = () => http.get('/api/settings/decision-models/catalog', { timeout: 60000 })
+// 单个适配器状态（轮询用，比 catalog 轻）
+export const fetchDecisionModelStatus = (adapter) => http.get('/api/settings/decision-models/status', { params: { adapter } })
+// 下载并安装（source: hf-mirror=国内镜像 / huggingface=官方源；后台异步，进度看 status）
+export const installDecisionModel = (adapter, source) => http.post('/api/settings/decision-models/install', { adapter, source })
+// 取消下载/安装
+export const cancelDecisionModelInstall = (adapter) => http.post('/api/settings/decision-models/cancel', { adapter })
+// 启动本地推理进程（port 传空=适配器默认端口）
+export const startDecisionModel = (adapter, port) => http.post('/api/settings/decision-models/start', { adapter, port: port || undefined })
+// 停止本地推理进程
+export const stopDecisionModel = () => http.post('/api/settings/decision-models/stop')
+// 卸载（先停进程再删权重与虚拟环境）
+export const uninstallDecisionModel = (adapter) => http.post('/api/settings/decision-models/uninstall', { adapter })
+// 切换运行形态：mode=api（调用远程 API）/ local（本机进程）
+export const saveDecisionModelSelection = (data) => http.post('/api/settings/decision-models/selection', data)
+// 保存自定义启动命令（适配器脚本与本机环境不兼容时兜底；传空=恢复默认命令）
+export const saveDecisionModelCustomCommand = (adapter, command) => http.post('/api/settings/decision-models/custom-command', { adapter, command })
 
 // ==================== Prompt 模板 ====================
 // 有效列表（项目覆盖 ∪ 用户覆盖 ∪ 内置；projectId 传=项目级覆盖）

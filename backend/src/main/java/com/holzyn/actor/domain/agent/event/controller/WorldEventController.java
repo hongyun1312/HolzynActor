@@ -43,14 +43,14 @@ import java.util.Map;
 /**
  * 世界事件总线 API 控制器（B1，domain/agent/event）。
  * <p>职责：暴露项目级世界事件流的两种只读能力——<ul>
- * <li><b>SSE</b>{@code GET /api/projects/{id}/world-events/stream}：实时世界事件流
+ * <li><b>SSE</b>{@code GET /api/worlds/{id}/world-events/stream}：实时世界事件流
  * （事件名 {@code world-event}，载荷含 eventId/kind/title/locationName/characterIds/gameHour/gameTimeText）；</li>
- * <li><b>查询</b>{@code GET /api/projects/{id}/world-events}：按类别/来源/地点/角色 ref（可见性过滤）/
+ * <li><b>查询</b>{@code GET /api/worlds/{id}/world-events}：按类别/来源/地点/角色 ref（可见性过滤）/
  * 游戏时间窗查询最近事件（时间线/前端/感知共用，修）。</li></ul></p>
  * <p>依赖方向（R1）：agent 域单向依赖既有域（项目仓库做归属校验、世界时钟解析时间文本）。</p>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}/world-events")
+@RequestMapping("/api/worlds/{projectId}/world-events")
 @RequiredArgsConstructor
 public class WorldEventController {
 

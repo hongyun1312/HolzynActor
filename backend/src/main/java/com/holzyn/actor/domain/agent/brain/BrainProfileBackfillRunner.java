@@ -41,12 +41,29 @@ public class BrainProfileBackfillRunner implements ApplicationRunner {
     private final BrainProfileService brainProfileService;
 
     /**
+     * 世界闸门（V1.1.2-beta.1 M4）：启动时通常还没有挂载世界，此时扫描 {@code actor_profile}
+     * 会打到目录库（没有这张表），既报错又什么也补不到。未挂载就跳过；世界挂载后由建库路径
+     * 与 M3 迁移保证存量行完整，本 Runner 只在"启动时恰好已挂载"的场景下工作。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.WorldGate worldGate;
+
+    /**
      * 启动时执行存量补行（幂等）。
      *
      * @param args 启动参数（未使用）
      */
     @Override
     public void run(ApplicationArguments args) {
+        if (worldGate == null) {
+            backfillNow();
+        } else {
+            worldGate.tryMaintenance("BrainProfileBackfillRunner.run", this::backfillNow);
+        }
+    }
+
+    /** 补行实体（世界未挂载时不会进入） */
+    private void backfillNow() {
         try {
             int ensured = brainProfileService.backfillExisting();
             log.info("[脑力配置] 启动补行完成：{} 个智能体已确保脑力配置行（存量数据默认脑力生效）", ensured);

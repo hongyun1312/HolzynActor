@@ -20,8 +20,8 @@
 import http from './http'
 
 // ==================== 对话 ====================
-export const createConversation = (projectId, data) => http.post(`/api/projects/${projectId}/conversations`, data)
-export const fetchConversations = (projectId) => http.get(`/api/projects/${projectId}/conversations`)
+export const createConversation = (projectId, data) => http.post(`/api/worlds/${projectId}/conversations`, data)
+export const fetchConversations = (projectId) => http.get(`/api/worlds/${projectId}/conversations`)
 export const fetchConversationDetail = (id) => http.get(`/api/conversations/${id}`)
 export const fetchMessages = (conversationId) => http.get(`/api/conversations/${conversationId}/messages`)
 export const sendMessage = (conversationId, data) => http.post(`/api/conversations/${conversationId}/messages`, data)
@@ -40,7 +40,7 @@ export const conversationLiveStreamUrl = (conversationId) => `/api/conversations
 // 会话「对话场景」：{location?, gameTimeText?}（location 空串=清空为远程通讯）
 export const updateConversationScene = (conversationId, data) => http.put(`/api/conversations/${conversationId}/scene`, data)
 // AI 生成对话专属标题（创建弹窗「AI 重写」）：{characterId?, location?, gameTimeText?} → { title }
-export const generateConversationTitle = (projectId, data) => http.post(`/api/projects/${projectId}/conversations/generate-title`, data)
+export const generateConversationTitle = (projectId, data) => http.post(`/api/worlds/${projectId}/conversations/generate-title`, data)
 
 // ==================== 世界事件 + 无玩家轮次 ====================
 // 世界事件：手填文本或 AI 生成（generate:true），返回后前端打开 SSE 触发在场角色回应

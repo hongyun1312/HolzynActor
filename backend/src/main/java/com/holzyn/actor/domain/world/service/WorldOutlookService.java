@@ -58,7 +58,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * （非 null，零阻断）。</li>
  * </ul>
  * <p><b>三通道注入（用户 Q4）</b>：AI 深思（action_gen {{world_outlook}} 占位符，经
- * {@code PromptService.buildActionGenPrompt} 8 参重载）/ NanoJev 快判（情境文本首部拼程序化
+ * {@code PromptService.buildActionGenPrompt} 8 参重载）/ 决策模型 快判（情境文本首部拼程序化
  * 趋势摘要，零 AI）/ 前瞻推演（ForesightService 宏观段升级含【未来一天世界走向】）。</p>
  * <p><b>架构不变量</b>：含 AI 方法不带 {@code @Transactional}；依赖字段注入 required=false + @Lazy
  * 破 Bean 环（构造器仅仓库+ObjectMapper）；null=未装配[单测]按能力缺失降级（返回 null/趋势摘要，

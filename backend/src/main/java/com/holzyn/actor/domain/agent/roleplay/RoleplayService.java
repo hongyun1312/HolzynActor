@@ -285,7 +285,7 @@ public class RoleplayService {
 
     /**
      * 社交意愿门控（搭话瞬间 boolean 判定「此刻是否愿意回应」；字段注入保持构造器不变；
-     * 实测一致率 92.3%，升级策略 top1Prob≥0.5 采纳 NanoJev 否则升 Qwen）
+     * 实测一致率 92.3%，升级策略 top1Prob≥0.5 采纳 决策模型 否则升 Qwen）
      */
     @Autowired(required = false)
     private SocialWillingnessGate socialWillingnessGate;

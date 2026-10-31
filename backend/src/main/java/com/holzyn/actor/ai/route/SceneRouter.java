@@ -86,11 +86,15 @@ public class SceneRouter {
         String safe = scene == null || scene.isBlank() ? "default" : scene;
         SceneRoutingProperties.SceneRouteOverride runtime = runtimeOverrides.get(safe);
         if (runtime != null) {
-            return merge(runtime, SOURCE_RUNTIME, null);
+            // 运行时覆盖（调试页热更新）通常只改温度/长度/供应商，类别仍需从 category-map 继承，
+            // 否则决策类场景会被误判成普通文本场景（决策模型路由失效）。
+            return merge(runtime, SOURCE_RUNTIME, props.getCategoryMap().get(safe));
         }
         SceneRoutingProperties.SceneRouteOverride sceneOverride = props.getScenes().get(safe);
         if (sceneOverride != null) {
-            return merge(sceneOverride, SOURCE_SCENE, null);
+            // 逐场景覆盖只改采样参数时，类别仍要来自 category-map：否则 category 丢了，
+            // 网关就无法把该场景识别成 decision（决策模型路由会静默退回文本模型）。
+            return merge(sceneOverride, SOURCE_SCENE, props.getCategoryMap().get(safe));
         }
         String category = props.getCategoryMap().get(safe);
         SceneRoutingProperties.Tier tier = category == null ? null : props.getTiers().get(category);

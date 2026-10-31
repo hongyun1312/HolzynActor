@@ -22,6 +22,7 @@
         :class="{ 'is-running': worldRunning }"
         :style="floatStyle"
         data-testid="assistant-float"
+        data-tour="assistant-float"
         title="项目级 AI 助手（Ctrl+Shift+A）"
         @mousedown="startFloatDrag"
         @click="onFloatClick"
@@ -580,7 +581,7 @@ function onKeydown(ev) {
 async function pollWorldRunning() {
   if (!projectId.value) return
   try {
-    const vo = await http.get(`/api/projects/${projectId.value}/world-clock`)
+    const vo = await http.get(`/api/worlds/${projectId.value}/world-clock`)
     worldRunning.value = vo && (vo.worldRunning === 1 || vo.worldRunning === true)
   } catch (_) {
     // 静默：时钟不可用时光效按静止处理
@@ -801,7 +802,7 @@ function sourceIcon(source) {
   font-size: 12.5px;
 }
 .assistant-mode-badge {
-  font-size: 11px;
+  font-size: 12.5px;
   padding: 2px 8px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-primary, #4f6ef7) 12%, transparent);
@@ -809,7 +810,7 @@ function sourceIcon(source) {
   white-space: nowrap;
 }
 .assistant-confirm-select {
-  font-size: 11px;
+  font-size: 12.5px;
   padding: 2px 6px;
   border: 1px solid var(--border-l2, #e5e9f2);
   border-radius: 999px;
@@ -875,7 +876,7 @@ function sourceIcon(source) {
 .assistant-msg-content.is-error { color: var(--color-danger, #e5484d); }
 .assistant-msg-meta { display: flex; align-items: center; gap: 6px; }
 .assistant-mode-chip {
-  font-size: 10.5px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: 999px;
   color: var(--text-dim, #8a94a8);
@@ -896,7 +897,7 @@ function sourceIcon(source) {
 
 .assistant-tools { display: flex; flex-wrap: wrap; gap: 4px; }
 .assistant-tool-chip {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-dim, #8a94a8);
   background: var(--bg-hover, #eef1f6);
   padding: 2px 8px;
@@ -913,7 +914,7 @@ function sourceIcon(source) {
   cursor: pointer;
 }
 .assistant-follow:hover { background: color-mix(in srgb, var(--color-primary, #4f6ef7) 8%, transparent); }
-.assistant-sources { font-size: 11.5px; color: var(--text-dim, #8a94a8); }
+.assistant-sources { font-size: 13px; color: var(--text-dim, #8a94a8); }
 .assistant-sources summary { cursor: pointer; user-select: none; }
 .assistant-source { padding: 2px 0; display: flex; align-items: baseline; gap: 6px; }
 .assistant-source-icon { flex: 0 0 auto; }

@@ -43,7 +43,7 @@ import java.util.Map;
 
 /**
  * Unity 对接 REST 门面（U 轨道 U1 服务端对接层，）——
- * /api/projects/{id}/unity/*（查询/初始化/干预）。
+ * /api/worlds/{id}/unity/*（查询/初始化/干预）。
  * <p>端点：</p>
  * <ul>
  * <li>GET /init —— 全量初始化（场景布局/摆放/NPC/地点/时钟/坐标基准，U2 场景构建）；</li>
@@ -55,7 +55,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/projects/{projectId}/unity")
+@RequestMapping("/api/worlds/{projectId}/unity")
 @RequiredArgsConstructor
 public class UnityBridgeController {
 

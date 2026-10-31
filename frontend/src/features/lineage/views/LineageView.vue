@@ -12,12 +12,12 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="lineage-view">
+  <div class="lineage-view project-col">
     <!-- 顶部：角色选择 + 刷新 -->
     <div class="lg-toolbar">
       <span class="lg-title">家族谱系</span>
       <el-select v-model="npcRef" filterable placeholder="选择角色（本人视角）" class="lg-select" @change="loadAll">
-        <el-option v-for="ch in characters" :key="ch.id" :label="`${ch.name}（${stageLabel(ch.stage)} ${ch.age ?? '?'}岁）`" :value="ch.npcRef" />
+        <el-option v-for="ch in characters" :key="ch.id" :label="charLabel(ch)" :value="refOf(ch)" />
       </el-select>
       <el-button size="small" type="primary" :disabled="!npcRef" :loading="loading" @click="loadAll">刷新</el-button>
       <span v-if="tree" class="lg-hint">
@@ -25,6 +25,17 @@
       </span>
       <span class="lg-hint">G4 遗传婚育谱系：孟德尔遗传 · 婚姻 · 子嗣 · 遗产（只读观测）</span>
     </div>
+
+    <!-- 加载失败要说出来：改前只 console.error，页面静默停在空态，用户只会看到「什么都没有」 -->
+    <el-alert
+      v-if="loadError"
+      class="lg-error"
+      type="error"
+      show-icon
+      :closable="false"
+      :title="loadError"
+      description="谱系数据来自 /api/debug/growth/lineage（后端 18080）。若刚升级过前端，请确认后端已重启。"
+    />
 
     <template v-if="npcRef">
       <el-row :gutter="12">
@@ -77,15 +88,16 @@
             <el-table v-if="tree && tree.relations.length" :data="tree.relations" size="small" height="220">
               <el-table-column label="类型" width="90">
                 <template #default="{ row }">
-                  <el-tag size="small" :type="row.type === 'MARRIAGE' ? 'danger' : 'success'" effect="plain">
-                    {{ row.type === 'MARRIAGE' ? '婚姻' : '亲子' }}
+                  <el-tag size="small" :type="isMarriage(row) ? 'danger' : 'success'" effect="plain">
+                    {{ isMarriage(row) ? '婚姻' : '亲子' }}
                   </el-tag>
                 </template>
               </el-table-column>
               <el-table-column label="关系" width="80">
                 <template #default="{ row }">
-                  <span v-if="row.relation" class="lg-rel">{{ relLabel(row.relation) }}</span>
-                  <span v-else class="sub-text">—</span>
+                  <!-- 婚姻边的 relation 由 LineageService.marry 留空（历史边不写关系文本），
+                       这里按"婚姻"补成「配偶」，不给用户看「—」 -->
+                  <span class="lg-rel">{{ relLabel(row.relation, row.type) }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="当事人" min-width="170">
@@ -127,7 +139,7 @@
               <div class="lg-genome-src">
                 来源：{{ sourceLabel(genome.source) }}
                 <template v-if="genome.sourceParentA || genome.sourceParentB">
-                  ｜父母：{{ refName('npc:' + genome.sourceParentA) }} × {{ refName('npc:' + genome.sourceParentB) }}
+                  ｜父母：{{ refName(toNpcRef(genome.sourceParentA)) }} × {{ refName(toNpcRef(genome.sourceParentB)) }}
                 </template>
               </div>
               <!-- 派生特征（OCEAN + 气质/学习/天赋） -->
@@ -181,10 +193,18 @@
  * 职责：以任一 NPC 为「本人」查看三代家族树（祖辈/父母/本人与兄弟姐妹/子女 + 婚姻/亲子边），
  * 以及该角色基因档案（15 位点孟德尔位点 + derived_traits 派生特征 + 表观印记）。
  * 数据源：/api/debug/growth/lineage（LineageService.familyTree）+ /api/debug/growth/genome。
+ *
+ * <p><b>2026-10-25 修复「页面什么都显示不出来」</b>：本页所有请求都要 {@code npcRef}（形如
+ * {@code npc:12}），而改前选择器的 {@code :value} 取的是 {@code ch.npcRef}——角色接口
+ * （CharacterVO）当时并没有这个字段 → 选项能列出、但选中后 {@code npcRef} 仍是 undefined
+ * → {@code v-if="npcRef"} 恒假 → 页面永远停在「请选择一位角色」，谱系/基因两个请求一次都没发。
+ * 现在取值走 {@link refOf}（{@code ch.npcRef} 优先，缺失时用 {@code shared/npcRef.js} 拼装，
+ * 与后端 {@code NpcRefs} 同源，不手写前缀），后端 CharacterVO 也补了 npcRef/stage/age。</p>
  */
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { fetchCharacters, fetchLineageTree, fetchGenome } from '@/shared/api'
+import { npcRef as toNpcRef } from '@/shared/npcRef'
 // V2.0 批次二：空态统一走 EmptyState
 import EmptyState from '@/shared/components/EmptyState.vue'
 
@@ -196,6 +216,25 @@ const npcRef = ref(null)
 const tree = ref(null)
 const genome = ref(null)
 const loading = ref(false)
+/** 加载失败原因（有内容就顶部红条提示，不再静默空白） */
+const loadError = ref('')
+
+/**
+ * 角色 → 统一身份引用 {@code npc:{id}}。
+ * <p>优先用后端返回的 npcRef（CharacterVO 新增字段）；旧后端没有这个字段时回落到
+ * {@code shared/npcRef.js} 的唯一拼装点——绝不能取 {@code ch.npcRef} 当选择值还可能为 undefined。</p>
+ */
+function refOf(ch) {
+  return ch?.npcRef || toNpcRef(ch?.id) || null
+}
+
+/** 选择器标签：有阶段/年龄才拼括号（旧后端缺字段时不会显示「— ?岁」） */
+function charLabel(ch) {
+  const parts = []
+  if (ch?.stage) parts.push(stageLabel(ch.stage))
+  if (ch?.age != null) parts.push(`${ch.age}岁`)
+  return parts.length ? `${ch.name}（${parts.join(' ')}）` : (ch?.name || '未命名角色')
+}
 
 /** 代际分列（relation 标签 → 代际） */
 const GEN = {
@@ -245,15 +284,17 @@ const epigeneticMarks = computed(() => {
 
 async function loadCharacters() {
   try {
-    characters.value = await fetchCharacters(projectId.value)
-  } catch (_) {
+    characters.value = (await fetchCharacters(projectId.value)) || []
+  } catch (e) {
     characters.value = []
+    loadError.value = '读取角色列表失败：' + (e?.message || '未知错误')
   }
 }
 
 async function loadAll() {
   if (!projectId.value || !npcRef.value) return
   loading.value = true
+  loadError.value = ''
   try {
     const [t, g] = await Promise.all([
       fetchLineageTree(projectId.value, npcRef.value),
@@ -264,6 +305,7 @@ async function loadAll() {
   } catch (e) {
     tree.value = null
     genome.value = null
+    loadError.value = '加载谱系失败：' + (e?.message || '未知错误')
     console.error('[lineage] 加载失败', e)
   } finally {
     loading.value = false
@@ -299,8 +341,29 @@ function relTagType(r) {
   return 'info'
 }
 
-function relLabel(r) {
-  return { father: '父', mother: '母' }[r] || r
+/**
+ * 是否婚姻边。
+ * <p>后端 {@code ActorGrowthLineage.EDGE_MARRIAGE = "marriage"}（小写），改前前端拿
+ * {@code 'MARRIAGE'} 大写比对 → 婚姻边被渲染成「亲子」，当事人那一列还显示「阿澈 → 苏晚晴」
+ * （夫妻被当成父子）。这里统一按小写 + 兼容旧大写。</p>
+ */
+function isMarriage(row) {
+  const t = String(row?.type || '').toLowerCase()
+  return t === 'marriage'
+}
+
+/**
+ * 关系文本。
+ *
+ * @param {string} r 关系码（father/mother/spouse…）
+ * @param {string} type 边类型（marriage/parent_child）
+ * @returns {string} 中文
+ */
+function relLabel(r, type) {
+  if (r === 'father') return '父'
+  if (r === 'mother') return '母'
+  if (r) return r
+  return String(type || '').toLowerCase() === 'marriage' ? '配偶' : '—'
 }
 
 function sourceLabel(s) {
@@ -337,8 +400,9 @@ onMounted(async () => {
   await loadCharacters()
   // 默认聚焦第一个特殊型 NPC（如有）
   const first = characters.value.find((c) => c.type === 'special') || characters.value[0]
-  if (first) {
-    npcRef.value = first.npcRef
+  const ref = refOf(first)
+  if (ref) {
+    npcRef.value = ref
     await loadAll()
   }
 })
@@ -351,6 +415,8 @@ onMounted(async () => {
 .lg-title { font-weight: 700; font-size: 1.05rem; color: var(--text-primary); }
 .lg-select { width: 280px; }
 .lg-hint { font-size: 0.78rem; color: var(--text-secondary); }
+/* 加载失败提示条（改前失败只进 console，页面静默空白） */
+.lg-error { margin: 0; }
 
 .lg-card { border: 1px solid var(--border-l1); border-radius: 12px; margin-bottom: 12px; }
 .lg-card-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }

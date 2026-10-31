@@ -987,6 +987,11 @@ public class MemoryArchiveService {
         if (!maintenanceEnabled || !enabled) {
             return;
         }
+        gated("MemoryArchiveService.maintenance", this::maintainNow);
+    }
+
+    /** 维护体（经世界闸门之后才允许扫库/写库） */
+    private void maintainNow() {
         try {
             List<ActorProject> projects = projectRepository.findAll();
             for (ActorProject p : projects) {
@@ -1017,6 +1022,22 @@ public class MemoryArchiveService {
             }
         } catch (Exception e) {
             log.warn("[归档] 定时维护失败（整体隔离）: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 世界闸门（V1.1.2-beta.1 M4）：世界未挂载时维护任务<b>零 DB 写入、零 AI 调用</b>（AC12）。
+     * 未装配（单测直接 {@code new}）时退化为直接执行；字段注入不改构造器（AGENTS §8.1.2）。
+     */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.WorldGate worldGate;
+
+    /** 经世界闸门执行；未装配闸门（单测）时直接执行 */
+    private void gated(String name, Runnable body) {
+        if (worldGate == null) {
+            body.run();
+        } else {
+            worldGate.tryMaintenance(name, body);
         }
     }
 

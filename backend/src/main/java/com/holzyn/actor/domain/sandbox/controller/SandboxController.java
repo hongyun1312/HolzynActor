@@ -86,11 +86,11 @@ import java.util.Optional;
  * 触发行动（仅特殊角色，{@link AgentRuntime#triggerAction}）、
  * 手动事件（{@link TimelineService#createEvent}）、时间控制（{@link WorldClockService#updateClock} /
  * </ul>
- * S3 资产摆放：GET|POST /api/projects/{id}/sandbox/scenes/{sceneId}/placements、
+ * S3 资产摆放：GET|POST /api/worlds/{id}/sandbox/scenes/{sceneId}/placements、
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/projects/{projectId}/sandbox")
+@RequestMapping("/api/worlds/{projectId}/sandbox")
 @RequiredArgsConstructor
 public class SandboxController {
 

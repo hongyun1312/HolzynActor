@@ -78,7 +78,7 @@
             <el-table-column label="标题" width="200" show-overflow-tooltip>
               <template #default="{ row }">{{ row.title }}</template>
             </el-table-column>
-            <el-table-column label="内容" min-width="320" show-overflow-tooltip>
+            <el-table-column label="内容" min-width="300" show-overflow-tooltip>
               <template #default="{ row }">{{ row.content }}</template>
             </el-table-column>
             <el-table-column label="重要度" width="80" align="center">
@@ -239,7 +239,7 @@
  * <li>世界编年史 Tab：按游戏日区间/关联实体/重要度过滤分页 + 详情抽屉 + 手动补充；</li>
  * <li>实体状态 Tab：按类型/按时间点（as-of）查询 + 版本链历史抽屉 + 手动更新（触发失效更新）。</li>
  * </ul>
- * <p>数据来源：/api/projects/{id}/world-memory/*（chronicle 查询/详情/补充、entities 查询/历史/更新、overview）。</p>
+ * <p>数据来源：/api/worlds/{id}/world-memory/*（chronicle 查询/详情/补充、entities 查询/历史/更新、overview）。</p>
  */
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'

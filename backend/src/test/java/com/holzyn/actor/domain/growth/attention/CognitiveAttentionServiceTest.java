@@ -1,8 +1,8 @@
 package com.holzyn.actor.domain.growth.attention;
 
-import com.holzyn.actor.ai.nanojev.NanoJevState;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
+import com.holzyn.actor.ai.decision.DecisionState;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
 import com.holzyn.actor.domain.agent.runtime.RealTimeDecisionService;
 import com.holzyn.actor.domain.agent.runtime.StimulusType;
 import com.holzyn.actor.domain.growth.config.GrowthProperties;
@@ -37,7 +37,7 @@ import static org.mockito.Mockito.when;
 /**
  * 认知注意力服务单元测试（N5 认知 LOD + 高频微决策，2026-09-26）。
  *
- * <p>测试纪律：字段注入 + {@code ReflectionTestUtils.setField}（构造器不变）；NanoJev 判定门
+ * <p>测试纪律：字段注入 + {@code ReflectionTestUtils.setField}（构造器不变）；决策模型 判定门
  * 全 mock（脚本化响应，零真实 AI）；直接反射调用同步体（{@code tickSync}/{@code eventRelevanceSync}）
  * 保证确定性（生产入口为异步虚拟线程）。概率门控（记忆写入/打断）通过把配置概率调到 1.0 使行为确定。</p>
  *
@@ -46,7 +46,7 @@ import static org.mockito.Mockito.when;
 class CognitiveAttentionServiceTest {
 
     private CognitiveAttentionService service;
-    private NanoJevDecisionGate gate;
+    private DecisionGate gate;
     private BrainTierService brainTierService;
     private ActorCharacterRepository characterRepository;
     private MemoryWorkingService memoryWorkingService;
@@ -57,7 +57,7 @@ class CognitiveAttentionServiceTest {
     @BeforeEach
     void setUp() {
         service = new CognitiveAttentionService();
-        gate = mock(NanoJevDecisionGate.class);
+        gate = mock(DecisionGate.class);
         brainTierService = mock(BrainTierService.class);
         characterRepository = mock(ActorCharacterRepository.class);
         memoryWorkingService = mock(MemoryWorkingService.class);
@@ -66,7 +66,7 @@ class CognitiveAttentionServiceTest {
         // 概率门控调满：记忆写入 / 打断必发生（确定性断言）
         properties.getAttention().setMemoryWriteProbability(1.0);
         properties.getAttention().setInterruptProbability(1.0);
-        ReflectionTestUtils.setField(service, "nanoJevDecisionGate", gate);
+        ReflectionTestUtils.setField(service, "decisionGate", gate);
         ReflectionTestUtils.setField(service, "brainTierService", brainTierService);
         ReflectionTestUtils.setField(service, "characterRepository", characterRepository);
         ReflectionTestUtils.setField(service, "npcStateService", mock(NpcStateService.class));
@@ -87,8 +87,8 @@ class CognitiveAttentionServiceTest {
         when(((com.holzyn.actor.domain.world.repository.ActorEventRepository)
                 ReflectionTestUtils.getField(service, "eventRepository"))
                 .findByProjectIdOrderByIdDesc(1L)).thenReturn(List.of());
-        when(gate.isEnabled(NanoJevDecisionScenes.ATTENTION)).thenReturn(true);
-        when(gate.isEnabled(NanoJevDecisionScenes.MICRO_DECISION)).thenReturn(true);
+        when(gate.isEnabled(DecisionScenes.ATTENTION)).thenReturn(true);
+        when(gate.isEnabled(DecisionScenes.MICRO_DECISION)).thenReturn(true);
         when(brainTierService.tierOf(1L, "npc:1")).thenReturn(BrainTierService.TIER_AMBIENT);
     }
 
@@ -105,16 +105,16 @@ class CognitiveAttentionServiceTest {
     @DisplayName("N5 每 tick 批量：注意力高 → applyAttention(level=3)；即时意向 chat → 记忆轨迹 + MENTAL_URGE 打断")
     void tickSyncAppliesAttentionAndMicroIntent() throws Exception {
         // 注意力 score=3（高）+ 即时意向 chat（主动意向）
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_ATTENTION_STATE,
-                new NanoJevDecisionGate.ScoreOutcome(3, 2.8, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.MICRO_DECISION),
+                new DecisionGate.ScoreOutcome(3, 2.8, true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.MICRO_DECISION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_MICRO_INTENT,
-                new NanoJevDecisionGate.ChoiceOutcome("chat", true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
+                new DecisionGate.ChoiceOutcome("chat", true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
 
         invokeSync("tickSync", 1L, 1_000_000L);
 
@@ -131,16 +131,16 @@ class CognitiveAttentionServiceTest {
     @Test
     @DisplayName("N5 每 tick 批量：多数「继续当下事」→ 零副作用（不写记忆不打断）")
     void tickSyncContinueCurrentNoSideEffect() throws Exception {
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_ATTENTION_STATE,
-                new NanoJevDecisionGate.ScoreOutcome(2, 1.9, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.MICRO_DECISION),
+                new DecisionGate.ScoreOutcome(2, 1.9, true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.MICRO_DECISION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_MICRO_INTENT,
-                new NanoJevDecisionGate.ChoiceOutcome("continue_current", true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
+                new DecisionGate.ChoiceOutcome("continue_current", true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
 
         invokeSync("tickSync", 1L, 1_000_000L);
 
@@ -161,11 +161,11 @@ class CognitiveAttentionServiceTest {
         event.setImportance(3);
         event.setGameHour(100L);
         event.setCharacterIds("npc:1"); // 当事人（在场名单来源）
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_EVENT_RELEVANCE,
-                new NanoJevDecisionGate.ScoreOutcome(3, 2.9, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
+                new DecisionGate.ScoreOutcome(3, 2.9, true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
 
         invokeSync("eventRelevanceSync", 1L, event);
 
@@ -184,11 +184,11 @@ class CognitiveAttentionServiceTest {
         event.setImportance(2);
         event.setGameHour(101L);
         event.setCharacterIds("npc:1"); // 当事人（在场名单来源）
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_EVENT_RELEVANCE,
-                new NanoJevDecisionGate.ScoreOutcome(1, 0.9, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
+                new DecisionGate.ScoreOutcome(1, 0.9, true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
 
         invokeSync("eventRelevanceSync", 1L, event);
 
@@ -199,8 +199,8 @@ class CognitiveAttentionServiceTest {
     @Test
     @DisplayName("N5 异步入口：场景未启用 → 零成本跳过（不触碰角色仓库）")
     void tickAsyncDisabledSkips() {
-        when(gate.isEnabled(NanoJevDecisionScenes.ATTENTION)).thenReturn(false);
-        when(gate.isEnabled(NanoJevDecisionScenes.MICRO_DECISION)).thenReturn(false);
+        when(gate.isEnabled(DecisionScenes.ATTENTION)).thenReturn(false);
+        when(gate.isEnabled(DecisionScenes.MICRO_DECISION)).thenReturn(false);
         service.tickAsync(1L, 1_000_000L);
         service.eventRelevanceAsync(1L, trivialEvent());
         // 无任何异步工作：角色仓库未被触碰（gate 开关短路）
@@ -220,7 +220,7 @@ class CognitiveAttentionServiceTest {
         service.eventRelevanceAsync(1L, relation);
         // relation 类事件被入口过滤：不提交异步任务、不触碰角色仓库、不触碰 gate
         verify(characterRepository, never()).findByProjectIdAndDeletedOrderByIdAsc(anyLong(), anyInt());
-        verify(gate, never()).isEnabled(NanoJevDecisionScenes.ATTENTION);
+        verify(gate, never()).isEnabled(DecisionScenes.ATTENTION);
     }
 
     @Test
@@ -234,11 +234,11 @@ class CognitiveAttentionServiceTest {
         roleplay.setImportance(2);
         roleplay.setGameHour(100L);
         roleplay.setCharacterIds("npc:1"); // 当事人（在场名单来源）
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_EVENT_RELEVANCE,
-                new NanoJevDecisionGate.ScoreOutcome(3, 2.9, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
+                new DecisionGate.ScoreOutcome(3, 2.9, true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
 
         invokeSync("eventRelevanceSync", 1L, roleplay);
 
@@ -273,16 +273,16 @@ class CognitiveAttentionServiceTest {
     /** 捕获一次 attention 批量调用的事件相关度 state 名单（key=npcRef）。 */
     @SuppressWarnings("unchecked")
     private java.util.Set<String> capturedRelevanceStates() throws Exception {
-        org.mockito.ArgumentCaptor<Map<String, NanoJevState>> captor =
+        org.mockito.ArgumentCaptor<Map<String, DecisionState>> captor =
                 org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(gate).mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        verify(gate).mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 captor.capture(), any(Map.class));
         return captor.getValue().keySet();
     }
 
-    private NanoJevDecisionGate.ScoreOutcome score(int level) {
-        return new NanoJevDecisionGate.ScoreOutcome(level, level - 0.1, true,
-                NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0);
+    private DecisionGate.ScoreOutcome score(int level) {
+        return new DecisionGate.ScoreOutcome(level, level - 0.1, true,
+                DecisionGate.DISP_ADOPTED, null, null, null, 0);
     }
 
     @Test
@@ -301,7 +301,7 @@ class CognitiveAttentionServiceTest {
         encounter.setVisibility("location");
         encounter.setImportance(3);
         encounter.setGameHour(100L);
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of(
                 "npc:1", Map.of(CognitiveAttentionService.QID_EVENT_RELEVANCE, score(3)),
                 "npc:2", Map.of(CognitiveAttentionService.QID_EVENT_RELEVANCE, score(2))));
@@ -331,7 +331,7 @@ class CognitiveAttentionServiceTest {
         ev.setLocationName("村口粮铺"); // 同地点在场者 = 陈百草
         ev.setImportance(3);
         ev.setGameHour(100L);
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of(
                 "npc:1", Map.of(CognitiveAttentionService.QID_EVENT_RELEVANCE, score(3)),
                 "npc:2", Map.of(CognitiveAttentionService.QID_EVENT_RELEVANCE, score(2))));
@@ -356,7 +356,7 @@ class CognitiveAttentionServiceTest {
         ev.setVisibility("private");
         ev.setLocationName("村口粮铺"); // private 不看地点
         ev.setImportance(3);
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of(
                 "npc:1", Map.of(CognitiveAttentionService.QID_EVENT_RELEVANCE, score(3)),
                 "npc:2", Map.of(CognitiveAttentionService.QID_EVENT_RELEVANCE, score(2))));
@@ -379,7 +379,7 @@ class CognitiveAttentionServiceTest {
         ev.setContent("天降暴雨，全村的庄稼受损");
         ev.setVisibility("global");
         ev.setImportance(4);
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of(
                 "npc:1", Map.of(CognitiveAttentionService.QID_EVENT_RELEVANCE, score(3)),
                 "npc:2", Map.of(CognitiveAttentionService.QID_EVENT_RELEVANCE, score(2)),
@@ -405,7 +405,7 @@ class CognitiveAttentionServiceTest {
 
         invokeSync("eventRelevanceSync", 1L, ev);
 
-        verify(gate, never()).mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        verify(gate, never()).mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(), any());
         verify(memoryWorkingService, never()).writePerception(anyLong(), anyString(), anyString(), anyInt());
     }
@@ -452,16 +452,16 @@ class CognitiveAttentionServiceTest {
     @Test
     @DisplayName("N6 参与度回灌注意力：参与度档 2 + 语义档位 2 → applyAttention(3)（+1 封顶）")
     void tickSyncParticipationBoostsAttention() throws Exception {
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_ATTENTION_STATE,
-                new NanoJevDecisionGate.ScoreOutcome(2, 1.9, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.MICRO_DECISION),
+                new DecisionGate.ScoreOutcome(2, 1.9, true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.MICRO_DECISION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_MICRO_INTENT,
-                new NanoJevDecisionGate.ChoiceOutcome("continue_current", true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
+                new DecisionGate.ChoiceOutcome("continue_current", true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
         // 近窗口内 4 次发言 → 参与度档 2
         for (int i = 0; i < 4; i++) {
             service.recordParticipation(1L, "npc:1", CognitiveAttentionService.PARTICIPATION_SPOKE, 1_000_000L + i);
@@ -503,16 +503,16 @@ class CognitiveAttentionServiceTest {
         ReflectionTestUtils.setField(service, "cameraDistanceProvider", camera);
         when(camera.hasActiveCamera(1L)).thenReturn(true);
         when(camera.distanceMeters(1L, "npc:1")).thenReturn(8.0);
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.ATTENTION),
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.ATTENTION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_ATTENTION_STATE,
-                new NanoJevDecisionGate.ScoreOutcome(1, 0.9, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
-        when(gate.mixedBatchDecisions(eq(1L), eq(NanoJevDecisionScenes.MICRO_DECISION),
+                new DecisionGate.ScoreOutcome(1, 0.9, true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
+        when(gate.mixedBatchDecisions(eq(1L), eq(DecisionScenes.MICRO_DECISION),
                 any(Map.class), any(Map.class))).thenReturn(Map.of("npc:1", Map.of(
                 CognitiveAttentionService.QID_MICRO_INTENT,
-                new NanoJevDecisionGate.ChoiceOutcome("continue_current", true,
-                        NanoJevDecisionGate.DISP_ADOPTED, null, null, null, 0))));
+                new DecisionGate.ChoiceOutcome("continue_current", true,
+                        DecisionGate.DISP_ADOPTED, null, null, null, 0))));
 
         invokeSync("tickSync", 1L, 1_000_000L);
 

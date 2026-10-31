@@ -45,7 +45,7 @@ import java.util.List;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/projects/{id}/world-info")
+@RequestMapping("/api/worlds/{id}/world-info")
 @RequiredArgsConstructor
 public class WorldInfoController {
 

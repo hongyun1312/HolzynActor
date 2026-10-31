@@ -1,7 +1,7 @@
 package com.holzyn.actor.domain.growth.evolution;
 
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
 import com.holzyn.actor.domain.agent.runtime.RealTimeDecisionService;
 import com.holzyn.actor.domain.agent.runtime.StimulusType;
 import com.holzyn.actor.domain.memory.service.MemoryWorkingService;
@@ -33,7 +33,7 @@ import static org.mockito.Mockito.when;
 /**
  * 意外事件判定单元测试（N5 演化判定四项之一，2026-09-26）。
  *
- * <p>测试纪律：字段注入 + {@code ReflectionTestUtils.setField}（构造器不变）；NanoJev 判定门
+ * <p>测试纪律：字段注入 + {@code ReflectionTestUtils.setField}（构造器不变）；决策模型 判定门
  * 全 mock（脚本化响应，零真实 AI）；同步体（{@code sync}）反射直调保证确定性。</p>
  *
  * <p>所属模块：domain/growth/evolution（N5）</p>
@@ -41,7 +41,7 @@ import static org.mockito.Mockito.when;
 class AccidentJudgeTest {
 
     private AccidentJudge judge;
-    private NanoJevDecisionGate gate;
+    private DecisionGate gate;
     private ActorCharacterRepository characterRepository;
     private MemoryWorkingService memoryWorkingService;
     private RealTimeDecisionService realTimeDecisionService;
@@ -50,11 +50,11 @@ class AccidentJudgeTest {
     @BeforeEach
     void setUp() {
         judge = new AccidentJudge();
-        gate = mock(NanoJevDecisionGate.class);
+        gate = mock(DecisionGate.class);
         characterRepository = mock(ActorCharacterRepository.class);
         memoryWorkingService = mock(MemoryWorkingService.class);
         realTimeDecisionService = mock(RealTimeDecisionService.class);
-        ReflectionTestUtils.setField(judge, "nanoJevDecisionGate", gate);
+        ReflectionTestUtils.setField(judge, "decisionGate", gate);
         ReflectionTestUtils.setField(judge, "characterRepository", characterRepository);
         ReflectionTestUtils.setField(judge, "npcStateService", mock(NpcStateService.class));
         ReflectionTestUtils.setField(judge, "memoryWorkingService", memoryWorkingService);
@@ -89,9 +89,9 @@ class AccidentJudgeTest {
     @Test
     @DisplayName("N5 意外判定：boolean 命中（true）→ 写 L1 感知记忆 + WORLD_EVENT 即时决策")
     void syncHitWritesMemoryAndInterrupts() throws Exception {
-        when(gate.booleanDecisions(eq(1L), eq(NanoJevDecisionScenes.ACCIDENT),
+        when(gate.booleanDecisions(eq(1L), eq(DecisionScenes.ACCIDENT),
                 any(Map.class), eq(AccidentJudge.QID_ACCIDENT))).thenReturn(Map.of("npc:1",
-                new NanoJevDecisionGate.BooleanOutcome(true, true, NanoJevDecisionGate.DISP_ADOPTED,
+                new DecisionGate.BooleanOutcome(true, true, DecisionGate.DISP_ADOPTED,
                         0.55, 0.55, null, 5)));
         invokeSync(event("大雨倾盆，集市棚子被风掀翻", 3, 200L));
         verify(memoryWorkingService).writePerception(eq(1L), eq("npc:1"), anyString(), eq(2));
@@ -102,9 +102,9 @@ class AccidentJudgeTest {
     @Test
     @DisplayName("N5 意外判定：boolean 未命中（false）→ 零副作用")
     void syncNoHitNoEffect() throws Exception {
-        when(gate.booleanDecisions(eq(1L), eq(NanoJevDecisionScenes.ACCIDENT),
+        when(gate.booleanDecisions(eq(1L), eq(DecisionScenes.ACCIDENT),
                 any(Map.class), eq(AccidentJudge.QID_ACCIDENT))).thenReturn(Map.of("npc:1",
-                new NanoJevDecisionGate.BooleanOutcome(false, true, NanoJevDecisionGate.DISP_ADOPTED,
+                new DecisionGate.BooleanOutcome(false, true, DecisionGate.DISP_ADOPTED,
                         0.1, 0.9, null, 5)));
         invokeSync(event("集市上张屠户与人起了争执", 3, 201L));
         verify(memoryWorkingService, never()).writePerception(anyLong(), anyString(), anyString(), anyInt());
@@ -115,9 +115,9 @@ class AccidentJudgeTest {
     @Test
     @DisplayName("N5 意外判定：判定未采纳（升级/失败）→ 零副作用（fail-closed 兜底）")
     void syncNotAdoptedNoEffect() throws Exception {
-        when(gate.booleanDecisions(eq(1L), eq(NanoJevDecisionScenes.ACCIDENT),
+        when(gate.booleanDecisions(eq(1L), eq(DecisionScenes.ACCIDENT),
                 any(Map.class), eq(AccidentJudge.QID_ACCIDENT))).thenReturn(Map.of("npc:1",
-                new NanoJevDecisionGate.BooleanOutcome(false, false, NanoJevDecisionGate.DISP_ESCALATED,
+                new DecisionGate.BooleanOutcome(false, false, DecisionGate.DISP_ESCALATED,
                         null, 0.4, 1.2, 5)));
         invokeSync(event("深夜巷道里传来一声闷响", 3, 202L));
         verify(memoryWorkingService, never()).writePerception(anyLong(), anyString(), anyString(), anyInt());
@@ -128,7 +128,7 @@ class AccidentJudgeTest {
     @Test
     @DisplayName("N5 意外判定：场景默认关（未启用）→ 零成本跳过，不触碰角色仓库")
     void onEventSceneDisabledSkips() {
-        when(gate.isEnabled(NanoJevDecisionScenes.ACCIDENT)).thenReturn(false);
+        when(gate.isEnabled(DecisionScenes.ACCIDENT)).thenReturn(false);
         judge.onEvent(1L, event("村里起了火灾", 4, 203L));
         verify(characterRepository, never()).findByProjectIdAndDeletedOrderByIdAsc(anyLong(), anyInt());
     }

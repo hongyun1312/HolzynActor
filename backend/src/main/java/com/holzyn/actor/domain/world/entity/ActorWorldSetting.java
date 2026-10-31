@@ -48,9 +48,18 @@ public class ActorWorldSetting {
     @Column(length = 100)
     private String name;
 
-    /** 题材（奇幻/科幻/都市/历史等） */
+    /** 题材（固定八类之一：奇幻/科幻/都市/历史/末世/仙侠/日常/悬疑；见 WorldCategory） */
     @Column(length = 50)
     private String genre;
+
+    /**
+     * 世界程度（casual/light/standard/hard；见 WorldTone）。
+     *
+     * <p>控制能力上限与设定边界：休闲档不该出现势力斗争与宏观社会调控。
+     * 空值按 standard 处理（历史数据语义 = 改造前的行为）。</p>
+     */
+    @Column(length = 16)
+    private String tone;
 
     /** 时代背景 */
     @Column(length = 50)

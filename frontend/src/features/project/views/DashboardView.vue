@@ -16,6 +16,22 @@
        与对谈页的 1440、角色页的"铺满"并存，导致同一产品在 1920 宽下出现三种内容列左边界
        （实测 x=300 / 378 / 548）。现由骨架统一档位，页面不再自写限宽。 -->
   <PageShell width="wide" class="dashboard-view">
+    <!-- 世界初始化未完成提示（全链路三处之一：画廊角标 / 详情页横幅 / 本页）：给出进度与直接入口 -->
+    <div v-if="initStatus && !initStatus.complete" class="dash-init-banner tech-card">
+      <div class="dib-text">
+        <div class="dib-title">
+          这个世界还没初始化完成
+          <el-tag size="small" type="warning" effect="plain">
+            必需 {{ initStatus.requiredDoneCount }}/{{ initStatus.requiredTotalCount }} · 全部 {{ initStatus.doneCount }}/{{ initStatus.totalCount }}
+          </el-tag>
+        </div>
+        <div class="dib-desc">{{ initStatus.message || '世界观设定、地点、角色卡、普通 NPC、关系、地图与世界时间需要按顺序生成后，世界才能正常运转。' }}</div>
+      </div>
+      <el-button size="small" type="primary" @click="go('/init')">
+        <el-icon><HIcon name="VideoPlay" /></el-icon>&nbsp;去完成初始化
+      </el-button>
+    </div>
+
     <!-- 欢迎区：项目名 + 题材标签 + 快捷操作 -->
     <div class="welcome-card tech-card">
       <div class="welcome-left">
@@ -235,7 +251,7 @@ import {
   fetchProject, fetchWorldSetting, fetchWorldClock, fetchCharacters, fetchKnowledgeDocs,
   fetchMemories, fetchUsageStats, fetchProjectActionTimeline, fetchConversations,
   sandboxStreamUrl, fetchRealtimeDecision, setRealtimeDecision,
-  fetchMacroState, fetchWorldEngineConfig
+  fetchMacroState, fetchWorldEngineConfig, fetchWorldInitStatus
 } from '@/shared/api'
 
 const route = useRoute()
@@ -261,6 +277,14 @@ const simStatus = computed(() => {
 const macro = ref(null)
 const aiIntensityLabel = ref('—')
 let macroTimer = null
+
+// ：世界初始化状态（必需要素是否齐备；未完成时页头给横幅入口）
+const initStatus = ref(null)
+
+/** 读世界初始化状态（失败静默：横幅是增益信息，不该影响仪表盘其它区块） */
+async function loadInitStatus() {
+  try { initStatus.value = await fetchWorldInitStatus(projectId) } catch (_) { initStatus.value = null }
+}
 
 /** 季节显示名 */
 function seasonName(s) {
@@ -315,28 +339,31 @@ const recent = ref([])
 function statusText(s) { return s === 1 ? '已生成角色卡' : (s === 2 ? '进行中' : '草稿') }
 function statusType(s) { return s === 1 ? 'success' : (s === 2 ? 'primary' : 'info') }
 
-/** 快捷跳转（相对 /project/:id） */
-function go(sub) { router.push(`/project/${projectId}${sub}`) }
+/** 快捷跳转（相对 /world/:id） */
+function go(sub) { router.push(`/world/${projectId}${sub}`) }
 
 /**
  * 世界初始化/重新初始化入口。
- * 点击弹提醒确认（可能重建/重新生成地点/角色卡/普通NPC/关系/世界时间/向量化），
- * 确认后进入独立全屏世界初始化页（/project/:id/init），可在页内选择「跳过已生成/全量重建」。
+ * 点击弹提醒确认，确认后进入独立全屏世界初始化页（/world/:id/init）。
+ *
+ * <p>语义变更（本轮重构）：初始化页<b>不再进页即自动跑</b>，改为「只读状态 + 手动逐步执行」——
+ * 严格顺序（必需步骤未完成前不能执行下一步），也可在页内「一键续跑剩余」。</p>
  */
 function openWorldInit() {
   ElMessageBox.confirm(
-    `即将进入「世界初始化」页面并自动运行 6 步工作流：\n` +
-    `① 世界观地点 ② 角色卡 ③ 字段字典与普通 NPC ④ 关系拓扑 ⑤ 世界时间 ⑥ 知识向量化。\n\n` +
-    `⚠ 提醒：若选择「全量重建」会重新生成并可能覆盖已有的地点/普通 NPC/关系等数据；` +
-    `页面内默认使用「跳过已生成（幂等）」模式。是否继续？`,
+    `即将进入「世界初始化」页面。\n` +
+    `初始化严格按顺序执行 10 步：① 世界观设定 ② 世界观地点 ③ 角色卡 ④ 普通 NPC ⑤ 关系拓扑 ` +
+    `⑥ 家族与基因 ⑦ 世界地图与住所 ⑧ 世界时间 ⑨ 宏观社会模板 ⑩ 知识向量化。\n\n` +
+    `必需步骤：①②③④⑤⑧；可选步骤：⑥⑦⑨⑩（失败只算降级）。\n` +
+    `⚠ 进页只读取状态、不会自动调用 AI；你可逐步执行，或用「一键续跑剩余」按顺序跑完。是否继续？`,
     '世界初始化',
     {
       confirmButtonText: '进入初始化',
       cancelButtonText: '取消',
-      type: 'warning'
+      type: 'info'
     }
   ).then(() => {
-    router.push(`/project/${projectId}/init`)
+    router.push(`/world/${projectId}/init`)
   }).catch(() => { /* 用户取消 */ })
 }
 
@@ -498,7 +525,7 @@ async function loadRecent() {
 }
 
 onMounted(() => {
-  loadBase(); loadStats(); loadRecent(); startClockTick(); connectClockStream(); loadRtState(); loadMacro()
+  loadBase(); loadStats(); loadRecent(); startClockTick(); connectClockStream(); loadRtState(); loadMacro(); loadInitStatus()
   macroTimer = setInterval(loadMacro, 60000) // ：宏观指标 60s 周期刷新（世界持续推进时保持新鲜）
 })
 onBeforeUnmount(() => {
@@ -573,6 +600,22 @@ function onWelcomeAction(key) {
 /* V2.0：本页不再自写限宽（原 max-width:1100px 造成与其它页的内容列错位）——
    限宽与居中交给 PageShell width="wide"，这里只保留页面纵向节奏的兜底。 */
 .dashboard-view { display: flex; flex-direction: column; gap: 16px; }
+
+/* 初始化未完成横幅 */
+.dash-init-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-left: 3px solid var(--el-color-warning, #e6a23c);
+}
+.dib-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dib-title { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 700; color: var(--text-primary); }
+.dib-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6; }
+@media (max-width: 900px) {
+  .dash-init-banner { flex-direction: column; align-items: flex-start; }
+}
 
 /* 欢迎区 */
 .welcome-card { padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; }

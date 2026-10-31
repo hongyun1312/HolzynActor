@@ -200,6 +200,15 @@ public class WorldEngine {
     private TickBarrier tickBarrier;
 
     /**
+     * 世界闸门（V1.1.2-beta.1 M4）：{@link #scanAndAdvance()} 在未挂载世界时必须直接返回。
+     *
+     * <p>字段注入 {@code required=false}：AGENTS §8.1.2 禁止改既有服务构造器；单测直接
+     * {@code new WorldEngine(...)} 时未装配 → 退化为改造前的直驱行为（既有断言不变）。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.WorldGate worldGate;
+
+    /**
      * 小时级决策扇出执行器（屏障接线配套，惰性创建）。
      * <p>为什么需要：屏障让「本 tick 的耗时」变成世界推进的真实节拍——一个游戏小时里 N 个角色的
      * 周期决策若串行执行，tick 耗时就等于 N×AI 延迟，世界会被自己的决策拖慢。同一游戏小时的角色
@@ -315,7 +324,7 @@ public class WorldEngine {
 
     /**
      * 普通 NPC AI 化。
-     * true=普通 NPC 的每小时决策也获得 AI 预算入口（NanoJev 空间候选为主 + Qwen 低频兜底，
+     * true=普通 NPC 的每小时决策也获得 AI 预算入口（决策模型 空间候选为主 + Qwen 低频兜底，
      * 每 tick 预算抬到「全 NPC 数 + 余量」）；false=回退 现状（预算 5 只够 5 个高重要度
      * 角色，普通 NPC 预算耗尽走程序化 continue）。用户北极星=最真实世界，不考虑 AI 成本。
      */
@@ -505,6 +514,17 @@ public class WorldEngine {
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.worldmap.service.MovementService movementService;
+
+    /**
+     * 新管线移动引擎（地图可编辑布局与 NPC 沿路移动 · M2）：日程/决策 → 沿路轨迹 → 坐标权威。
+     *
+     * <p>与上面的 {@code movementService} 分属两个坐标域——那个服务旧沙盘（500×500 场景格、
+     * 中心化），这个只服务 mapgen 米制地图（1024²、西南原点）。两套并存是刻意的：
+     * Unity 端还在读沙盘坐标，硬合并会让老客户端的人站到墙里。
+     * null=未装配[单测]跳过，行为与改动前一致。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcMovementService npcMovementService;
 
     // ==================== 静态纯逻辑（可单测） ====================
 
@@ -698,27 +718,43 @@ public class WorldEngine {
     // ==================== 扫描与推进 ====================
 
     /**
-     * 扫描全部未删除项目并推进「持续运行」的项目（WorldSimulationJob 薄触发器调用，默认每 3 分钟）。
-     * <p>不再按「最近有对话」的活跃窗口筛选（修 L-02）；单项目失败不阻断其他项目（try 隔离）。</p>
+     * 推进「当前挂载的世界」一轮（调度壳调用，默认每 12.5 真实秒）。
+     *
+     * <p>单世界语义（V1.1.2-beta.1 M4）：入口先过世界闸门。世界未挂载时不能靠"路由回落到目录库
+     * 于是读不到项目"来兜底——目录库的 {@code actor_project} 恰恰有世界的<b>索引行</b>
+     * （id/名字/摘要/游戏时间），遍历推进等于拿索引当世界数据跑。未挂载 → 直接返回。</p>
+     *
+     * <p>为什么保留"遍历项目"的形态而不是写成 {@code advanceProject(current.id())}：世界库里的
+     * {@code actor_project} 只镜像<b>本世界自己那一行</b>（设计 §3.5），所以这个列表在挂载态恒为 1 个元素；
+     * 保留循环 + 单项目 try 隔离，未来若做"多世界并行"只需换列表来源，不必重写推进路径。</p>
      */
     public void scanAndAdvance() {
         if (!simEnabled || !scanning.compareAndSet(false, true)) {
             return;
         }
         try {
-            List<ActorProject> projects = projectRepository.findByDeletedOrderByIdAsc(0);
-            // ：扫描频率提升到 12.5 真实秒，扫描日志降为 debug 防刷屏（推进日志仍 info）
-            log.debug("[世界引擎] 扫描：项目 {} 个", projects.size());
-            for (ActorProject project : projects) {
-                try {
-                    advanceProject(project.getId());
-                } catch (Exception e) {
-                    // 单项目推进失败不阻断其他项目
-                    log.warn("[世界引擎] 项目 {} 推进失败: {}", project.getId(), e.getMessage());
-                }
+            if (worldGate == null) {
+                advanceCurrentWorld();   // 单测/未装配：保持既有口径
+            } else {
+                worldGate.tryMaintenance("WorldEngine.scanAndAdvance", this::advanceCurrentWorld);
             }
         } finally {
             scanning.set(false);
+        }
+    }
+
+    /** 推进体（闸门之后才允许扫库）：挂载态下 actor_project 只有当前世界一行 */
+    private void advanceCurrentWorld() {
+        List<ActorProject> projects = projectRepository.findByDeletedOrderByIdAsc(0);
+        // ：扫描频率提升到 12.5 真实秒，扫描日志降为 debug 防刷屏（推进日志仍 info）
+        log.debug("[世界引擎] 扫描：项目 {} 个", projects.size());
+        for (ActorProject project : projects) {
+            try {
+                advanceProject(project.getId());
+            } catch (Exception e) {
+                // 单项目推进失败不阻断其他项目
+                log.warn("[世界引擎] 项目 {} 推进失败: {}", project.getId(), e.getMessage());
+            }
         }
     }
 
@@ -830,7 +866,7 @@ public class WorldEngine {
         budgetPerTick = intensityBudget(budgetPerTick, aiIntensityGate, projectId);
         // 普通 NPC AI 化：all-npc-ai-enabled=true
         // 且 all-npc-hourly=true 时，每 tick 预算抬到「全 NPC 数 + 余量」——20 个角色全部获得
-        // 每小时 AI 决策入口（NanoJev 空间候选为主路径、Qwen 低频兜底），不再只有重要度前 5 名
+        // 每小时 AI 决策入口（决策模型 空间候选为主路径、Qwen 低频兜底），不再只有重要度前 5 名
         // 能进 AI 链（DB 实证：普通 NPC brain_level=light，但预算=5 只够 5 特殊 NPC）。
         // 用户北极星=最真实世界、不考虑 AI 成本；回退=all-npc-ai-enabled=false 恢复预算 5 现状。
         if (allNpcAiEnabled && growthProperties != null && growthProperties.isEnabled()
@@ -1207,6 +1243,16 @@ public class WorldEngine {
                         movementService.tick(projectId, s);
                     } catch (Exception e) {
                         log.warn("[世界引擎] 连续移动推进失败（隔离继续）: project={} : {}", projectId, e.getMessage());
+                    }
+                }
+
+                // ①-M2 新管线移动引擎（米制地图）：日程段切换 → 沿路寻路 → 按游戏秒推进坐标。
+                // 零 AI、失败隔离不阻断推进；未装配[单测]或没有地图时直接跳过。
+                if (npcMovementService != null) {
+                    try {
+                        npcMovementService.tick(projectId, s);
+                    } catch (Exception e) {
+                        log.warn("[世界引擎] 地图移动推进失败（隔离继续）: project={} : {}", projectId, e.getMessage());
                     }
                 }
 

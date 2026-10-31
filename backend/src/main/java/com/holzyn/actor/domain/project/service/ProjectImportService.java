@@ -36,8 +36,10 @@ import com.holzyn.actor.domain.settings.service.PromptTemplateService;
 import com.holzyn.actor.domain.usage.service.UsageLogService;
 import com.holzyn.actor.domain.world.dto.WorldLocationDTO;
 import com.holzyn.actor.domain.world.service.WorldLocationService;
+import com.holzyn.actor.domain.worldstore.WorldLifecycleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -105,6 +107,16 @@ public class ProjectImportService {
     private final UsageLogService usageLogService;
     private final WorldLocationService worldLocationService;
     private final ObjectMapper objectMapper;
+
+    /**
+     * 世界存档壳（V1.1.2-beta.1 M5，字段注入而非构造器注入：AGENTS §8.1.2 禁止改既有构造器）。
+     *
+     * <p>用它的原因：本服务走老的 {@code ProjectService.create}，插进 {@code actor_project} 的行没有
+     * {@code project_uid}／{@code data_dir_name}，分档存储下打不开；{@link WorldLifecycleService#mountNewWorld}
+     * 负责补齐壳并挂载，之后本服务写世界观/角色/地点才落在新世界库里。测试里可为 null（老断言不受影响）。</p>
+     */
+    @Autowired(required = false)
+    private WorldLifecycleService worldLifecycleService;
 
     /**
      * 解析上传文件：AI 结构化提取项目/世界观/角色。
@@ -767,9 +779,19 @@ public class ProjectImportService {
         ProjectDTO projectDto = new ProjectDTO(truncate(dto.project().name(), 100), null, truncate(dto.project().summary(), 2000), null);
         ProjectVO project = projectService.create(projectDto);
 
+        // 1b) 分档存储（M5）：补世界壳（uid + 世界目录 + 清单 + 索引列）并挂载，
+        //     否则下面写 worldview / 角色 / 地点时脚下这个"世界"根本不存在
+        if (worldLifecycleService != null) {
+            worldLifecycleService.mountNewWorld(project.id());
+        }
+
         // 2) 保存世界观（覆盖新建）
         WorldSettingDTO worldDto = new WorldSettingDTO(
-                truncate(w.name(), 100), truncate(w.genre(), 50), truncate(w.era(), 50),
+                truncate(w.name(), 100),
+                // 导入包里的题材可能是自由文本：收窄到固定八类，映射不到留空由用户补选
+                com.holzyn.actor.domain.world.model.WorldCategory.normalize(w.genre()),
+                null,
+                truncate(w.era(), 50),
                 truncate(w.geography(), 5000), truncate(w.factions(), 5000), truncate(w.magicSystem(), 5000),
                 truncate(w.culture(), 5000), truncate(w.history(), 5000), truncate(w.freeText(), 5000));
         projectService.saveWorldSetting(project.id(), worldDto);

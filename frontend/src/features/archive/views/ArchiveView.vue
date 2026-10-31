@@ -13,8 +13,10 @@
 -->
 <template>
   <!-- V2.0：页面骨架化——原 .archive-page 内联 max-width:1200px（与全站其它内容列不统一），
-       改由 PageShell width="content"（1200）承载，页面不再自写限宽。 -->
-  <PageShell width="content" class="archive-page">
+       改由 PageShell 承载，页面不再自写限宽。
+       2026-10 布局审计：本页是宽表（8 列 + 操作列），且与同属项目空间的其它页共用侧栏导航，
+       content（1200）在 1920 屏与 1440 档页面之间会跳 120px，故升到 wide（1440）。 -->
+  <PageShell width="wide" class="archive-page">
     <!-- 标题 + 操作 -->
     <div class="ar-top">
       <div class="ar-title-wrap">
@@ -37,81 +39,83 @@
     </div>
 
     <!-- 过滤条 -->
-    <div class="ar-filters">
-      <el-select v-model="filters.characterRef" clearable filterable placeholder="全部角色" class="ar-f-filter ar-f-char" @change="reload">
-        <el-option v-for="c in characters" :key="c.id" :label="c.name" :value="npcRef(c.id)" />
-      </el-select>
-      <el-select v-model="filters.type" clearable placeholder="全部类型" class="ar-f-filter" @change="reload">
-        <el-option v-for="(label, key) in typeLabels" :key="key" :label="label" :value="key" />
-      </el-select>
-      <el-select v-model="filters.reason" clearable placeholder="全部原因" class="ar-f-filter" @change="reload">
-        <el-option v-for="(label, key) in reasonLabels" :key="key" :label="label" :value="key" />
-      </el-select>
-      <el-input v-model="filters.keyword" clearable placeholder="搜索归档内容" class="ar-f-filter ar-f-kw" @clear="reload" @keyup.enter="reload">
-        <template #prefix><el-icon><HIcon name="Search" /></el-icon></template>
-      </el-input>
-      <el-button size="default" type="primary" @click="reload">
-        <el-icon><HIcon name="Search" /></el-icon>&nbsp;查询
-      </el-button>
-    </div>
+    <div class="ar-panel tech-card">
+      <div class="ar-filters">
+        <el-select v-model="filters.characterRef" clearable filterable placeholder="全部角色" class="ar-f-filter ar-f-char" @change="reload">
+          <el-option v-for="c in characters" :key="c.id" :label="c.name" :value="npcRef(c.id)" />
+        </el-select>
+        <el-select v-model="filters.type" clearable placeholder="全部类型" class="ar-f-filter" @change="reload">
+          <el-option v-for="(label, key) in typeLabels" :key="key" :label="label" :value="key" />
+        </el-select>
+        <el-select v-model="filters.reason" clearable placeholder="全部原因" class="ar-f-filter" @change="reload">
+          <el-option v-for="(label, key) in reasonLabels" :key="key" :label="label" :value="key" />
+        </el-select>
+        <el-input v-model="filters.keyword" clearable placeholder="搜索归档内容" class="ar-f-filter ar-f-kw" @clear="reload" @keyup.enter="reload">
+          <template #prefix><el-icon><HIcon name="Search" /></el-icon></template>
+        </el-input>
+        <el-button size="default" type="primary" @click="reload">
+          <el-icon><HIcon name="Search" /></el-icon>&nbsp;查询
+        </el-button>
+      </div>
 
-    <!-- 归档列表 -->
-    <div v-loading="loading" class="ar-body">
-      <el-table :data="rows" class="ar-table" empty-text="暂无归档条目（在角色页记忆/核心块上点击「归档」，或由超龄扫描/版本链自动归档）" row-key="id">
-        <el-table-column label="内容" min-width="360" show-overflow-tooltip>
-          <template #default="{ row }">
-            <div class="ar-content">{{ row.content }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="类型" width="90" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="typeTag(row.type)" effect="plain">{{ typeLabels[row.type] || row.type }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="原因" width="110" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="reasonTag(row.archiveReason)" effect="light">{{ reasonLabels[row.archiveReason] || row.archiveReason }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="归属" width="130" align="center">
-          <template #default="{ row }">
-            <span class="ar-ref">{{ refLabel(row.characterRef, characters) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="重要度" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" effect="light">{{ row.importanceAtArchive ?? '—' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="归档时间" width="160" align="center">
-          <template #default="{ row }">{{ fmtTime(row.archivedAt) }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="90" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.restored === 1 ? 'success' : 'info'" effect="plain">
-              {{ row.restored === 1 ? '已还原' : '未还原' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="170" align="center" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" text type="primary" :disabled="row.restored === 1" @click="doRestore(row)">还原</el-button>
-            <el-button size="small" text type="danger" @click="doDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <!-- 归档列表 -->
+      <div v-loading="loading" class="ar-body">
+        <el-table :data="rows" class="ar-table" empty-text="暂无归档条目（在角色页记忆/核心块上点击「归档」，或由超龄扫描/版本链自动归档）" row-key="id">
+          <el-table-column label="内容" min-width="240" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div class="ar-content">{{ row.content }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="90" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" :type="typeTag(row.type)" effect="plain">{{ typeLabels[row.type] || row.type }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="原因" width="110" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" :type="reasonTag(row.archiveReason)" effect="light">{{ reasonLabels[row.archiveReason] || row.archiveReason }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="归属" width="130" align="center">
+            <template #default="{ row }">
+              <span class="ar-ref">{{ refLabel(row.characterRef, characters) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="重要度" width="80" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" effect="light">{{ row.importanceAtArchive ?? '—' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="归档时间" width="150" align="center">
+            <template #default="{ row }">{{ fmtTime(row.archivedAt) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="90" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.restored === 1 ? 'success' : 'info'" effect="plain">
+                {{ row.restored === 1 ? '已还原' : '未还原' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" :disabled="row.restored === 1" @click="doRestore(row)">还原</el-button>
+              <el-button size="small" text type="danger" @click="doDelete(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
-      <!-- 分页 -->
-      <div class="ar-pager">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="size"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @current-change="load"
-          @size-change="reload"
-        />
+        <!-- 分页 -->
+        <div class="ar-pager">
+          <el-pagination
+            v-model:current-page="page"
+            v-model:page-size="size"
+            :total="total"
+            :page-sizes="[10, 20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="load"
+            @size-change="reload"
+          />
+        </div>
       </div>
     </div>
   </PageShell>
@@ -122,9 +126,9 @@
  * 记忆归档页。
  * <p>职责：展示/检索项目级<b>记忆归档</b>（L4 冷存储）——按角色/类型/原因/关键词过滤分页 + 还原 + 删除 + 导出
  * （JSON 全量 / Markdown 阅读版）+ 手动触发超龄归档扫描。归档原文保留、可检索可还原，<b>不参与日常注入</b>。</p>
- * <p>数据来源：/api/projects/{id}/archives（列表）/ /archives/{id}/restore（还原）/
- * /archives/{id}（删除）/ /api/projects/{id}/archives/export（导出）/ .../scan-age（超龄扫描）。
- * 角色筛选下拉复用 /api/projects/{id}/characters。</p>
+ * <p>数据来源：/api/worlds/{id}/archives（列表）/ /archives/{id}/restore（还原）/
+ * /archives/{id}（删除）/ /api/worlds/{id}/archives/export（导出）/ .../scan-age（超龄扫描）。
+ * 角色筛选下拉复用 /api/worlds/{id}/characters。</p>
  */
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
@@ -281,6 +285,9 @@ onMounted(() => { loadChars(); load() })
 .ar-title { margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; }
 .ar-sub { font-size: 0.8rem; color: var(--text-secondary); }
 .ar-ops { display: flex; gap: 8px; flex-wrap: wrap; }
+/* 过滤条 + 表格 + 分页收进一张卡片：改前它们直接压在壁纸上（表头/行没有承载面，
+   与「项目记忆」等同样是表格的页面不同，玻璃主题下正文可读性最差）。 */
+.ar-panel { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 12px; }
 .ar-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .ar-f-filter { width: 150px; }
 .ar-f-char { width: 170px; }

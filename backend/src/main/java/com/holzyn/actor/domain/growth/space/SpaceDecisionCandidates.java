@@ -24,13 +24,13 @@ import java.util.List;
 /**
  * 空间候选选择 · 候选集组装器。
  * <p><b>职责</b>：把空间 {@code possible_actions} 与通用三项（继续当前/歇一歇/找人说说话）
- * 组装为 NanoJev choice 候选集（：候选=空间 possible_actions[含低权重项] +
+ * 组装为 决策模型 choice 候选集（：候选=空间 possible_actions[含低权重项] +
  * 通用三项，无空间外通道）：</p>
  * <ul>
  * <li><b>通用三项恒在</b>（与空间候选去重）——「继续当前行动」是真人最常见的默认态，
  * 「歇/聊」是低权重合法项=真人式偶尔放空（crowd 同款口径）；</li>
  * <li><b>权重作情境信息</b>：空间候选描述带「（倾向 x%）」（weight 非空时）——
- * Qwen 生成空间时的倾向强度仅供 0.6B 语义参考，最终分布完全由 NanoJev 决定
+ * Qwen 生成空间时的倾向强度仅供 0.6B 语义参考，最终分布完全由 决策模型 决定
  * ；</li>
  * <li><b>上限 8</b>（choice 候选 ≤8 利于 0.6B 判断，官方上限 255 不触达）；</li>
  * <li><b>键</b>：通用三项键=continue_current/rest/chat，

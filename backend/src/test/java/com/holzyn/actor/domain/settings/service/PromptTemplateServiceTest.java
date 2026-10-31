@@ -34,7 +34,7 @@ class PromptTemplateServiceTest {
         // O6 G4（2026-09-22）：新增 growth_romance_decision 心动判定 / growth_proposal_decision 求婚判定 /
         // growth_fertility_decision 生育意愿判定 / growth_newborn_persona 新生儿建档 / growth_wedding_narrative
         // 婚礼叙事 五模板 → 63 → 68
-        // N 轨道 N2（2026-09-22）：新增 nanojev_ab_judge NanoJev 判定合理性评分模板 → 68 → 69
+        // N 轨道 N2（2026-09-22）：新增 decision_ab_judge 决策模型 判定合理性评分模板 → 68 → 69
         // 工作流适配（2026-09-29_05）：M4 角色工作流新增 worldgen_character_roster 角色阵容设计 /
         // worldgen_character_depth 逐角色深度档案 两模板 → 69 → 71
         // 工作流适配（2026-09-29_06）：M4 story-plan 工作流新增 worldgen_story_plan 故事宏观规划 /
@@ -60,7 +60,9 @@ class PromptTemplateServiceTest {
         // 世界地图生成管线 V1.1（第 76 次）：新增 world_map_profile 世界档案 /
         // world_map_assets 建筑资产类型库 / world_map_roads 路网拓扑 三模板 → 91 → 94
         // 世界地图生成管线 V1.3（第 82 次）：新增 world_map_brief 世界→地图契约（S0b）模板 → 94 → 95
-        assertEquals(95, builtins.size());
+        // 开局家族谱系（本轮）：新增 growth_family_profile_infer 成长档案精修模板 → 95 → 96
+        // 世界初始化重构（本轮）：新增 world_meta_suggest 世界名与简介建议模板 → 96 → 97
+        assertEquals(97, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_CARD_GEN));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOG));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_GROUP));
@@ -172,8 +174,10 @@ class PromptTemplateServiceTest {
         // 新用户引导（2026-10-16 第 71 次第二批）：新增 player_profile_gen 玩家档案 AI 补充生成模板 → 90 → 91，
         // 世界地图生成管线 V1.1（第 76 次）：新增 world_map_profile / world_map_assets / world_map_roads → 91 → 94，
         // 世界地图生成管线 V1.3（第 82 次）：新增 world_map_brief（S0b 契约）→ 94 → 95，
+        // 开局家族谱系（本轮）：新增 growth_family_profile_infer 成长档案精修模板 → 95 → 96，
+        // 世界初始化重构（本轮）：新增 world_meta_suggest 世界名与简介建议模板 → 96 → 97，
         // 此处的逐段计数断言与最终断言保持一致，避免历史注释计数误导。
-        assertEquals(95, builtins.size());
+        assertEquals(97, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_A));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_B));
         // 世界常识摘要（2026-10-08）：world_common_knowledge 模板含世界观占位符 + 300-500 字要求
@@ -182,6 +186,14 @@ class PromptTemplateServiceTest {
                 .contains("{{world_setting}}"));
         assertTrue(builtins.get(PromptTemplateService.CODE_WORLD_COMMON_KNOWLEDGE).template()
                 .contains("300-500"));
+        // 世界初始化重构（本轮）：world_meta_suggest 含世界观分节占位符 + 严格字数约束
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_WORLD_META_SUGGEST));
+        assertTrue(builtins.get(PromptTemplateService.CODE_WORLD_META_SUGGEST).template()
+                .contains("{{genre}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_WORLD_META_SUGGEST).template()
+                .contains("6-14"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_WORLD_META_SUGGEST).template()
+                .contains("60-100"));
         // 项目级 AI 助手（2026-10-10 第 50 次）：assistant_tool 含工具决策 JSON 契约；assistant_chat 含零 OOC 铁律
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_ASSISTANT_TOOL));
         assertTrue(builtins.get(PromptTemplateService.CODE_ASSISTANT_TOOL).template().contains("tool_calls"));
@@ -311,9 +323,9 @@ class PromptTemplateServiceTest {
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_FERTILITY_DECISION));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_NEWBORN_PERSONA));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_WEDDING_NARRATIVE));
-        // N 轨道 N2（2026-09-22）：新增 nanojev_ab_judge NanoJev 判定合理性评分模板（68→69）
-        assertTrue(builtins.containsKey(PromptTemplateService.CODE_NANOJEV_AB_JUDGE));
-        // G4 判定类模板为 SCHEMA_JSON 契约（NanoJev 序列化对齐）
+        // N 轨道 N2（2026-09-22）：新增 decision_ab_judge 决策模型 判定合理性评分模板（68→69）
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_DECISION_AB_JUDGE));
+        // G4 判定类模板为 SCHEMA_JSON 契约（决策模型 序列化对齐）
         assertTrue(builtins.get(PromptTemplateService.CODE_ROMANCE_DECISION).template().contains("attracted"));
         assertTrue(builtins.get(PromptTemplateService.CODE_PROPOSAL_DECISION).template().contains("target_ref"));
         assertTrue(builtins.get(PromptTemplateService.CODE_FERTILITY_DECISION).template().contains("want"));

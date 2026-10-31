@@ -62,7 +62,7 @@ import java.util.Set;
  * <p><b>实现形态（用户 Q1-Q6 确认）</b>：<b>调制器策略</b>——{@link #decide} 只计算策略档位并把
  * 【策略偏好】段经 {@link AiCallContext#holdStrategyPreference} 持有，<b>恒返回空（永不产出决策，
  * 链继续）</b>；priority=85（介于 Deliberate[60] 与 PhysioDanger[100] 之间，且先于
- * SpaceChoice[80]/Deliberate[60]）保证 SpaceChoice（NanoJev 快判）与 Deliberate（AI 深思）
+ * SpaceChoice[80]/Deliberate[60]）保证 SpaceChoice（决策模型 快判）与 Deliberate（AI 深思）
  * 双通道都能读到偏好段——AI 仍是决策者，只是被「保守/激进」引导（真实的人面对新事是
  * 「谨慎地想」而非「按脚本退避」，保留 AI 创造力）。</p>
  * <p><b>熟悉度三源（用户 Q3 确认，全程序化 0 额外 AI 兜底）</b>：
@@ -78,7 +78,7 @@ import java.util.Set;
  * AI 失败/超时/解析失败 → <b>fail-open 回退初始档位</b>（白盒保底，零阻断）。</p>
  * <p><b>注入（用户 Q5 确认，holder 双通道）</b>：最终档位非均衡时组装【策略偏好】段 →
  * {@link AiCallContext#holdStrategyPreference}（action_gen {{strategy_preference}} 占位符 /
- * NanoJev 快判情境文本首部，对齐主动记忆检索先例）；均衡 → 不注入（行为零变化），trace 留痕。
+ * 决策模型 快判情境文本首部，对齐主动记忆检索先例）；均衡 → 不注入（行为零变化），trace 留痕。
  * <b>例行决策不门控 hasStimulus</b>：每次 SPECIAL 非 programmatic 决策都评估（冻结世界纪律下
  * 冒烟走 MANUAL 触发同样生效）；例行感知情境同样参与领域识别，陌生→保守/熟悉+自信→激进。</p>
  * <p><b>架构不变量</b>：含 AI 调用（档位复核），公开方法<b>一律不带 {@code @Transactional}</b>；
@@ -171,7 +171,7 @@ public class FamiliarityStrategy implements BrainStrategy {
     @Override
     public int priority() {
         // 介于 Deliberate(60) 与 PhysioDanger(100) 之间，且先于 SpaceChoice(80)/Deliberate(60)——
-        // 保证双通道（NanoJev 快判 / AI 深思）都能读到本策略持有的【策略偏好】段。
+        // 保证双通道（决策模型 快判 / AI 深思）都能读到本策略持有的【策略偏好】段。
         return 85;
     }
 

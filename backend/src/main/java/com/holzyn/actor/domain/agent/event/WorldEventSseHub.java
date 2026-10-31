@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 世界事件前端 SSE 广播中心（B1，domain/agent/event）。
- * <p>职责：按项目维护 SSE 订阅者集合（{@code /api/projects/{id}/world-events/stream}），
+ * <p>职责：按项目维护 SSE 订阅者集合（{@code /api/worlds/{id}/world-events/stream}），
  * 世界事件总线发布后向该项目订阅者广播 {@code world-event} 事件（载荷含
  * <p>与调试事件流的关系：本 Hub 是「业务事件流」，调试前端事件流由 {@code DebugEventHub}
  * （注册为 {@link WorldEventBus} 订阅者）同源消费——不再各发各的。</p>
@@ -49,7 +49,7 @@ public class WorldEventSseHub {
     private final ConcurrentHashMap<Long, Set<SseEmitter>> emittersByProject = new ConcurrentHashMap<>();
 
     /**
-     * 订阅项目世界事件流（GET /api/projects/{id}/world-events/stream 使用）。
+     * 订阅项目世界事件流（GET /api/worlds/{id}/world-events/stream 使用）。
      *
      * @param projectId 项目 ID
      *

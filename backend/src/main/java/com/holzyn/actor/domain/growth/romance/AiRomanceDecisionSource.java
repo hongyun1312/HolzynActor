@@ -27,7 +27,7 @@ import tools.jackson.databind.JsonNode;
 import java.util.Map;
 
 /**
- * 心动判定默认实现（Qwen AI 主 + 程序化兜底；NanoJev 替换实现类即可，主流程零改动）。
+ * 心动判定默认实现（Qwen AI 主 + 程序化兜底；决策模型 替换实现类即可，主流程零改动）。
  * <p><b>AI 判定</b>（scene=growth_romance_decision，SCHEMA_JSON 0.4/300）：输入角色与候选对象的
  * 互动证据 + 好感，输出 {@code {attracted:boolean, confidence:0-1, reason}}。</p>
  * <p><b>程序化兜底</b>（AI 失败/输出非法 → 不动心，零阻断——真实世界「没证据=没心动」；
@@ -41,26 +41,26 @@ public class AiRomanceDecisionSource implements RomanceDecisionSource {
     private final AiDecisionSourceSupport support;
 
     /**
-     * NanoJev 心动判定（默认关场景；开启且采纳时优先，失败/升级回退本 Qwen 实现；
+     * 决策模型 心动判定（默认关场景；开启且采纳时优先，失败/升级回退本 Qwen 实现；
      * 字段注入保持构造器不变，null=未装配[单测]直接走 Qwen）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.holzyn.actor.ai.nanojev.decision.NanoJevRomanceAttractionDecision nanoJevDecision;
+    private com.holzyn.actor.ai.decision.gate.RomanceAttractionJudge decisionJudge;
 
     @Override
     public RomanceDecisions.AttractionDecision decide(RomanceDecisions.AttractionContext ctx) {
         if (ctx == null || ctx.npcRef() == null || ctx.partnerRef() == null) {
             return RomanceDecisions.AttractionDecision.of(false, 0.0, "参数缺失，视为不动心", "programmatic");
         }
-        // ：NanoJev 优先（逐场景开关默认关；采纳即用，否则回退 Qwen）
-        if (nanoJevDecision != null) {
+        // ：决策模型 优先（逐场景开关默认关；采纳即用，否则回退 Qwen）
+        if (decisionJudge != null) {
             try {
-                RomanceDecisions.AttractionDecision nano = nanoJevDecision.decide(ctx);
+                RomanceDecisions.AttractionDecision nano = decisionJudge.decide(ctx);
                 if (nano != null) {
                     return nano;
                 }
             } catch (Exception e) {
-                log.warn("[婚育] NanoJev 心动判定异常（回退 Qwen）: {} → {} : {}", ctx.npcName(), ctx.partnerName(),
+                log.warn("[婚育] 决策模型 心动判定异常（回退 Qwen）: {} → {} : {}", ctx.npcName(), ctx.partnerName(),
                         e.getMessage());
             }
         }

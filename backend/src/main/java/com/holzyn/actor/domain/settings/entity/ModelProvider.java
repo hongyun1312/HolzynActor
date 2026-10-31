@@ -87,6 +87,20 @@ public class ModelProvider {
     @Column(name = "embedding_model", length = 100)
     private String embeddingModel;
 
+    /**
+     * 该供应商下的模型清单（JSON 数组，元素字段：id/name/role/isDefault/enabled/remark）。
+     *
+     * <p>role：{@code text}=文本模型 / {@code embedding}=向量模型 / {@code decision}=决策模型。
+     * 为 NULL 或空数组时按旧字段（{@code model} / {@code embedding_model} / {@code purpose}）
+     * 推导出一份只读视图——升级前已有的单模型配置因此无需回填即可继续工作。</p>
+     *
+     * <p>为什么是 JSON 列而不是子表：本表同时受"目录库 + 世界库 + 镜像同步 + 归档脱敏"四套机制约束，
+     * 新增子表要改两库 schema、注册表清单与镜像/脱敏逻辑；而供应商配置是整行读写的单用户小对象，
+     * 模型数量有限，JSON 列的收益/风险比明显更好（见 V103 迁移注释）。</p>
+     */
+    @Column(name = "models_json", columnDefinition = "TEXT")
+    private String modelsJson;
+
     /** 用户级默认标记：0 否 / 1 是（同一用户至多一个 1，业务层事务维护互斥） */
     @Column(name = "is_default")
     private Integer isDefault = 0;

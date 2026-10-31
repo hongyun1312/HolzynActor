@@ -23,9 +23,9 @@ import java.util.List;
 /**
  * 婚恋决策插拔点 · 接口族。
  * <p><b>设计意图</b>：婚育链路中三个「软判定」节点抽象为接口，默认实现走 Qwen（AI），
- * 程序化兜底保底；<b>N 轨道（NanoJev）只需换实现、不重改主流程</b>——与 的
+ * 程序化兜底保底；<b>N 轨道（决策模型）只需换实现、不重改主流程</b>——与 的
  * {@code MaskContextSource} / {@code MaskBreachDecision} 同构。每个判定输入输出均设计为
- * <b>可序列化为 NanoJev {@code states + questions} 契约</b>（state=情境文本，question=choice/boolean），
+ * <b>可序列化为 决策模型 {@code states + questions} 契约</b>（state=情境文本，question=choice/boolean），
  * 见各接口注释。</p>
  */
 public final class RomanceDecisions {

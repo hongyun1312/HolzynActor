@@ -149,13 +149,13 @@ class AiCallContextTest {
     }
 
     /**
-     * N 轨道 N1（2026-09-22）：NanoJev 参数快照写入 detail_json.request_params.params_snapshot
+     * N 轨道 N1（2026-09-22）：决策模型 参数快照写入 detail_json.request_params.params_snapshot
      * （「调度记录完整」验收项：states/questions/paths 三轴可回溯）。
      */
     @Test
-    void nanojevParamsSnapshotInDetailJson() {
-        AiCallContext.run("nanojev_sample", 1L, () -> {
-            AiCallContext.current().setNanojevParams("states=1, questions=3, paths=5");
+    void decisionParamsSnapshotInDetailJson() {
+        AiCallContext.run("decision_sample", 1L, () -> {
+            AiCallContext.current().setDecisionParams("states=1, questions=3, paths=5");
             markInvoked();
             return null;
         });
@@ -163,10 +163,10 @@ class AiCallContextTest {
         String detail = submitted.get(0).toDetailJson(20000);
         assertTrue(detail.contains("\"params_snapshot\":\"states=1, questions=3, paths=5\""),
                 "detail_json.request_params 必须含 params_snapshot：" + detail);
-        // 非 NanoJev 调用不设置该字段 → detail_json 不出现 params_snapshot
+        // 非 决策模型 调用不设置该字段 → detail_json 不出现 params_snapshot
         AiCallContext.run("dialog", 1L, () -> { markInvoked(); return null; });
         String plain = submitted.get(1).toDetailJson(20000);
-        assertTrue(!plain.contains("params_snapshot"), "非 NanoJev 调用不得出现 params_snapshot");
+        assertTrue(!plain.contains("params_snapshot"), "非 决策模型 调用不得出现 params_snapshot");
     }
 
     /** 提取 inner trace_id（beginTrace 生成） */

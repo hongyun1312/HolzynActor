@@ -172,13 +172,13 @@ public class AiCallTrace {
     /** 语义缓存命中标记 */
     private boolean semanticCacheHit = false;
 
-    // ===== N 轨道：NanoJev 判定调用参数快照 =====
+    // ===== N 轨道：决策模型 判定调用参数快照 =====
 
     /**
-     * NanoJev 判定调用参数快照（"states=N, questions=N, paths=N"；非 NanoJev 调用为 null；
+     * 决策模型 判定调用参数快照（"states=N, questions=N, paths=N"；非 决策模型 调用为 null；
      * N 轨道「调度记录完整」验收项：paramsSnapshot 写入 detail_json.request_params）
      */
-    private String nanojevParams;
+    private String decisionParams;
 
     // ===== Prompt 工程 + trace 数据流补全 =====
 
@@ -288,8 +288,8 @@ public class AiCallTrace {
     /** 标记语义缓存命中 */
     public void setSemanticCacheHit(boolean semanticCacheHit) { this.semanticCacheHit = semanticCacheHit; }
 
-    /** 回填 NanoJev 判定调用参数快照。 */
-    public void setNanojevParams(String nanojevParams) { this.nanojevParams = nanojevParams; }
+    /** 回填 决策模型 判定调用参数快照。 */
+    public void setDecisionParams(String decisionParams) { this.decisionParams = decisionParams; }
 
     // ===== Prompt 工程 + trace 数据流补全 =====
 
@@ -512,9 +512,9 @@ public class AiCallTrace {
             putNumber(rp, "max_tokens", maxTokens);
             rp.put("stream", stream);
             rp.put("json_mode", jsonMode);
-            // N 轨道：NanoJev 判定调用参数快照（states/questions/paths）
-            if (nanojevParams != null && !nanojevParams.isBlank()) {
-                rp.put("params_snapshot", nanojevParams);
+            // N 轨道：决策模型 判定调用参数快照（states/questions/paths）
+            if (decisionParams != null && !decisionParams.isBlank()) {
+                rp.put("params_snapshot", decisionParams);
             }
             // ===== 输入 =====
             ObjectNode in = root.putObject("input");

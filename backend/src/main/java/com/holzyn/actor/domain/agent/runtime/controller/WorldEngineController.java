@@ -49,7 +49,7 @@ import java.util.Map;
  * 前端 AI 强度滑块/按钮读写此接口）。配置行每项目唯一，懒创建默认。</p>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}/world-engine")
+@RequestMapping("/api/worlds/{projectId}/world-engine")
 @RequiredArgsConstructor
 public class WorldEngineController {
 

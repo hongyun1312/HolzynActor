@@ -71,7 +71,7 @@ public class KnowledgeController {
      *
      * @return 文档 VO 列表
      */
-    @GetMapping("/projects/{projectId}/knowledge-docs")
+    @GetMapping("/worlds/{projectId}/knowledge-docs")
     public R<List<KnowledgeDocVO>> list(@PathVariable("projectId") Long projectId) {
         return R.ok(knowledgeService.list(projectId));
     }
@@ -85,7 +85,7 @@ public class KnowledgeController {
      *
      * @return 保存后的文档
      */
-    @PostMapping("/projects/{projectId}/knowledge-docs")
+    @PostMapping("/worlds/{projectId}/knowledge-docs")
     public R<KnowledgeDocVO> create(@PathVariable("projectId") Long projectId, @Valid @RequestBody KnowledgeDocDTO dto) {
         return R.ok(knowledgeService.create(projectId, dto));
     }
@@ -152,7 +152,7 @@ public class KnowledgeController {
      *
      * @return 保存后的文档
      */
-    @PostMapping("/projects/{projectId}/knowledge-docs/upload")
+    @PostMapping("/worlds/{projectId}/knowledge-docs/upload")
     public R<KnowledgeDocVO> upload(@PathVariable("projectId") Long projectId,
                                     @RequestParam("file") MultipartFile file,
                                     @RequestParam(value = "characterId", required = false) Long characterId) {
@@ -168,7 +168,7 @@ public class KnowledgeController {
      *
      * @return 命中片段列表（docId/title/text/score）
      */
-    @PostMapping("/projects/{projectId}/knowledge-docs/search")
+    @PostMapping("/worlds/{projectId}/knowledge-docs/search")
     public R<List<KnowledgeHit>> search(@PathVariable("projectId") Long projectId,
                                         @RequestBody Map<String, Object> body) {
         if (body == null || body.get("query") == null) {
@@ -190,7 +190,7 @@ public class KnowledgeController {
      *
      * @return {synced=本次新建/更新文档数}
      */
-    @PostMapping("/projects/{projectId}/knowledge-docs/sync-world")
+    @PostMapping("/worlds/{projectId}/knowledge-docs/sync-world")
     public R<Map<String, Object>> syncWorld(@PathVariable("projectId") Long projectId) {
         int synced = knowledgeService.syncWorldSetting(projectId);
         return R.ok(Map.of("synced", synced));
@@ -206,7 +206,7 @@ public class KnowledgeController {
      *
      * @return {synced=本次新建/更新知识卡数}
      */
-    @PostMapping("/projects/{projectId}/knowledge-docs/sync-character-cards")
+    @PostMapping("/worlds/{projectId}/knowledge-docs/sync-character-cards")
     public R<Map<String, Object>> syncCharacterCards(@PathVariable("projectId") Long projectId) {
         int synced = knowledgeService.syncCharacterCards(projectId);
         return R.ok(Map.of("synced", synced));
@@ -220,7 +220,7 @@ public class KnowledgeController {
      *
      * @return {evaluated=评估数, migrated=迁移数, skipped=跳过数, byState=各目标态迁移计数}
      */
-    @PostMapping("/projects/{projectId}/knowledge-docs/scan-lifecycle")
+    @PostMapping("/worlds/{projectId}/knowledge-docs/scan-lifecycle")
     public R<Map<String, Object>> scanLifecycle(@PathVariable("projectId") Long projectId) {
         KnowledgeLifecycleService.ScanResult r = lifecycleService.scanProject(projectId);
         return R.ok(Map.of("evaluated", r.evaluated(), "migrated", r.migrated(),
@@ -260,7 +260,7 @@ public class KnowledgeController {
      *
      * @return 候选列表（最新在前）
      */
-    @GetMapping("/projects/{projectId}/knowledge-candidates")
+    @GetMapping("/worlds/{projectId}/knowledge-candidates")
     public R<List<KnowledgeCandidate>> candidates(@PathVariable("projectId") Long projectId) {
         return R.ok(candidateRepository.findByProjectIdOrderByIdDesc(projectId));
     }
@@ -275,7 +275,7 @@ public class KnowledgeController {
      *
      * @return {promoted=写入沉淀文档数, duplicate=重复跳过数, rejected=规则拒绝数}
      */
-    @PostMapping("/projects/{projectId}/knowledge-bridge/run")
+    @PostMapping("/worlds/{projectId}/knowledge-bridge/run")
     public R<Map<String, Object>> runBridge(@PathVariable("projectId") Long projectId,
                                             @RequestBody Map<String, Object> body) {
         if (body == null || body.get("characterRef") == null) {

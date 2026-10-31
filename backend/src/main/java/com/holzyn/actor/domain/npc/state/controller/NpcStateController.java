@@ -42,12 +42,12 @@ import java.util.List;
  * <p>职责：向角色页「状态」Tab / 调试页提供 NPC 内部状态只读视图（需求/心情/情绪/健康/urgency）——
  * 决策侧状态权威 actor_state 的展示读接口；写入一律走 NpcStateService（衰减/行动挂钩/情绪评估）。
  * 增历史曲线读接口（actor_state_history 快照，调试前端状态页/主前端角色页曲线数据源）。</p>
- * <p>端点：GET /api/projects/{id}/npc-state（项目全部状态行）、
- * GET /api/projects/{id}/npc-state/{npcRef}（单 NPC 状态行，npcRef=npc:{id}）、
+ * <p>端点：GET /api/worlds/{id}/npc-state（项目全部状态行）、
+ * GET /api/worlds/{id}/npc-state/{npcRef}（单 NPC 状态行，npcRef=npc:{id}）、
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/projects/{projectId}/npc-state")
+@RequestMapping("/api/worlds/{projectId}/npc-state")
 @RequiredArgsConstructor
 public class NpcStateController {
 

@@ -20,7 +20,7 @@
 
 ![世界：无人值守 · 自己会走](https://img.shields.io/badge/%E4%B8%96%E7%95%8C-%E6%97%A0%E4%BA%BA%E5%80%BC%E5%AE%88%20%C2%B7%20%E8%87%AA%E5%B7%B1%E4%BC%9A%E8%B5%B0-4E9B8A?style=flat-square)![角色：像真人一样生活](https://img.shields.io/badge/%E8%A7%92%E8%89%B2-%E5%83%8F%E7%9C%9F%E4%BA%BA%E4%B8%80%E6%A0%B7%E7%94%9F%E6%B4%BB-4C6EF5?style=flat-square)![记忆：会淡化 · 会升层](https://img.shields.io/badge/%E8%AE%B0%E5%BF%86-%E4%BC%9A%E6%B7%A1%E5%8C%96%20%C2%B7%20%E4%BC%9A%E5%8D%87%E5%B1%82-6A8DEB?style=flat-square)![人格：从婴儿到耄耋](https://img.shields.io/badge/%E4%BA%BA%E6%A0%BC-%E4%BB%8E%E5%A9%B4%E5%84%BF%E5%88%B0%E8%80%84%E8%80%8B-8E7CC3?style=flat-square)
 
-![社会：自己长出来](https://img.shields.io/badge/%E7%A4%BE%E4%BC%9A-%E8%87%AA%E5%B7%B1%E9%95%BF%E5%87%BA%E6%9D%A5-C77DFF?style=flat-square)![地图：程序化写实 · 同种子可复现](https://img.shields.io/badge/%E5%9C%B0%E5%9B%BE-%E7%A8%8B%E5%BA%8F%E5%8C%96%E5%86%99%E5%AE%9E%20%C2%B7%20%E5%90%8C%E7%A7%8D%E5%AD%90%E5%8F%AF%E5%A4%8D%E7%8E%B0-E8B457?style=flat-square)![桌面端：Windows 安装版](https://img.shields.io/badge/%E6%A1%8C%E9%9D%A2%E7%AB%AF-Windows%20%E5%AE%89%E8%A3%85%E7%89%88-6C7A89?style=flat-square)![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square)![版本: v1.1.1-beta.1](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-v1.1.1--beta.1-2F81F7?style=flat-square)
+![社会：自己长出来](https://img.shields.io/badge/%E7%A4%BE%E4%BC%9A-%E8%87%AA%E5%B7%B1%E9%95%BF%E5%87%BA%E6%9D%A5-C77DFF?style=flat-square)![地图：程序化写实 · 同种子可复现](https://img.shields.io/badge/%E5%9C%B0%E5%9B%BE-%E7%A8%8B%E5%BA%8F%E5%8C%96%E5%86%99%E5%AE%9E%20%C2%B7%20%E5%90%8C%E7%A7%8D%E5%AD%90%E5%8F%AF%E5%A4%8D%E7%8E%B0-E8B457?style=flat-square)![桌面端：Windows 安装版](https://img.shields.io/badge/%E6%A1%8C%E9%9D%A2%E7%AB%AF-Windows%20%E5%AE%89%E8%A3%85%E7%89%88-6C7A89?style=flat-square)![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square)![版本: v1.1.2-beta.1](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-v1.1.2--beta.1-2F81F7?style=flat-square)
 
 <p><b>⚠️ 使用须知</b>：<b>必须自行配置 AI 模型</b>——世界的推进、角色的决策与对话全部依赖模型调用；<br/>
 程序化只作兜底，如果全按兜底走的话会非常僵，非常不真实。</p>
@@ -89,7 +89,7 @@
 - **故事规划与风格宪法**：生成「叙事力学」与「世界风格宪法」（语气 / 参照 / 叙事人格 / 戒律 / 题材笔记）——只定义力、不定义事件
 - **项目即文件**：整个世界导出为单个 `.holzyn` 文件，可选密码加密，换机器、送人都只需一个文件
 
-### 世界地图生成管线
+### 世界地图生成管线（S0 → S5）
 
 > 不是让 AI 直接画一张图，而是让 AI **只决定「什么该存在」**，把「长在哪」交给确定性算法。
 
@@ -226,13 +226,13 @@
 
 ## 快速开始
 
-**方式一：安装包**
+**方式一：装安装包（推荐给想直接体验的人）**
 
 1. 到 [Releases](https://github.com/hongyun1312/HolzynActor/releases) 下载最新安装包，按向导安装
 2. 首次启动会带你完成本地账户 → **配置一个模型接口**（OpenAI 兼容 API 或本地模型）→ 我的形象
-3. 项目画廊里已经躺着一个示例世界「**浮生小镇 · 青屿镇**」，点进去就能看到它自己运转
+3. 世界画廊里已经躺着一个示例世界「**浮生小镇 · 青屿镇**」，点进去就能看到它自己运转
 
-**方式二：跑源码**
+**方式二：跑源码（推荐给想看代码 / 改代码的人）**
 
 前置：**JDK 21** 与 **Node.js 20+**（Windows 另需 Maven，或直接使用仓库内 `run.bat` 的引导）
 
@@ -242,13 +242,13 @@ run.bat            # Windows（macOS / Linux：bash run.sh）
 # 然后打开 http://localhost:18080
 ```
 
-- 首次启动会引导你建立本地账户；进入项目画廊即可新建项目，或直接打开随库内置的示例世界
+- 首次启动会引导你建立本地账户；进入世界画廊即可新建世界，或直接打开随库内置的示例世界
 - **进入设置配置一个模型接口**（OpenAI 兼容 API 或本地模型）——这是让世界正常运转的前提，不配模型只能看到僵硬的兜底状态，详见[常见问题](#常见问题)
 - 世界默认**启动全静止**：进入世界地图（或由引擎客户端接入）后该世界才开始运行，其余世界保持静止
 - 只想要干净的前后端分离开发：后端 `mvn -o spring-boot:run`（默认 18080）、前端 `npm run dev`（默认 5174，已配 `/api` 代理）
 - 打包：`build.bat` / `build.sh` 产出后端 jar；桌面端打包见 `desktop/README.md`（`npm run pack`）
 
-<p align="center"><img src="assets/screenshots/gallery.png" width="680" alt="项目画廊"></p>
+<p align="center"><img src="assets/screenshots/gallery.png" width="680" alt="世界画廊"></p>
 
 ## 存储与数据
 

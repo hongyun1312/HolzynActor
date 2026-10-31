@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="chat-view">
+  <div class="chat-view project-col">
     <!-- 左栏：会话 + 角色 -->
     <div class="chat-side">
       <div class="side-header">

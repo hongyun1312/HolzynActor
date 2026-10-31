@@ -41,7 +41,7 @@ class SocialGatheringCandidatesTest {
         assertEquals("去青禾茶馆坐坐，喝茶闲聊（倾向 30%）", c.get(0).questionText());
         assertEquals(0.3, c.get(0).weight());
         assertFalse(c.get(0).generic(), "注入候选非通用项");
-        assertNull(c.get(0).precondition(), "无前置条件（恒可发生区，交给 NanoJev 判定）");
+        assertNull(c.get(0).precondition(), "无前置条件（恒可发生区，交给 决策模型 判定）");
         // 顺序保持入参顺序
         assertEquals("青禾集市", c.get(1).target());
         assertEquals("村口石牌坊", c.get(2).target());

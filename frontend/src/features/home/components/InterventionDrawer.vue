@@ -162,11 +162,11 @@ async function doAdvance() {
 .iv-section { display: flex; flex-direction: column; gap: 8px; }
 .iv-title { font-size: 13px; font-weight: 700; color: var(--text-primary, #e8f0ff); }
 .iv-target {
-  font-size: 11.5px; color: var(--text-secondary, #9db8e8);
+  font-size: 13px; color: var(--text-secondary, #9db8e8);
   padding: 6px 9px; border-radius: 7px;
   background: var(--brand-gradient-soft, rgba(77,159,255,0.1));
 }
 .iv-btns { display: flex; align-items: center; gap: 8px; }
 .iv-clock-row { display: flex; align-items: center; gap: 8px; }
-.iv-hint { font-size: 10.5px; color: var(--text-placeholder, #6b7fa8); }
+.iv-hint { font-size: 12px; color: var(--text-placeholder, #6b7fa8); }
 </style>

@@ -21,7 +21,7 @@ package com.holzyn.actor.domain.worldmap.dto;
 import lombok.Data;
 
 /**
- * 世界地图生成请求（POST /api/projects/{id}/world-map/generate）。
+ * 世界地图生成请求（POST /api/worlds/{id}/world-map/generate）。
  * <p>幂等可重跑：同参数重复调用覆盖式重建（摆放/住所全量重建或保留既有由 regenerateHomes 控制）。</p>
  */
 @Data

@@ -52,7 +52,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/projects/{id}")
+@RequestMapping("/api/worlds/{id}")
 @RequiredArgsConstructor
 public class EnvironmentController {
 

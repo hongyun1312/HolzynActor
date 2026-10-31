@@ -27,7 +27,9 @@ import jakarta.validation.constraints.Size;
  *
  * @param name 世界观名称
  *
- * @param genre 题材（奇幻/科幻/都市/历史等）
+ * @param genre 题材（固定八类之一：奇幻/科幻/都市/历史/末世/仙侠/日常/悬疑）
+ *
+ * @param tone 世界程度（casual/light/standard/hard；空=standard）
  *
  * @param era 时代背景
  *
@@ -46,6 +48,7 @@ import jakarta.validation.constraints.Size;
 public record WorldSettingDTO(
         @NotBlank(message = "世界观名称不能为空") @Size(max = 100, message = "世界观名称最长 100 字符") String name,
         @Size(max = 50, message = "题材最长 50 字符") String genre,
+        @Size(max = 16, message = "世界程度取值非法") String tone,
         @Size(max = 50, message = "时代背景最长 50 字符") String era,
         String geography,
         String factions,

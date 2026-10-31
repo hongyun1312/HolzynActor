@@ -197,16 +197,32 @@ public class LineageService {
      *
      * @param gameSecond 出生时刻
      */
-    public void addParentChild(Long projectId, String parentRef, String childRef, String relation, Long gameSecond) {
+    /**
+     * 追加一条亲子边（父/母 → 子女）。已存在同向同关系的边时跳过。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param parentRef 父或母的 npcRef
+     *
+     * @param childRef 子女 npcRef
+     *
+     * @param relation 关系码（{@code father} / {@code mother}）
+     *
+     * @param gameSecond 出生时刻
+     *
+     * @return true 表示这次真的新增了边（false = 已存在或参数非法被跳过）；
+     *         调用方用它做「实际新增」计数，避免把跳过也算成新增
+     */
+    public boolean addParentChild(Long projectId, String parentRef, String childRef, String relation, Long gameSecond) {
         if (projectId == null || parentRef == null || childRef == null) {
-            return;
+            return false;
         }
         boolean exists = lineageRepository.findByProjectIdOrderByIdAsc(projectId).stream().anyMatch(e ->
                 ActorGrowthLineage.EDGE_PARENT_CHILD.equals(e.getEdgeType())
                         && parentRef.equals(e.getFromRef()) && childRef.equals(e.getToRef())
                         && (relation == null || relation.equals(e.getRelation())));
         if (exists) {
-            return;
+            return false;
         }
         ActorGrowthLineage edge = new ActorGrowthLineage();
         edge.setProjectId(projectId);
@@ -217,6 +233,7 @@ public class LineageService {
         edge.setGameSecond(gameSecond);
         edge.setActive(1);
         lineageRepository.save(edge);
+        return true;
     }
 
     /** 某角色的子女（本人为父母的全部亲子边的 to 端）。 */
@@ -447,7 +464,11 @@ public class LineageService {
                 return "祖母";
             }
             if (spouseOf(projectId, parent).map(ref::equals).orElse(false)) {
-                return parentGender(projectId, parent).map(g -> "男".equals(g) ? "祖母" : "祖父").orElse("祖辈配偶");
+                // 父母的配偶 ≠ 祖辈。改前这里一律标「祖父/祖母」，实测把「父亲 42 岁、继母 35 岁、
+                // 孩子 28 岁」标成了孩子的祖母；正确语义是继母/继父（她是父亲的妻子，
+                // 但没有亲子边证明她是孩子的母亲）。
+                String g = parentGender(projectId, ref).orElse("");
+                return "女".equals(g) ? "继母" : "继父";
             }
         }
         return "亲属";

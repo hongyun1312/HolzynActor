@@ -208,13 +208,15 @@
       </el-form>
     </div>
 
-    <!-- ④ 导入 / 导出（仅项目空间） -->
+    <!-- ④ 世界备份（仅项目空间）：v1.1.2 起导出/导入在世界画廊里做（导出要求世界已关闭） -->
     <div v-if="projectId" class="set-card">
-      <div class="set-card-title">导入 / 导出</div>
-      <div class="set-card-desc">导出为 .holzyn 项目包（全量业务数据 + 可选 API 敏感数据 + 可选密码加密）；导入 .holzyn 包完整还原。</div>
+      <div class="set-card-title">世界备份（导出 / 导入）</div>
+      <div class="set-card-desc">
+        世界以「世界目录」为单位打包成 <code>.holzyn</code>（世界库 + 向量库 + 地图图块 + 清单）。
+        导出要求世界已关闭——请先「返回画廊」再用卡片菜单里的「导出世界」；导入同在该页（会把包作为一个<b>新世界</b>加入，不影响已有世界）。
+      </div>
       <div class="io-ops">
-        <el-button type="primary" @click="openExport"><el-icon><HIcon name="Download" /></el-icon>&nbsp;导出 .holzyn</el-button>
-        <el-button plain @click="openImport"><el-icon><HIcon name="Upload" /></el-icon>&nbsp;导入 .holzyn 包</el-button>
+        <el-button type="primary" @click="goToLibrary"><el-icon><HIcon name="Back" /></el-icon>&nbsp;返回世界画廊</el-button>
       </div>
     </div>
 
@@ -225,61 +227,23 @@
       <el-button type="danger" plain @click="doDeleteProject"><el-icon><HIcon name="Delete" /></el-icon>&nbsp;删除项目</el-button>
     </div>
 
-    <!-- 本地账户填写弹窗（独立弹窗，避免内嵌表单挤占设置页版式；字段与首次引导「我的形象」页一致）
-         固定视口形态（.h-dialog-fit + align-center）：表单很长，之前弹窗整体长到 1368px（720 高窗口里被顶出屏幕，
-         标题与底部按钮都要靠滚动整窗才能看到）。现在弹窗高度钳在视口内、垂直居中，
-         头（标题/关闭）与脚（取消）常驻，只有正文在弹窗内部上下滚动。 -->
+    <!-- 本地账户填写弹窗（独立弹窗，避免内嵌表单挤占设置页版式；字段与首次引导「我的形象」页一致）。
+         尺寸与其它设置弹窗统一：.settings-dialog（同宽同高、正文独立滚动、头脚常驻）；
+         append-to-body 让它逃出设置弹窗正文的 overflow 裁剪；align-center 保证小屏垂直居中。 -->
     <el-dialog
       v-model="accountDialog"
       title="编辑本地账户"
-      width="720px"
+      width="900px"
       align-center
+      append-to-body
       :close-on-click-modal="false"
-      class="h-dialog-fit account-editor-dialog"
+      class="h-dialog settings-dialog account-editor-dialog"
       destroy-on-close
     >
       <div class="ac-dialog-desc">与首次引导「我的形象」页填写一致：基本信息 + NPC 眼中的你 + 玩家 persona 六维 + AI 补充生成。保存后即时生效。</div>
       <LocalAccountForm @saved="onAccountSaved" />
       <template #footer>
         <el-button @click="accountDialog = false">取消</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 导出对话框 -->
-    <el-dialog v-model="exportDialog" :title="`导出 .holzyn · ${infoForm.name || ''}`" width="520px">
-      <el-alert type="info" :closable="false" show-icon
-        title="导出 = 项目基本信息/世界观/角色/对话/知识/记忆/行动/事件/人群/世界时钟/项目级设置 + 可选 API 敏感数据 + 可选密码加密（PBKDF2 + AES-GCM）。"
-        description="默认不携带任何 API 密钥，可安全分享/拷贝；勾选「包含敏感数据」后建议设置密码加密。" />
-      <el-form label-width="150px" style="margin-top: 14px">
-        <el-form-item label="包含 API 敏感数据">
-          <el-switch v-model="exportForm.includeSensitive" />
-        </el-form-item>
-        <el-form-item v-if="exportForm.includeSensitive" label="密码加密（可选）">
-          <el-input v-model="exportForm.password" type="password" show-password placeholder="设置后导入需输入此密码才能恢复 API 配置" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="exportDialog = false">取消</el-button>
-        <el-button type="primary" :loading="exportForm.loading" @click="doExportPackage">导出</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 导入对话框 -->
-    <el-dialog v-model="importDialog" title="导入 .holzyn 项目包" width="520px">
-      <el-alert type="info" :closable="false" show-icon
-        title="导入后将完整还原项目（世界观/角色/对话/知识/记忆/设置）；已导入过的项目（相同 projectUid）会被幂等拦截。" />
-      <el-upload drag :auto-upload="false" :limit="1" accept=".holzyn,.zip" :on-change="onImportFileChange" :on-remove="() => (importForm.file = null)" style="margin-top: 14px">
-        <el-icon class="el-icon--upload"><HIcon name="UploadFilled" /></el-icon>
-        <div class="el-upload__text">拖拽 .holzyn 文件到此处，或 <em>点击选择</em></div>
-      </el-upload>
-      <el-form label-width="90px" style="margin-top: 12px">
-        <el-form-item label="密码（可选）">
-          <el-input v-model="importForm.password" type="password" show-password placeholder="包内含密码加密的 API 配置时填写" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="importDialog = false">取消</el-button>
-        <el-button type="primary" :loading="importForm.loading" :disabled="!importForm.file" @click="doImportPackage">导入项目</el-button>
       </template>
     </el-dialog>
   </div>
@@ -289,7 +253,7 @@
 /**
  * 设置-通用设置。
  * <p>职责：项目/全局双模式通用设置——
- * 项目模式（/project/:id/settings/general）：本地账户 + 主题与外观 + 基本信息 + 世界时钟 + 群聊配置 + 导入/导出 + 危险区；
+ * 项目模式（/world/:id/settings/general）：本地账户 + 主题与外观 + 基本信息 + 世界时钟 + 群聊配置 + 导入/导出 + 危险区；
  * 全局模式（/settings/general，首页顶栏「设置」进入）：仅本地账户 + 主题与外观（无项目覆盖）+ 群聊配置（全局），
  * 并提示项目专属设置在项目空间内配置。</p>
  * <p>数据来源：projects、world-clock、group-chat/config 现有接口；主题配置走本地 localStorage（useTheme）。</p>
@@ -302,10 +266,10 @@ import {
   fetchWorldClock, updateWorldClock,
   fetchGroupChatConfig, saveGroupChatConfig,
   fetchWorldSetting,
-  exportProjectPackage, importProjectPackage,
   fetchWorldEngineConfig, updateWorldEngineConfig
 } from '@/shared/api'
 import { useTheme, THEME_PRESETS } from '@/shared/theme'
+import { leaveToLibrary } from '@/shared/worldSession'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 import LocalAccountForm from '@/shared/components/LocalAccountForm.vue'
 
@@ -454,12 +418,6 @@ const groupReplies = ref(5)
 /** 本地账户填写弹窗（独立弹窗，字段与首次引导「我的形象」页一致） */
 const accountDialog = ref(false)
 
-const exportDialog = ref(false)
-const importDialog = ref(false)
-// 导出/导入表单状态
-const exportForm = reactive({ includeSensitive: false, password: '', loading: false })
-const importForm = reactive({ file: null, password: '', loading: false })
-
 /** 加载全部通用设置数据 */
 async function loadAll() {
   // 全局设置（无项目）仅加载用户级/全局项：群聊配置；项目专属数据由项目空间内设置页承载
@@ -567,52 +525,15 @@ async function saveGroupReplies() {
   } catch (e) { ElMessage.error(e.message || '保存失败') }
 }
 
-/** 打开导出对话框 */
-function openExport() {
-  Object.assign(exportForm, { includeSensitive: false, password: '', loading: false })
-  exportDialog.value = true
-}
-
-/** 打开导入对话框 */
-function openImport() {
-  Object.assign(importForm, { file: null, password: '', loading: false })
-  importDialog.value = true
-}
-
-/** 导入文件选择回调 */
-function onImportFileChange(file) {
-  importForm.file = file.raw
-}
-
-/** 导出 .holzyn 包（下载） */
-async function doExportPackage() {
-  if (!projectId.value) return
-  exportForm.loading = true
-  try {
-    const blob = await exportProjectPackage(projectId.value, exportForm.includeSensitive, exportForm.password || undefined)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${infoForm.name || 'project'}.holzyn`
-    a.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('已导出 .holzyn 项目包')
-    exportDialog.value = false
-  } catch (e) { ElMessage.error(e.message || '导出失败') }
-  finally { exportForm.loading = false }
-}
-
-/** 导入 .holzyn 包（幂等拦截 + 密码可选） */
-async function doImportPackage() {
-  if (!importForm.file) return
-  importForm.loading = true
-  try {
-    const res = await importProjectPackage(importForm.file, importForm.password || undefined)
-    ElMessage.success(`项目「${res.name}」导入成功（角色 ${res.characterCount} 位）`)
-    importDialog.value = false
-    router.replace('/')
-  } catch (e) { ElMessage.error(e.message || '导入失败') }
-  finally { importForm.loading = false }
+/**
+ * 回到世界画廊（导出/导入都在那里做：导出要求世界已关闭，所以本页不能直接导）。
+ *
+ * <p>走 {@link leaveToLibrary}：它会先 {@code POST /close} 压盘当前世界再跳，
+ * 直接从设置页 `router.push('/')` 会让世界保持挂载——世界画廊里那张卡片会显示"运行中"，
+ * 且用户再点"继续"时后端会回 409 WORLD_BUSY。</p>
+ */
+function goToLibrary() {
+  leaveToLibrary(router)
 }
 
 /** 删除项目（二次确认，软删）后返回画廊 */

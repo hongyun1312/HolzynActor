@@ -994,10 +994,10 @@ defineExpose({
 .topo-tip .tw-row { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 .topo-tip .tw-k { color: var(--text-tertiary); flex-shrink: 0; }
 .topo-tip .tw-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; align-self: center; }
-.topo-tip .tw-note { color: var(--text-secondary); font-size: 11px; margin-top: 3px; }
+.topo-tip .tw-note { color: var(--text-secondary); font-size: 12.5px; margin-top: 3px; }
 .topo-tip .tw-tag {
   margin-left: 6px;
-  font-size: 10px;
+  font-size: 12px;
   color: #fff;
   background: var(--accent);
   border-radius: 3px;

@@ -20,11 +20,11 @@ package com.holzyn.actor.domain.growth.evolution;
 
 import com.holzyn.actor.ai.AiChatRequest;
 import com.holzyn.actor.ai.AiChatResult;
-import com.holzyn.actor.ai.nanojev.NanoJevQuestion;
-import com.holzyn.actor.ai.nanojev.NanoJevState;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionTemplates;
+import com.holzyn.actor.ai.decision.DecisionQuestion;
+import com.holzyn.actor.ai.decision.DecisionState;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
+import com.holzyn.actor.ai.decision.gate.DecisionTemplates;
 import com.holzyn.actor.ai.spring.AiSpringChatGateway;
 import com.holzyn.actor.common.NpcRefs;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
@@ -102,11 +102,11 @@ public class PersonalityShiftService {
     private final WorldSandboxSseHub sandboxSseHub;
 
     /**
-     * 人格偏移判定门（persona_shift 场景——NanoJev 初判[证据强度 score +
+     * 人格偏移判定门（persona_shift 场景——决策模型 初判[证据强度 score +
      * 偏移方向 choice，分布尖锐才采纳否则升 Qwen]；字段注入保持构造器不变，null=未装配走 Qwen 现状）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private NanoJevDecisionGate nanoJevDecisionGate;
+    private DecisionGate decisionGate;
 
     /** qid：证据强度（persona_shift 场景，score） */
     public static final String QID_SHIFT_STRENGTH = "shift_strength";
@@ -222,20 +222,20 @@ public class PersonalityShiftService {
                 out.put("skipped", "evidence_insufficient");
                 return out;
             }
-            // ② AI 判定偏移（：persona_shift 场景 NanoJev 初判——证据强度 score + 方向 choice
+            // ② AI 判定偏移（：persona_shift 场景 决策模型 初判——证据强度 score + 方向 choice
             // 一次前向；分布尖锐才采纳（含采样），否则升 Qwen 深度判定；未启用/失败同样升 Qwen）
-            NanoJevShiftResult nanoJev = nanoJevShiftAssess(projectId, ch, collect, gameSecond);
+            DecisionShiftResult decision = decisionShiftAssess(projectId, ch, collect, gameSecond);
             List<ShiftParse.ShiftItem> items;
-            if (nanoJev == null) {
+            if (decision == null) {
                 items = aiAssess(projectId, ch, collect, gameSecond);
             } else {
-                items = nanoJev.items();
+                items = decision.items();
             }
             if (items.isEmpty()) {
-                if (nanoJev != null) {
-                    // NanoJev 明确判定「证据不足/方向不明」→ 正常零偏移留痕（评估成功，不记失败指标）
+                if (decision != null) {
+                    // 决策模型 明确判定「证据不足/方向不明」→ 正常零偏移留痕（评估成功，不记失败指标）
                     writeProgrammaticNoop(projectId, ch, gameSecond, trigger, collect,
-                            "NanoJev 判定证据不足以支持偏移或方向不明，本轮不改变人格（零偏移留痕）");
+                            "决策模型 判定证据不足以支持偏移或方向不明，本轮不改变人格（零偏移留痕）");
                 } else {
                     // AI 失败/无有效偏移 → 程序化兜底：本轮零偏移（留痕 + 指标）
                     growthMetrics.recordShiftAssessFail();
@@ -243,7 +243,7 @@ public class PersonalityShiftService {
                             "AI 评估失败或无有效偏移，本轮不改变人格（程序化兜底）");
                 }
                 out.put("shifts", List.of());
-                out.put("fallback", nanoJev != null ? "nanojev_no_shift" : "ai_empty");
+                out.put("fallback", decision != null ? "decision_no_shift" : "ai_empty");
                 return out;
             }
             // ③ 程序化截断 + 写回
@@ -308,11 +308,11 @@ public class PersonalityShiftService {
     }
 
     /** persona_shift 初判结果：null=未采纳（升 Qwen）；非 null=采纳（items 可空=明确判定无偏移）。 */
-    private record NanoJevShiftResult(List<ShiftParse.ShiftItem> items) {
+    private record DecisionShiftResult(List<ShiftParse.ShiftItem> items) {
     }
 
     /**
-     * persona_shift 初判（NanoJev 判定层，含 AI 调用，禁止 @Transactional 栈内执行）。
+     * persona_shift 初判（决策模型 判定层，含 AI 调用，禁止 @Transactional 栈内执行）。
      * <p>同 state 一次前向：证据强度（score 4 档）+ 偏移方向（choice 正/负/不明）。
      * 门控（{@code scenes.persona-shift}，默认开、escalation top1-prob=0.6）：分布不尖锐 →
      * 升级 Qwen 同题重问；采纳后按强度×方向程序化产出偏移条目（OCEAN 外向/宜人/神经质三维，
@@ -320,47 +320,47 @@ public class PersonalityShiftService {
      *
      * @return null=未启用/升级/失败（调用方升 Qwen）；空列表=采纳且明确判定无偏移；非空=采纳偏移条目
      */
-    private NanoJevShiftResult nanoJevShiftAssess(Long projectId, ActorCharacter ch,
+    private DecisionShiftResult decisionShiftAssess(Long projectId, ActorCharacter ch,
                                                   ShiftEvidenceCollector.CollectResult collect,
                                                   Long gameSecond) {
-        if (nanoJevDecisionGate == null
-                || !nanoJevDecisionGate.isEnabled(NanoJevDecisionScenes.PERSONA_SHIFT)) {
+        if (decisionGate == null
+                || !decisionGate.isEnabled(DecisionScenes.PERSONA_SHIFT)) {
             return null;
         }
-        Map<String, NanoJevQuestion> questions = NanoJevState.newQuestions();
-        questions.put(QID_SHIFT_STRENGTH, NanoJevDecisionTemplates.personaShiftEvidenceQuestion());
-        questions.put(QID_SHIFT_DIRECTION, NanoJevDecisionTemplates.personaShiftDirectionQuestion());
-        NanoJevState state = NanoJevState.text("persona_shift",
+        Map<String, DecisionQuestion> questions = DecisionState.newQuestions();
+        questions.put(QID_SHIFT_STRENGTH, DecisionTemplates.personaShiftEvidenceQuestion());
+        questions.put(QID_SHIFT_DIRECTION, DecisionTemplates.personaShiftDirectionQuestion());
+        DecisionState state = DecisionState.text("persona_shift",
                 buildShiftStateText(ch, collect), questions);
-        Map<String, Object> out = nanoJevDecisionGate.mixedDecisions(projectId, ch.getId(),
-                NanoJevDecisionScenes.PERSONA_SHIFT, state,
-                Map.of(QID_SHIFT_STRENGTH, NanoJevQuestion.TYPE_SCORE,
-                        QID_SHIFT_DIRECTION, NanoJevQuestion.TYPE_CHOICE));
+        Map<String, Object> out = decisionGate.mixedDecisions(projectId, ch.getId(),
+                DecisionScenes.PERSONA_SHIFT, state,
+                Map.of(QID_SHIFT_STRENGTH, DecisionQuestion.TYPE_SCORE,
+                        QID_SHIFT_DIRECTION, DecisionQuestion.TYPE_CHOICE));
         Object strengthRaw = out.get(QID_SHIFT_STRENGTH);
         Object dirRaw = out.get(QID_SHIFT_DIRECTION);
-        if (!(strengthRaw instanceof NanoJevDecisionGate.ScoreOutcome so) || !so.adopted()) {
+        if (!(strengthRaw instanceof DecisionGate.ScoreOutcome so) || !so.adopted()) {
             return null; // 升级/失败/未启用 → 升 Qwen
         }
-        if (!(dirRaw instanceof NanoJevDecisionGate.ChoiceOutcome co) || !co.adopted()) {
+        if (!(dirRaw instanceof DecisionGate.ChoiceOutcome co) || !co.adopted()) {
             return null;
         }
         // 采纳（分布尖锐）：证据强度 < 中 或 方向不明 → 明确判定本轮无偏移（零 AI 完成评估）
         if (so.level() < 2 || co.chosen() == null || "unclear".equals(co.chosen())) {
-            log.info("[人格演化] NanoJev 判定无偏移：ref={} 强度档={} 方向={}", ch.npcRef(), so.level(), co.chosen());
-            return new NanoJevShiftResult(List.of());
+            log.info("[人格演化] 决策模型 判定无偏移：ref={} 强度档={} 方向={}", ch.npcRef(), so.level(), co.chosen());
+            return new DecisionShiftResult(List.of());
         }
         double mag = so.level() >= 3 ? SHIFT_MAG_LEVEL3 : SHIFT_MAG_LEVEL2;
         boolean positive = "positive".equals(co.chosen());
-        String why = "NanoJev 判定证据" + (so.level() >= 3 ? "强" : "中")
+        String why = "决策模型 判定证据" + (so.level() >= 3 ? "强" : "中")
                 + "、方向" + (positive ? "正向" : "负向") + "（persona_shift 场景）";
         // 三维签名：正向=外向/宜人 ↑、神经质 ↓；负向=镜像（与现实人格漂移的维度相关一致）
         List<ShiftParse.ShiftItem> items = List.of(
                 new ShiftParse.ShiftItem("ocean", "extraversion", positive ? mag : -mag, why),
                 new ShiftParse.ShiftItem("ocean", "agreeableness", positive ? mag : -mag, why),
                 new ShiftParse.ShiftItem("ocean", "neuroticism", positive ? -mag : mag, why));
-        log.info("[人格演化] NanoJev 采纳偏移：ref={} 强度档={} 方向={} 幅度={}", ch.npcRef(),
+        log.info("[人格演化] 决策模型 采纳偏移：ref={} 强度档={} 方向={} 幅度={}", ch.npcRef(),
                 so.level(), co.chosen(), mag);
-        return new NanoJevShiftResult(items);
+        return new DecisionShiftResult(items);
     }
 
     /** persona_shift 初判情境文本（自包含：身份/阶段/当前人格/价值权重/证据集）。 */

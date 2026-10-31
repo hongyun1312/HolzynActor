@@ -45,6 +45,14 @@ public class MemoryTierMigrationRunner implements ApplicationRunner {
 
     private final JdbcTemplate jdbcTemplate;
 
+    /**
+     * 世界闸门（V1.1.2-beta.1 M4）：本 Runner 会对 {@code actor_memory} 做 DDL/DML（含 DROP COLUMN），
+     * 而 {@code actor_memory} 是世界表。未挂载时 {@code hasColumn} 恰好返回 false 从而早退，
+     * 但那依赖"信息模式里查不到表"这种副作用；明确挂闸门更安全，也省一次无意义的查询。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.WorldGate worldGate;
+
     public MemoryTierMigrationRunner(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -54,6 +62,15 @@ public class MemoryTierMigrationRunner implements ApplicationRunner {
      */
     @Override
     public void run(ApplicationArguments args) {
+        if (worldGate == null) {
+            migrateNow();
+        } else {
+            worldGate.tryMaintenance("MemoryTierMigrationRunner.run", this::migrateNow);
+        }
+    }
+
+    /** 迁移实体（世界未挂载时不会进入） */
+    private void migrateNow() {
         try {
             migrate();
         } catch (Exception e) {

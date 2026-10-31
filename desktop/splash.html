@@ -108,7 +108,16 @@
   }
   .fill {
     position: relative; height: 100%; width: 5%; border-radius: 999px;
-    background: linear-gradient(90deg, var(--brand-a), var(--brand-b));
+    /* 底色渐变 + 流光做成两个背景图层：背景按元素盒子裁切，
+       所以流光只会从进度条自身左端进入、在当前进度右端离开，
+       既不会跑到闪屏最左侧，也不会越过进度往外甩。 */
+    background-image:
+      linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.38), transparent),
+      linear-gradient(90deg, var(--brand-a), var(--brand-b));
+    background-repeat: no-repeat;
+    background-size: 42% 100%, 100% 100%;
+    background-position: -100% 0, 0 0;
+    animation: fill-sheen 1.5s linear infinite;
     transition: width .38s cubic-bezier(.3, .6, .3, 1);
   }
   /* 进度条前缘光点 */
@@ -118,12 +127,6 @@
     background: rgba(255, 255, 255, 0.9);
     box-shadow: 0 0 10px 2px rgba(140, 160, 255, 0.7);
   }
-  /* 细流光 */
-  .fill::before {
-    content: ''; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
-    animation: shimmer 1.5s linear infinite;
-  }
   .meta-row {
     margin-top: 13px;
     display: flex; justify-content: space-between; align-items: center;
@@ -131,9 +134,12 @@
   }
   .ver { font-family: Consolas, "Courier New", monospace; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes shimmer { from { transform: translateX(-120%); } to { transform: translateX(120%); } }
+  @keyframes fill-sheen {
+    from { background-position: -100% 0, 0 0; }
+    to   { background-position: 200% 0, 0 0; }
+  }
   body.done .spinner { display: none; }
-  body.done .fill::before { display: none; }
+  body.done .fill { animation: none; }
 
   /* 错误态：启动失败 → 弹窗内展示错误 + 操作按钮 */
   .error {
@@ -200,7 +206,7 @@
     <div class="track"><div class="fill" id="fill"></div></div>
     <div class="meta-row">
       <span class="copy">© 2026 HONGYUN</span>
-      <span class="ver" id="ver">Version 1.1.1-beta.1</span>
+      <span class="ver" id="ver">Version 1.1.2-beta.1</span>
     </div>
   </footer>
 

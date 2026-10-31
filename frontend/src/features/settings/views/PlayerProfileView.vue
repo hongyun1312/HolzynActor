@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="settings-stack">
+  <div class="settings-stack project-col">
     <PageHeader
       title="玩家档案"
       :desc="projectId
@@ -139,13 +139,13 @@
 
 <script setup>
 /**
- * 玩家档案页（M3，双态共用：全局 /settings/player-profile + 对谈界面 /project/:id/dialogue/player-profile）。
+ * 玩家档案页（M3，双态共用：全局 /settings/player-profile + 对谈界面 /world/:id/dialogue/player-profile）。
  * <p>职责：① 编辑玩家 persona 六维（身份/背景/性格/说话风格/目标/能力，与特殊 NPC 档案同构裁剪、
  * 无记忆/状态/行动）——注入对谈上下文「关于{玩家}」段；② 项目内按角色编辑「与我的关系」设定
  * （过往/身份关系/态度，存玩家档案）与好感/信任/阶段/备注基线（存本项目关系行）。</p>
- * <p>数据：/api/player-profile（用户级）+ /api/projects/{id}/player-profile/relations（项目级）。</p>
+ * <p>数据：/api/player-profile（用户级）+ /api/worlds/{id}/player-profile/relations（项目级）。</p>
  * <p>P0-1：项目态入口从「设置域」移入「对谈」独立界面（玩家档案属对谈相关功能）；
- * 旧路由 /project/:id/settings/player-profile 仍保留供深链，两路由复用本组件。</p>
+ * 旧路由 /world/:id/settings/player-profile 仍保留供深链，两路由复用本组件。</p>
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'

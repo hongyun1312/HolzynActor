@@ -37,7 +37,7 @@ import java.util.Map;
  * <li>空间内选择=软引导 + 硬禁止，可配硬约束开关 → {@code space.hard-constraint}；</li>
  * <li>出生时刻反推=时钟基准 + 档案提取 + 默认兜底 → {@link #backfill}；</li>
  * <li>门控表=建表 + 代码 seed、表优先 → {@link #gateTable};</li>
- * <li>决策频率=全 20 人每游戏小时（NanoJev 后续提速）→ {@code dispatch.all-npc-hourly}；</li>
+ * <li>决策频率=全 20 人每游戏小时（决策模型 后续提速）→ {@code dispatch.all-npc-hourly}；</li>
  * <li>护栏三条（stage/space/knowledge_bound）→ {@link #guardrails}；</li>
  * <li>机能曲线完整接入状态衰减 → {@link #aging}。</li>
  * </ul>

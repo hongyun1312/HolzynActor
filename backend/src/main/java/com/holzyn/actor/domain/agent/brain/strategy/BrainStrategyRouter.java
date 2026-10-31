@@ -39,9 +39,9 @@ import java.util.Optional;
  * <p><b>链组成</b>（生产装配）：</p>
  * <ul>
  * <li>SPECIAL + programmatic 档 → 危险强制 → 程序化兜底（0 AI，生理仍生效）；</li>
- * <li>SPECIAL + full/light 档 → 危险强制 → 空间选择（NanoJev 快通道）→
+ * <li>SPECIAL + full/light 档 → 危险强制 → 空间选择（决策模型 快通道）→
  * AI 深思（System 2）→ 程序化兜底；</li>
- * <li>COMMON → 危险强制 → 快选择（NanoJev+AI 建议）→ 概率化（链空由调用方
+ * <li>COMMON → 危险强制 → 快选择（决策模型+AI 建议）→ 概率化（链空由调用方
  * 作息状态机兜底）。</li>
  * </ul>
  * <p><b>可插拔</b>：新增策略 = 实现 {@link BrainStrategy} 注册为 Spring Bean

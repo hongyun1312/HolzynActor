@@ -12,7 +12,8 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <aside class="dialogue-session-list">
+  <!-- data-tour：新手引导「对谈：左栏是会话列表」的聚光灯目标 -->
+  <aside class="dialogue-session-list" data-tour="dlg-sessions">
     <!-- 头部：新建对谈 -->
     <div class="dsl-header">
       <span class="dsl-title">对谈会话</span>

@@ -30,8 +30,8 @@ import java.util.Optional;
 /**
  * 决策策略链·空间候选选择（System 1 快通道，priority=80，SPECIAL）。
  * <p>核心角色「此刻挑一个」的高频快判：空间 possible_actions + 通用三项
- * （+社交聚集/生理低值注入候选）由 NanoJev space_decision 亚秒选择
- * （40s→亚秒 ≈40×）——Qwen 只负责低频生成空间（语义质量），NanoJev 做
+ * （+社交聚集/生理低值注入候选）由 决策模型 space_decision 亚秒选择
+ * （40s→亚秒 ≈40×）——Qwen 只负责低频生成空间（语义质量），决策模型 做
  * 快选择（差异=真人随机波动）；判定失败/未启用/空间无效 → 链继续（AI 深思）。</p>
  * <p><b>行为兼容</b>：内部逻辑 = 既有 {@code DecisionService.trySpaceDecision}
  * 原样委托（含决策前空间保障），不新增/改变决策行为。</p>

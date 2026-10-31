@@ -73,7 +73,7 @@ public class BrainTierService {
 
     /**
      * 注意力语义通道跟踪：npcRef → {建议档位, 生效至游戏秒}（，：
-     * 规则硬基线 + NanoJev 双语义通道——注意力只做语义调整，规则（重要度/事件/同地/关系/相机）
+     * 规则硬基线 + 决策模型 双语义通道——注意力只做语义调整，规则（重要度/事件/同地/关系/相机）
      * 仍是硬基线；语义升档/降档带保持窗口防每 tick 抖动）。
      */
     private final Map<String, SemanticTrack> semantic = new ConcurrentHashMap<>();
@@ -224,7 +224,7 @@ public class BrainTierService {
      *
      * @param npcRef 统一角色引用 npc:{id}
      *
-     * @param level 注意力档位（0=无 / 1=低 / 2=中 / 3=高；NanoJev score 档位）
+     * @param level 注意力档位（0=无 / 1=低 / 2=中 / 3=高；决策模型 score 档位）
      *
      * @param gameSecond 当前世界时刻（可空=不设置语义窗口，仅清痕迹）
      */

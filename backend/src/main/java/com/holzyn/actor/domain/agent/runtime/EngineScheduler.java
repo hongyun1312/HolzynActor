@@ -25,8 +25,10 @@ import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
 import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
 import com.holzyn.actor.domain.world.entity.ActorWorldClock;
 import com.holzyn.actor.domain.world.repository.ActorWorldClockRepository;
+import com.holzyn.actor.domain.worldstore.WorldGate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -86,6 +88,29 @@ public class EngineScheduler {
     private boolean actionExecuteEnabled;
 
     /**
+     * 世界闸门（V1.1.2-beta.1 M4）：世界未挂载时两个定时入口必须直接返回。
+     *
+     * <p>为什么不能靠"路由会回落到目录库所以读不到东西"：未挂载时默认路由就是目录库，
+     * 而 {@code actor_project} 在目录库里是<b>2 行世界索引</b>，
+     * {@code actor_action_plan} 这类两库同构表也会被当成世界表去扫——那就不是"读不到"，
+     * 而是"读到错的东西还继续执行"。</p>
+     *
+     * <p>为什么字段注入且 {@code required=false}：AGENTS §8.1.2 禁止改既有服务构造器；
+     * 单测直接 {@code new} 本壳时未装配 → {@link #gated} 退化为直接执行，既有断言口径不变。</p>
+     */
+    @Autowired(required = false)
+    private WorldGate worldGate;
+
+    /** 经世界闸门执行；未装配闸门（单测）时直接执行 */
+    private void gated(String name, Runnable body) {
+        if (worldGate == null) {
+            body.run();
+        } else {
+            worldGate.tryMaintenance(name, body);
+        }
+    }
+
+    /**
      * 定时扫描并推进「持续运行」的项目（原 WorldSimulationJob； 起默认每 12.5 真实秒
      * = 5 游戏分钟@rate=24，可配 scan-interval-ms）。暂停的项目由 WorldEngine 内部统一跳过。
      * <p>⚠️ 关键配套（世界演化与游戏时间系统，）：原默认 180000（3 真实分钟）在
@@ -97,7 +122,7 @@ public class EngineScheduler {
         if (!worldScanEnabled) {
             return;
         }
-        worldEngine.scanAndAdvance();
+        gated("EngineScheduler.worldScan", worldEngine::scanAndAdvance);
     }
 
     /**
@@ -109,6 +134,11 @@ public class EngineScheduler {
         if (!actionExecuteEnabled) {
             return;
         }
+        gated("EngineScheduler.runDuePlans", this::runDuePlansNow);
+    }
+
+    /** 到期计划执行体（经世界闸门之后才允许扫库） */
+    private void runDuePlansNow() {
         try {
             List<ActorActionPlan> due = planRepository.findByStatusAndPlannedTimeLessThanEqual("planned", LocalDateTime.now());
             for (ActorActionPlan plan : due) {

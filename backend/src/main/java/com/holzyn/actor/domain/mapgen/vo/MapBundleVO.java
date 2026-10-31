@@ -57,6 +57,17 @@ public class MapBundleVO {
     /** 环境快照（季节/天气/潮汐/昼夜，按世界时钟实时算） */
     private Map<String, Object> ambient;
 
+    /** 世界时钟快照（gameSecond/paused/rate；前端据此推进角色，暂停即冻结） */
+    private Map<String, Object> clock;
+
+    /**
+     * 导航缩略（128² 水域/可建位图，base64）。
+     *
+     * <p>只给前端做「拖到这格会落水」的即时红绿提示；真正的合法性判定在服务端
+     * （{@code LayoutEditValidator}）。给全分辨率既浪费带宽，也会让前端误以为自己有最终裁决权。</p>
+     */
+    private Map<String, Object> navGrid;
+
     /** 角色（家 + 一天的日程锦点；前端按世界时钟让角色在图上走动） */
     private List<CharacterVO> characters;
 
@@ -96,6 +107,15 @@ public class MapBundleVO {
 
         /** 当前是否在室内 */
         private Boolean indoor;
+
+        /** 朝向（度，0=北；服务端权威，前端画箭头） */
+        private Double heading;
+
+        /** 状态：static / walking / working（服务端权威） */
+        private String status;
+
+        /** 在途轨迹 ID（静止时为 null；前端可按折线插值） */
+        private Long pathId;
 
         /** 一天的日程段 */
         private List<RoutineVO> segments;

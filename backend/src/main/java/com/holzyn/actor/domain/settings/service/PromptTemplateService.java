@@ -299,6 +299,13 @@ public class PromptTemplateService implements ApplicationRunner {
     public static final String CODE_STAGE_BEHAVIOR = "growth_stage_behavior";
 
     /**
+     * 轨道：开局家族·成长档案精修（scene=growth_family_profile_infer；
+     * 温度 0.2 / 上限 900——从既有身份/档案里读出每个角色的性别与年龄，输出
+     * {@code {"people":[{"name","gender","age"}]}}；批量覆盖一批角色，故上限留足）
+     */
+    public static final String CODE_FAMILY_PROFILE_INFER = "growth_family_profile_infer";
+
+    /**
      * 自省-行为一致性校验（自省漂移检测·候选 A）：判断角色最近反思与本次决策是否一致。
      */
     public static final String CODE_SELF_CHECK = "self_check";
@@ -340,6 +347,15 @@ public class PromptTemplateService implements ApplicationRunner {
      * 温度 0.4 / 上限 900（300-500 汉字 ≈ 450-750 token 给足余量）。
      */
     public static final String CODE_WORLD_COMMON_KNOWLEDGE = "world_common_knowledge";
+
+    /**
+     * 世界名与世界简介建议（world_meta_suggest）：根据已生成的世界观设定，产出一句世界名
+     * （6-14 字）与一段世界简介（60-100 字），用于世界画廊卡片展示；
+     * 输出 {"name":"…","summary":"…"}（SCHEMA_JSON）；scene=world_meta_suggest；温度 0.8 / 上限 300。
+     * <p>本模板与 {@code WorldMetaSuggestService} 的内联 Prompt 配套维护（服务内联组装、
+     * 运行时零模板库依赖，与 {@code player_profile_gen} 同模式），此处为版本留痕与设置页可见。</p>
+     */
+    public static final String CODE_WORLD_META_SUGGEST = "world_meta_suggest";
 
     /**
      * 记忆-知识桥接判定（P1 ②-3，knowledge_bridge）：反思洞察 → 「可复用事实型知识候选」
@@ -397,19 +413,19 @@ public class PromptTemplateService implements ApplicationRunner {
 
     /**
      * 轨道：心动判定（SCHEMA_JSON：{attracted,confidence,reason}；
-     * scene=growth_romance_decision；温度 0.4 / 上限 300；NanoJev boolean question 同构）
+     * scene=growth_romance_decision；温度 0.4 / 上限 300；决策模型 boolean question 同构）
      */
     public static final String CODE_ROMANCE_DECISION = "growth_romance_decision";
 
     /**
      * 轨道：求婚判定（SCHEMA_JSON：{propose,target_ref,reason}；
-     * scene=growth_proposal_decision；温度 0.4 / 上限 300；NanoJev choice question 同构）
+     * scene=growth_proposal_decision；温度 0.4 / 上限 300；决策模型 choice question 同构）
      */
     public static final String CODE_PROPOSAL_DECISION = "growth_proposal_decision";
 
     /**
      * 轨道：生育意愿判定（SCHEMA_JSON：{want,reason}；
-     * scene=growth_fertility_decision；温度 0.4 / 上限 300；NanoJev score/boolean question 同构）
+     * scene=growth_fertility_decision；温度 0.4 / 上限 300；决策模型 score/boolean question 同构）
      */
     public static final String CODE_FERTILITY_DECISION = "growth_fertility_decision";
 
@@ -426,10 +442,10 @@ public class PromptTemplateService implements ApplicationRunner {
     public static final String CODE_WEDDING_NARRATIVE = "growth_wedding_narrative";
 
     /**
-     * N 轨道：NanoJev A/B 判定合理性评分（LLM-as-Judge 四维 1-5 绝对评分——
-     * 一致性/合理性/情境利用/自然度；复用 JudgeChatClient 独立云端模型；scene=nanojev_ab_judge）
+     * N 轨道：决策模型 A/B 判定合理性评分（LLM-as-Judge 四维 1-5 绝对评分——
+     * 一致性/合理性/情境利用/自然度；复用 JudgeChatClient 独立云端模型；scene=decision_ab_judge）
      */
-    public static final String CODE_NANOJEV_AB_JUDGE = "nanojev_ab_judge";
+    public static final String CODE_DECISION_AB_JUDGE = "decision_ab_judge";
 
     /**
      * 项目级 AI 助手·工具决策（assistant_tool，jsonMode 结构化输出）——
@@ -543,6 +559,7 @@ public class PromptTemplateService implements ApplicationRunner {
             Map.entry(CODE_STAGE_TRANSITION_NARRATIVE, "relation"),
             Map.entry(CODE_DEATH_CHRONICLE, "relation"),
             Map.entry(CODE_STAGE_BEHAVIOR, "relation"),
+            Map.entry(CODE_FAMILY_PROFILE_INFER, "relation"),
             // 世界观生成
             Map.entry(CODE_WORLDGEN_CORELAWS, "worldgen"),
             Map.entry(CODE_WORLDGEN_SPACETIME, "worldgen"),
@@ -573,6 +590,7 @@ public class PromptTemplateService implements ApplicationRunner {
             Map.entry(CODE_MESO_DIRECTIVE, "world"),
             Map.entry(CODE_MACRO_EMERGENCE, "world"),
             Map.entry(CODE_WORLD_COMMON_KNOWLEDGE, "world"),
+            Map.entry(CODE_WORLD_META_SUGGEST, "world"),
             Map.entry(CODE_WORLD_OUTLOOK, "world"),
             Map.entry(CODE_WORLD_TIME_INFER, "world"),
             // 行动与计划
@@ -610,7 +628,7 @@ public class PromptTemplateService implements ApplicationRunner {
             Map.entry(CODE_SELF_EFFICACY_UPDATE, "judge"),
             Map.entry(CODE_MUSE_STRATEGY_CHECK, "judge"),
             Map.entry(CODE_BEHAVIOR_JUDGE, "judge"),
-            Map.entry(CODE_NANOJEV_AB_JUDGE, "judge"),
+            Map.entry(CODE_DECISION_AB_JUDGE, "judge"),
             // 对话交流
             Map.entry(CODE_DIALOG, "dialogue"),
             Map.entry(CODE_GROUP_REPLY, "dialogue"),
@@ -3195,15 +3213,15 @@ public class PromptTemplateService implements ApplicationRunner {
                 """, "你是严谨的行为质量评估员：只输出严格 JSON；绝对评分 1-5；先逐维证据再评分；不受文本长度与格式影响。"));
 
         /**
-         * N 轨道：NanoJev A/B 判定合理性评分——定制四维 1-5 绝对评分
+         * N 轨道：决策模型 A/B 判定合理性评分——定制四维 1-5 绝对评分
          * +
          * 偏见规避协议；
          * judge=独立云端模型（JudgeChatClient，与生成模型不同家族）
          */
-        map.put(CODE_NANOJEV_AB_JUDGE, new BuiltinDef("NanoJev 判定合理性评分",
+        map.put(CODE_DECISION_AB_JUDGE, new BuiltinDef("决策模型 判定合理性评分",
                 """
                 —— 评分任务 ——
-                请对下面这条【NanoJev 判定样本】按四维 rubric 逐维独立评分：每维先给出证据（引用样本中的具体内容），
+                请对下面这条【决策模型 判定样本】按四维 rubric 逐维独立评分：每维先给出证据（引用样本中的具体内容），
                 再给 1-5 分；最后给出总分与一句话总评。
 
                 —— 四维 rubric（1-5 绝对评分锚点） ——
@@ -3233,8 +3251,8 @@ public class PromptTemplateService implements ApplicationRunner {
                 —— 判定题面 ——
                 {{question}}
 
-                —— NanoJev 判定结果 ——
-                {{nanojev_answer}}
+                —— 决策模型 判定结果 ——
+                {{decision_answer}}
                 """, "你是严谨的判定质量评估员：只输出严格 JSON；绝对评分 1-5；先逐维证据再评分；不受文本长度与格式影响。"));
 
         // ==================== 轨道：全生命周期阶段机 + 此刻可发生空间（新建） ====================
@@ -3341,6 +3359,28 @@ public class PromptTemplateService implements ApplicationRunner {
                 —— 离世原因 ——
                 {{reason}}
                 """, "你是青禾村式的乡土世界叙事者，用朴素真切的中文口吻讲述，只输出叙事正文。"));
+
+        // ③-③ 开局家族·成长档案精修：SCHEMA_JSON {"people":[{name,gender,age}]}。
+        // 场景：老世界/中断的世界里大量角色 gender/age 为空，谱系系统因此永远无法起婚育。
+        // 铁律=只从「既有身份与档案」里读出事实，不编造；姓名/称谓不够时按 AI 合理推定并说明。
+        map.put(CODE_FAMILY_PROFILE_INFER, new BuiltinDef("开局家族档案精修",
+                """
+                你是角色档案整理员。下面是一批角色的「姓名 / 身份 / 职业 / 所属 / 档案摘要」，
+                请为每个角色判定【性别】与【年龄】，只输出 JSON，不要任何解释文字。
+
+                —— 判定规则 ——
+                1. 性别只允许「男」或「女」。优先依据称谓（老板/老汉/婶子…）、身份词（母亲/父亲…）、
+                   姓名用字与档案里明确提到的事实；证据不足时按名字与文化习惯合理推定，但不要留空。
+                2. 年龄给整数（0-90），依据职业与身份（学徒=十几岁、掌柜/大夫=四十上下、
+                   老汉/族长/婆婆=六七十）；档案明确写了年龄就用档案里的数字。
+                3. 同一个角色只输出一次，姓名必须与下面清单里的姓名逐字一致。
+
+                —— 角色清单 ——
+                {{people}}
+
+                —— 输出格式 ——
+                {"people":[{"name":"姓名","gender":"男","age":34}]}
+                """, "你是角色档案整理员，只做客观整理与合理推定，只输出 JSON。"));
 
         // ③-② 发育阶段行为润色：正文 PLAIN_TEXT 一句话。stage_gating 策略把程序化行为骨架
         // （阶段×时段候选池）展开为带个人化细节的行动文本——同一骨架不同的人/不同的时刻
@@ -3957,7 +3997,7 @@ public class PromptTemplateService implements ApplicationRunner {
         // ==================== 轨道：遗传婚育谱系（新建） ====================
         // ⑤ 心动判定：SCHEMA_JSON {attracted,confidence,reason}。输入=本人 + 候选对象 + 互动证据。
         // 铁律：宁缺毋滥（证据不足不动心）；判定依据只能来自互动证据，禁止脑补身份/财富/外貌；
-        // 契约与 NanoJev boolean question 同构（N 轨道替换实现零重写主流程）。
+        // 契约与 决策模型 boolean question 同构（N 轨道替换实现零重写主流程）。
         map.put(CODE_ROMANCE_DECISION, new BuiltinDef("心动判定",
                 """
                 你是这个世界的观察者，深谙人情世故。请判断角色 {{npc_name}} 是否对 {{partner_name}} 产生了浪漫兴趣（动心），
@@ -4234,6 +4274,30 @@ public class PromptTemplateService implements ApplicationRunner {
                 3. memory_points 只写明确发生的与玩家的活动/共识/承诺（每条 ≤60 字，1~3 条），宁缺毋滥；
                 4. 无实质变化时 relations 可为空数组；只输出 JSON，不要任何其他文字。
                 """, "你是对谈沉淀记录员：克制地判定每位对谈角色的关系变化与记忆要点，只输出 JSON。"));
+        // world_meta_suggest（世界名 + 世界简介）：创意发散/手动建世界后，从已生成的世界观
+        // 反推「画廊卡片」要显示的两个字段——名字要有辨识度、简介要有张力，都受字数硬约束
+        // （名字 6-14 字、简介 60-100 字），否则画廊卡片会被长文本撑破。
+        // 运行时由 WorldMetaSuggestService 内联组装（玩家档案同模式），本模板为版本留痕与设置页可见。
+        map.put(CODE_WORLD_META_SUGGEST, new BuiltinDef("世界名与简介建议",
+                """
+                你是世界命名师：为已经生成完毕的世界取一个能被记住的名字，并写一段画廊简介。
+                【世界设定】
+                题材：{{genre}}
+                时代：{{era}}
+                地理：{{geography}}
+                势力：{{factions}}
+                规则：{{magic_system}}
+                文化：{{culture}}
+                历史：{{history}}
+                补充：{{free_text}}
+                【任务】
+                只输出一个 JSON 对象，键为 name 与 summary：
+                {"name":"世界名","summary":"世界简介"}
+                约束：
+                1. name 为 6-14 个汉字，可带一个短副题（如「雾海纪·浮舟」），不得堆砌标点、不得照抄题材类型词；
+                2. summary 为 60-100 个汉字，一句话说清「这是什么世界 + 最独特的冲突或张力」，用于画廊卡片，不分点、不换行；
+                3. 不得编造与世界设定矛盾的内容；只输出 JSON，不要 Markdown 代码块。
+                """, "你是世界命名师：为虚构世界取名并写画廊简介，严格遵守字数与输出 JSON 的约束。"));
         return map;
     }
 

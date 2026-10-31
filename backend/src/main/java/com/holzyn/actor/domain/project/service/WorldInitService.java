@@ -39,6 +39,7 @@ import com.holzyn.actor.domain.debug.service.AiCallContext;
 import com.holzyn.actor.domain.knowledge.service.CharacterKnowledgeCardSyncService;
 import com.holzyn.actor.domain.knowledge.service.KnowledgeService;
 import com.holzyn.actor.domain.knowledge.service.WorldKnowledgeSyncService;
+import com.holzyn.actor.domain.project.model.WorldInitStep;
 import com.holzyn.actor.domain.project.vo.WorldInitResultVO;
 import com.holzyn.actor.domain.settings.service.PromptTemplateService;
 import com.holzyn.actor.domain.usage.service.UsageLogService;
@@ -113,7 +114,48 @@ public class WorldInitService {
     private final com.holzyn.actor.domain.worldmap.service.WorldMapGenerationService worldMapGenerationService;
 
     /**
-     * 世界初始化主入口：依次执行 7 步，任一步失败跳过继续。
+     * 开局家族与基因建档（第 ⑤ 步）。
+     *
+     * <p>字段注入（{@code required=false}）而不是构造器参数：本类构造器由
+     * {@code @RequiredArgsConstructor} 生成，AGENTS 8.1.2 禁止改既有构造器签名
+     * （会打断既有测试的构造点）。未装配时第 ⑤ 步直接跳过，不影响其余步骤。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.growth.lineage.FamilyGenesisService familyGenesisService;
+
+    /**
+     * 初始化状态服务（步骤状态行 + 完成度判定 + 严格顺序门禁的数据源）。
+     *
+     * <p>字段注入 {@code required=false}：本类构造器由 {@code @RequiredArgsConstructor} 生成，
+     * AGENTS §8.1.2 禁止改既有构造器签名（会打断既有测试的构造点）。未装配时（单测直接 new、
+     * 或做一些与初始化无关的静态工具调用）跳过状态记录与门禁，各步骤照常执行，
+     * 行为退化回旧版"只跑不记账"。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private WorldInitStatusService worldInitStatusService;
+
+    /**
+     * 世界程度（控制第 9 步「宏观社会模板」要不要生成）。
+     *
+     * <p>为什么在这一步门禁而不是在宏观调度器里事后过滤：休闲档的世界<b>根本不该有</b>
+     * 势力/经济/人口这些宏观设定，生成了再隐藏等于把冲突留在库里；从源头不生成才是设定一致。</p>
+     */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.service.WorldToneService worldToneService;
+
+    /**
+     * 世界初始化主入口：按 {@link WorldInitStep} 定义的固定顺序逐步执行。
+     *
+     * <p><b>严格顺序（本版语义变更）</b>：必需步骤失败即<b>中止</b>后续步骤（旧版是
+     * "失败静默跳过、后面照跑"，结果用户看到的是一堆半成品）。中止后用户修复问题、
+     * 在初始化向导里从失败那一步继续，不会重复烧前面的 AI。</p>
+     *
+     * <p><b>幂等</b>：{@code rebuild=false} 时已满足的步骤直接跳过（判定含实时数据校验，
+     * 见 {@link WorldInitStatusService#satisfied}）；{@code rebuild=true} 时全部重跑。</p>
+     *
+     * <p>标注"含 AI 调用"：本方法内会调用网关，<b>不得</b>加 {@code @Transactional}
+     * （AGENTS §8.1.1，H2 行锁跨 AI 时长会锁超时并丢掉已付费的结果）。</p>
      *
      * @param userId 归属用户 ID
      *
@@ -128,77 +170,395 @@ public class WorldInitService {
     public WorldInitResultVO runInit(Long userId, Long projectId, boolean rebuild, WorkflowLog wf) {
         long taskStart = System.currentTimeMillis();
         info(wf, "[世界初始化] 任务开始：项目=" + projectId + "，模式=" + (rebuild ? "全量重建" : "跳过已生成（幂等）"));
+        RunAccumulator acc = new RunAccumulator();
+        boolean aborted = false;
+        for (WorldInitStep step : WorldInitStep.values()) {
+            if (aborted) {
+                info(wf, "[世界初始化] 已中止，跳过第 " + step.index() + " 步「" + step.label()
+                        + "」（前置必需步骤未完成，严格顺序不允许继续）");
+                continue;
+            }
+            if (!rebuild && satisfied(projectId, step)) {
+                info(wf, "[世界初始化] 第 " + step.index() + " 步「" + step.label()
+                        + "」数据已存在，跳过（需要重做请切「全量重建」）");
+                continue;
+            }
+            stage(wf, step.label(), step.index(), WorldInitStep.total());
+            StepOutcome outcome = executeStep(userId, projectId, step, rebuild, wf, acc);
+            if (!outcome.ok() && step.required()) {
+                aborted = true;
+                info(wf, "[世界初始化] 第 " + step.index() + " 步「" + step.label()
+                        + "」是必需步骤且执行失败：后续步骤不再执行（修复后可从本步继续）");
+            }
+        }
+        info(wf, "[世界初始化] 任务结束：耗时 " + (System.currentTimeMillis() - taskStart) + "ms，" + acc.summary());
+        return new WorldInitResultVO(projectId, acc.locations, acc.cards, acc.npcs, acc.relations,
+                acc.gameTimeText == null ? "未设置" : acc.gameTimeText, acc.vectorized);
+    }
 
-        // ① 世界观地点
-        stage(wf, "世界观地点", 1, 6);
-        int locations = initLocations(userId, projectId, rebuild, wf);
+    /**
+     * 执行单个初始化步骤（初始化向导「执行本步」入口）。
+     *
+     * <p><b>严格顺序门禁</b>：执行第 N 步前，所有 {@code index < N} 的必需步骤必须已满足，
+     * 否则抛 400「请先完成第 K 步」——向导据此把按钮置灰并提示上一步，
+     * 避免用户跳着点出一堆半成品数据。</p>
+     *
+     * <p>含 AI 调用，<b>不得</b>加 {@code @Transactional}（AGENTS §8.1.1）。</p>
+     *
+     * @param userId 归属用户 ID
+     *
+     * @param projectId 项目 ID
+     *
+     * @param stepCode 步骤编码（{@link WorldInitStep#code()}）
+     *
+     * @param rebuild true=全量重建 / false=跳过已生成（幂等）
+     *
+     * @param wf 工作流日志回调（可为 null）
+     *
+     * @return 本步执行结果（其余字段为 0）
+     *
+     * @throws BizException 步骤编码未知 / 前置步骤未完成 / 本步执行失败
+     */
+    public WorldInitResultVO runStep(Long userId, Long projectId, String stepCode, boolean rebuild, WorkflowLog wf) {
+        WorldInitStep step = WorldInitStep.of(stepCode)
+                .orElseThrow(() -> new BizException(400, "未知的初始化步骤：" + stepCode));
+        ensurePreviousRequiredSatisfied(projectId, step);
+        RunAccumulator acc = new RunAccumulator();
+        stage(wf, step.label(), step.index(), WorldInitStep.total());
+        StepOutcome outcome = executeStep(userId, projectId, step, rebuild, wf, acc);
+        if (!outcome.ok()) {
+            throw new BizException(400, "第 " + step.index() + " 步「" + step.label() + "」执行失败："
+                    + outcome.message());
+        }
+        return new WorldInitResultVO(projectId, acc.locations, acc.cards, acc.npcs, acc.relations,
+                acc.gameTimeText == null ? "未设置" : acc.gameTimeText, acc.vectorized);
+    }
 
-        // ② 角色卡
-        stage(wf, "角色卡", 2, 6);
-        int cards = initCharacterCards(userId, projectId, rebuild, wf);
+    /**
+     * 跳过某个可选步骤（初始化向导「跳过此步」入口）。
+     *
+     * <p>必需步骤<b>不允许</b>跳过：它们是"这个世界能不能跑起来"的最低配置，
+     * 允许跳过等于允许交付一个空世界。跳过后该步骤视为已满足，不再阻塞后续步骤。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param stepCode 步骤编码
+     *
+     * @return 跳过后的最新初始化状态
+     *
+     * @throws BizException 步骤编码未知 / 该步骤是必需步骤（不能跳过）
+     */
+    public com.holzyn.actor.domain.project.vo.WorldInitStatusVO skipStep(Long projectId, String stepCode) {
+        WorldInitStep step = WorldInitStep.of(stepCode)
+                .orElseThrow(() -> new BizException(400, "未知的初始化步骤：" + stepCode));
+        if (step.required()) {
+            throw new BizException(400, "「" + step.label() + "」是必需步骤，不能跳过；请修复后重试");
+        }
+        WorldInitStatusService state = worldInitStatusService;
+        if (state == null) {
+            throw new BizException(500, "初始化状态服务未装配，无法跳过步骤");
+        }
+        state.markSkipped(projectId, step, "用户在初始化向导中跳过");
+        return state.status(projectId);
+    }
 
-        // ③ 字段字典 + 5 个普通 NPC
-        stage(wf, "字段字典与普通 NPC", 3, 6);
-        int npcs = initFieldDictAndNpcs(userId, projectId, rebuild, wf);
+    /**
+     * 计算世界初始化状态（"是否完全初始化完成"的唯一判定入口）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 初始化状态（含逐步状态与结论）
+     */
+    public com.holzyn.actor.domain.project.vo.WorldInitStatusVO status(Long projectId) {
+        WorldInitStatusService state = worldInitStatusService;
+        if (state == null) {
+            throw new BizException(500, "初始化状态服务未装配，无法读取初始化状态");
+        }
+        // 走 refreshStatus：世界已挂载时顺手校正目录库快照（画廊角标），未挂载时 service 自己跳过写入
+        return state.refreshStatus(projectId);
+    }
 
-        // ④ 全局关系拓扑
-        stage(wf, "关系拓扑", 4, 7);
-        int relations = initRelations(userId, projectId, rebuild, wf);
+    /**
+     * 严格顺序门禁：检查本步之前的所有<b>必需</b>步骤是否已完成。
+     *
+     * <p>为什么只拦必需步骤：可选步骤（家族/地图/宏观/向量化）本就是"能跳过"的，
+     * 把它们也纳入门禁会让用户永远走不到世界时间——那不是严格，是卡死。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param step      待执行步骤
+     *
+     * @throws BizException 存在未完成的必需前置步骤
+     */
+    private void ensurePreviousRequiredSatisfied(Long projectId, WorldInitStep step) {
+        WorldInitStatusService state = worldInitStatusService;
+        if (state == null) {
+            return;
+        }
+        for (WorldInitStep prev : WorldInitStep.values()) {
+            if (prev.index() >= step.index()) {
+                break;
+            }
+            if (!prev.required()) {
+                continue;
+            }
+            if (!state.satisfied(projectId, prev)) {
+                throw new BizException(400, "请先完成第 " + prev.index() + " 步「" + prev.label()
+                        + "」，再执行第 " + step.index() + " 步「" + step.label() + "」");
+            }
+        }
+    }
 
-        // ⑤ 世界地图 + 住所（同居共宅）：AI 生成或机制兜底；失败不阻断后续
-        stage(wf, "世界地图与住所", 5, 7);
-        int[] map = initWorldMap(userId, projectId, wf);
-
-        // ⑥ 世界时间
-        stage(wf, "世界时间", 6, 7);
-        String gameTimeText = initWorldTime(userId, projectId, wf);
-
-        // ⑦ 知识向量化
-        stage(wf, "知识向量化", 7, 7);
-        // 6.0 世界设定 → 项目级知识文档同步（RAG 适配：幂等 upsert + 向量化；失败不阻断后续）
-        int synced = 0;
+    /**
+     * 执行单步的公共骨架：标记运行中 → 分派具体步骤 → 落状态行 → 输出日志。
+     *
+     * <p>把"落状态 + 打日志"从各步骤里提出来，是为了保证 10 个步骤的状态语义完全一致
+     * （漏一处就会出现"向导显示未跑到、实际数据已生成"的错位）。</p>
+     *
+     * @param userId    归属用户 ID
+     * @param projectId 项目 ID
+     * @param step      步骤
+     * @param rebuild   是否全量重建
+     * @param wf        日志回调
+     * @param acc       结果累加器（本步产出写回）
+     *
+     * @return 单步执行结果
+     */
+    private StepOutcome executeStep(Long userId, Long projectId, WorldInitStep step, boolean rebuild,
+                                    WorkflowLog wf, RunAccumulator acc) {
+        WorldInitStatusService state = worldInitStatusService;
+        if (state != null) {
+            state.markRunning(projectId, step);
+        }
+        long startAt = System.currentTimeMillis();
+        int count = 0;
+        boolean ok;
+        String message;
         try {
-            synced = worldKnowledgeSyncService.syncWorldSetting(userId, projectId);
-            if (synced > 0) {
-                info(wf, "[世界初始化-知识同步] 世界设定已同步为项目级知识文档 " + synced + " 份");
+            switch (step) {
+                case WORLDVIEW: {
+                    ok = liveSatisfied(projectId, step);
+                    count = ok ? 1 : 0;
+                    message = ok ? "世界观设定已就绪（名称与分节内容完整）"
+                            : "世界观设定不完整：请至少填写名称与 3 个分节（地理/势力/规则/文化/历史/补充）";
+                    break;
+                }
+                case LOCATIONS: {
+                    int n = initLocations(userId, projectId, rebuild, wf);
+                    acc.locations = n;
+                    count = n;
+                    ok = n > 0 || liveSatisfied(projectId, step);
+                    message = ok ? "已生成世界观地点 " + n + " 个"
+                            : "未生成任何地点：请先补全世界观「地理设定」（为空或 AI 未返回有效结果）";
+                    break;
+                }
+                case CHARACTERS: {
+                    int n = initCharacterCards(userId, projectId, rebuild, wf);
+                    acc.cards = n;
+                    count = n;
+                    ok = n > 0 || liveSatisfied(projectId, step);
+                    message = ok ? "已生成角色卡 " + n + " 张"
+                            : "项目内还没有角色：请先到「角色」页新增角色（会同时生成角色卡），再回来执行本步";
+                    break;
+                }
+                case NPCS: {
+                    int n = initFieldDictAndNpcs(userId, projectId, rebuild, wf);
+                    acc.npcs = n;
+                    count = n;
+                    ok = n > 0 || liveSatisfied(projectId, step);
+                    message = ok ? "已生成普通 NPC " + n + " 个"
+                            : "未生成普通 NPC：字段字典或居民生成失败（需要先有地点与角色卡）";
+                    break;
+                }
+                case RELATIONS: {
+                    int n = initRelations(userId, projectId, rebuild, wf);
+                    acc.relations = n;
+                    count = n;
+                    ok = n > 0 || liveSatisfied(projectId, step);
+                    message = ok ? "已生成关系 " + n + " 条"
+                            : "未生成任何关系：AI 未返回有效关系草稿（需要先有角色卡）";
+                    break;
+                }
+                case FAMILY: {
+                    com.holzyn.actor.domain.growth.lineage.FamilyGenesisService.Result family =
+                            initFamilyGenesis(userId, projectId, wf);
+                    acc.family = family;
+                    count = family == null ? 0 : family.families();
+                    ok = true;
+                    message = family == null ? "家族与基因步骤已跳过（服务未装配）"
+                            : "家族 " + family.families() + " 簇（婚姻 " + family.marriages()
+                            + " 条 / 亲子 " + family.parentEdges() + " 条 / 基因 " + family.genomes() + " 份）";
+                    break;
+                }
+                case WORLD_MAP: {
+                    int[] map = initWorldMap(userId, projectId, wf);
+                    acc.map = map;
+                    count = map[0];
+                    ok = true;
+                    message = "世界地图 " + map[0] + " 个区域 / " + map[1] + " 间住所（"
+                            + map[2] + " 人入住，" + (map[3] == 1 ? "AI" : "机制") + "）";
+                    break;
+                }
+                case WORLD_TIME: {
+                    String text = initWorldTime(userId, projectId, wf);
+                    acc.gameTimeText = text;
+                    count = text == null || "未设置".equals(text) ? 0 : 1;
+                    ok = count > 0 || liveSatisfied(projectId, step);
+                    message = ok ? "世界时间已设置为 " + text
+                            : "世界时间推断失败：请检查世界观「历史脉络 / 时代背景」后重试";
+                    break;
+                }
+                case MACRO: {
+                    // 世界程度门禁：休闲/轻度档不生成宏观模板——"不该有的内容一次都不出现"，
+                    // 所以这里不是失败而是"按档位跳过"，跳过不算未完成（WorldInitStep.MACRO 本就是可选步）。
+                    if (worldToneService != null && worldToneService.tone(projectId).skipsMacroTemplate()) {
+                        String toneLabel = worldToneService.tone(projectId).label();
+                        String skipMsg = "该档位不生成宏观模板（世界程度：" + toneLabel + "），已按设定跳过";
+                        info(wf, "[世界初始化] 第 " + step.index() + " 步「" + step.label()
+                                + "」已跳过：" + skipMsg);
+                        // 直接落 SKIPPED 而不是 DONE：向导里要显示"跳过"而不是"完成"，
+                        // 但它不是失败，也不影响"世界已初始化完成"的判定（可选步）。
+                        if (state != null) {
+                            state.markSkipped(projectId, step, skipMsg);
+                        }
+                        return new StepOutcome(true, 0, skipMsg);
+                    }
+                    boolean done = false;
+                    if (macroStateService != null) {
+                        macroStateService.stateOf(projectId);
+                        info(wf, "[世界初始化] 宏观社会模板已推导落位（"
+                                + macroStateService.templateOf(projectId).name() + "）");
+                        done = true;
+                    }
+                    count = done ? 1 : 0;
+                    ok = true;
+                    message = done ? "宏观社会模板已落位" : "宏观模板服务未装配，已跳过";
+                    break;
+                }
+                case KNOWLEDGE: {
+                    int synced = 0;
+                    try {
+                        synced = worldKnowledgeSyncService.syncWorldSetting(userId, projectId);
+                        if (synced > 0) {
+                            info(wf, "[世界初始化-知识同步] 世界设定已同步为项目级知识文档 " + synced + " 份");
+                        }
+                    } catch (Exception e) {
+                        log.warn("[世界初始化-知识同步] 失败（跳过继续）：{}", e.getMessage());
+                        info(wf, "[世界初始化-知识同步] 失败（跳过继续）：" + e.getMessage());
+                    }
+                    acc.knowledgeSynced = synced;
+                    int vectorized = initKnowledgeVectorize(userId, projectId, wf);
+                    acc.vectorized = vectorized;
+                    int cardCount = 0;
+                    try {
+                        cardCount = characterKnowledgeCardSyncService.syncAllCards(userId, projectId);
+                        if (cardCount > 0) {
+                            info(wf, "[世界初始化-知识卡] 人物知识卡已同步 " + cardCount + " 张");
+                        }
+                    } catch (Exception e) {
+                        log.warn("[世界初始化-知识卡] 失败（跳过继续）：{}", e.getMessage());
+                        info(wf, "[世界初始化-知识卡] 失败（跳过继续）：" + e.getMessage());
+                    }
+                    acc.knowledgeCards = cardCount;
+                    count = Math.max(vectorized, cardCount);
+                    ok = true;
+                    message = "知识文档 " + synced + " 份 / 向量化 " + vectorized + " 条 / 人物知识卡 "
+                            + cardCount + " 张" + (vectorized == 0 ? "（未配置向量服务时属正常降级）" : "");
+                    break;
+                }
+                default: {
+                    ok = false;
+                    message = "未实现的初始化步骤：" + step.code();
+                    break;
+                }
             }
         } catch (Exception e) {
-            log.warn("[世界初始化-知识同步] 失败（跳过继续）：{}", e.getMessage());
-            info(wf, "[世界初始化-知识同步] 失败（跳过继续）：" + e.getMessage());
+            log.warn("[世界初始化] 第 {} 步「{}」执行异常：{}", step.index(), step.label(), e.getMessage());
+            ok = false;
+            count = 0;
+            message = "执行异常：" + (e.getMessage() == null ? e.toString() : e.getMessage());
         }
-        int vectorized = initKnowledgeVectorize(userId, projectId, wf);
-        info(wf, "[世界初始化-知识同步] 项目级知识文档 " + synced + " 份（向量化合并计入下一行）");
-
-        // 6.1 角色人物知识卡同步（知识检索质量深化：全角色结构化知识卡幂等 upsert + 向量化；
-        // 覆盖旧路径角色卡生成的角色；失败不阻断后续）
-        int cardCount = 0;
-        try {
-            cardCount = characterKnowledgeCardSyncService.syncAllCards(userId, projectId);
-            if (cardCount > 0) {
-                info(wf, "[世界初始化-知识卡] 人物知识卡已同步 " + cardCount + " 张");
+        long cost = System.currentTimeMillis() - startAt;
+        if (state != null) {
+            if (ok) {
+                state.markDone(projectId, step, count, message + "（" + cost + "ms）");
+            } else {
+                state.markFailed(projectId, step, message);
             }
-        } catch (Exception e) {
-            log.warn("[世界初始化-知识卡] 失败（跳过继续）：{}", e.getMessage());
-            info(wf, "[世界初始化-知识卡] 失败（跳过继续）：" + e.getMessage());
         }
+        log.info("[世界初始化] 第 {}/{} 步「{}」{}：{}（{}ms）", step.index(), WorldInitStep.total(),
+                step.label(), ok ? "完成" : "失败", message, cost);
+        info(wf, "[世界初始化] 第 " + step.index() + "/" + WorldInitStep.total() + " 步「" + step.label()
+                + "」" + (ok ? "完成" : "失败") + "：" + message);
+        return new StepOutcome(ok, count, message);
+    }
 
-        // 宏观模板落位：触发宏观状态惰性初始化——世界观设定文本 → 双维度模板推导
-        // （文明形态×力量体系）→ 落 init 快照行（含 templateId）；失败隔离不阻断初始化
-        try {
-            if (macroStateService != null) {
-                macroStateService.stateOf(projectId);
-                info(wf, "[世界初始化] 宏观社会模板已推导落位（"
-                        + macroStateService.templateOf(projectId).name() + "）");
-            }
-        } catch (Exception e) {
-            log.warn("[世界初始化-宏观模板] 推导失败（跳过）: project={} : {}", projectId, e.getMessage());
+    /** 单步执行结果（ok=是否成功；count=产出条数；message=面向用户的结论） */
+    private record StepOutcome(boolean ok, int count, String message) {
+    }
+
+    /**
+     * 初始化结果累加器：各步骤产出写回此处，最后统一汇总成一条日志与结果 VO。
+     *
+     * <p>为什么用可变累加器而不是让每步返回结果对象：步骤签名各异（int / int[] / String /
+     * Result），统一改成同一返回类型会改动 8 个既有步骤方法的签名与所有日志，收益不抵风险。</p>
+     */
+    private static final class RunAccumulator {
+
+        /** 本次入库地点数 */
+        int locations;
+
+        /** 本次生成角色卡数 */
+        int cards;
+
+        /** 本次生成普通 NPC 数 */
+        int npcs;
+
+        /** 本次写入关系数 */
+        int relations;
+
+        /** 家族与基因结果（未执行为 null） */
+        com.holzyn.actor.domain.growth.lineage.FamilyGenesisService.Result family;
+
+        /** 世界地图结果 [区域, 住所, 入住, 是否AI] */
+        int[] map;
+
+        /** 世界时间文本 */
+        String gameTimeText;
+
+        /** 同步的知识文档数 */
+        int knowledgeSynced;
+
+        /** 人物知识卡数 */
+        int knowledgeCards;
+
+        /** 向量化文档数 */
+        int vectorized;
+
+        /** 汇总文本（与原「任务结束」日志同格式，便于老日志检索） */
+        String summary() {
+            int[] m = map == null ? new int[]{0, 0, 0, 0} : map;
+            String familyText = family == null ? "0 簇（婚姻 0 条 / 亲子 0 条 / 基因 0 份）"
+                    : family.families() + " 簇（婚姻 " + family.marriages() + " 条 / 亲子 "
+                    + family.parentEdges() + " 条 / 基因 " + family.genomes() + " 份）";
+            return "地点 " + locations + " 个 / 角色卡 " + cards + " 张 / 普通 NPC " + npcs + " 个 / 关系 "
+                    + relations + " 条 / 家族 " + familyText + " / 世界地图 " + m[0] + " 个区域·" + m[1]
+                    + " 间住所（" + m[2] + " 人入住，" + (m[3] == 1 ? "AI" : "机制") + "） / 世界时间 "
+                    + (gameTimeText == null ? "未设置" : gameTimeText) + " / 知识卡 " + knowledgeCards
+                    + " 张 / 向量化 " + vectorized + " 条";
         }
+    }
 
-        info(wf, "[世界初始化] 任务结束：耗时 " + (System.currentTimeMillis() - taskStart) + "ms，"
-                + "地点 " + locations + " 个 / 角色卡 " + cards + " 张 / 普通 NPC " + npcs + " 个 / 关系 " + relations
-                + " 条 / 世界地图 " + map[0] + " 个区域·" + map[1] + " 间住所（" + map[2] + " 人入住，" + (map[3] == 1 ? "AI" : "机制")
-                + "） / 世界时间 " + gameTimeText + " / 知识卡 " + cardCount + " 张 / 向量化 " + vectorized + " 条");
-        return new WorldInitResultVO(projectId, locations, cards, npcs, relations, gameTimeText, vectorized);
+    /** 某步骤是否已满足（状态行或实时数据；状态服务未装配时一律 false） */
+    private boolean satisfied(Long projectId, WorldInitStep step) {
+        WorldInitStatusService state = worldInitStatusService;
+        return state != null && state.satisfied(projectId, step);
+    }
+
+    /** 某步骤的实时数据是否已存在（状态服务未装配时一律 false） */
+    private boolean liveSatisfied(Long projectId, WorldInitStep step) {
+        WorldInitStatusService state = worldInitStatusService;
+        return state != null && state.liveSatisfied(projectId, step);
     }
 
     // ==================== ① 世界观地点 ====================
@@ -442,7 +802,48 @@ public class WorldInitService {
         }
     }
 
-    // ==================== ⑤ 世界地图 + 住所（同居共宅） ====================
+    // ==================== ⑤ 开局家族与基因建档 ====================
+
+    /**
+     * 第 5 步：开局家族与基因建档（G4 遗传婚育谱系）。
+     *
+     * <p>做四件事（都在 {@code FamilyGenesisService.ensure} 里，幂等可重入）：
+     * ① 补齐每个角色的 {@code gender/age/birth_game_second/stage}（缺这一步婚配永远不会发生，
+     * 因为婚龄判定把 null 当 0 岁）；② 按姓氏 +「同族」关系聚成家族簇并分三代；
+     * ③ 落婚姻边与亲子边；④ 给每个角色建基因档案（有父母的按孟德尔重组，创始人按 OCEAN 反推）。</p>
+     *
+     * <p>位置讲究：排在「关系拓扑」之后（要读同族/合作关系做聚类）、「世界地图+住所」之前
+     * （住所分配能看见家庭结构，同族才可能同宅）。失败不阻断后续步骤。</p>
+     *
+     * @param userId 归属用户 ID（AI 精修用量归属）
+     *
+     * @param projectId 项目 ID
+     *
+     * @param wf 日志回调
+     *
+     * @return 建档结果（未装配服务/失败时返回空结果）
+     */
+    private com.holzyn.actor.domain.growth.lineage.FamilyGenesisService.Result initFamilyGenesis(
+            Long userId, Long projectId, WorkflowLog wf) {
+        if (familyGenesisService == null) {
+            info(wf, "[世界初始化-家族] 未装配家庭建档服务，跳过");
+            return com.holzyn.actor.domain.growth.lineage.FamilyGenesisService.Result.EMPTY;
+        }
+        try {
+            info(wf, "[世界初始化-家族] 补齐成长档案 → 建立家族谱系 → 基因建档…");
+            var r = familyGenesisService.ensure(userId, projectId, worldClockService.currentEngineGameSecond(projectId));
+            info(wf, "[世界初始化-家族] 完成：补档案 " + r.profilesFixed() + " 人 / 家族 " + r.families()
+                    + " 簇 / 婚姻边 " + r.marriages() + " 条 / 亲子边 " + r.parentEdges()
+                    + " 条 / 基因档案 " + r.genomes() + " 份");
+            return r;
+        } catch (Exception e) {
+            log.warn("[世界初始化-家族] 失败（跳过继续）：{}", e.getMessage());
+            info(wf, "[世界初始化-家族] 失败（跳过继续）：" + e.getMessage());
+            return com.holzyn.actor.domain.growth.lineage.FamilyGenesisService.Result.EMPTY;
+        }
+    }
+
+    // ==================== ⑥ 世界地图 + 住所（同居共宅） ====================
 
     /**
      * 第 5 步：生成世界地图 + 角色住所（AI 主通道 + 机制兜底，静默不发布事件；失败不阻断后续）。

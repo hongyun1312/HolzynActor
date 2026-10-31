@@ -102,7 +102,7 @@ public class MemoryController {
      *
      * @return 分页记忆 VO
      */
-    @GetMapping("/projects/{projectId}/memories")
+    @GetMapping("/worlds/{projectId}/memories")
     public R<PageResult<MemoryVO>> list(@PathVariable("projectId") Long projectId,
                                         @RequestParam(value = "characterId", required = false) Long characterId,
                                         @RequestParam(value = "characterRef", required = false) String characterRef,
@@ -128,7 +128,7 @@ public class MemoryController {
      *
      * @return 分页工作记忆 VO
      */
-    @GetMapping("/projects/{projectId}/working-memories")
+    @GetMapping("/worlds/{projectId}/working-memories")
     public R<PageResult<MemoryWorkingVO>> listWorking(@PathVariable("projectId") Long projectId,
                                                       @RequestParam(value = "characterId", required = false) Long characterId,
                                                       @RequestParam(value = "characterRef", required = false) String characterRef,
@@ -149,7 +149,7 @@ public class MemoryController {
      *
      * @return 核心记忆详情 VO（baselineText + blocks）
      */
-    @GetMapping("/projects/{projectId}/core-memories")
+    @GetMapping("/worlds/{projectId}/core-memories")
     public R<CoreMemoryVO> coreDetail(@PathVariable("projectId") Long projectId,
                                       @RequestParam(value = "characterId", required = false) Long characterId,
                                       @RequestParam(value = "characterRef", required = false) String characterRef) {
@@ -164,7 +164,7 @@ public class MemoryController {
      *
      * @return 新建的块 VO
      */
-    @PostMapping("/projects/{projectId}/core-memories")
+    @PostMapping("/worlds/{projectId}/core-memories")
     public R<CoreBlockVO> createCoreBlock(@PathVariable("projectId") Long projectId,
                                           @RequestBody Map<String, Object> body) {
         String ref = requireString(body, "characterRef");
@@ -186,7 +186,7 @@ public class MemoryController {
      *
      * @return 新版本的块 VO
      */
-    @PutMapping("/projects/{projectId}/core-memories/{blockId}")
+    @PutMapping("/worlds/{projectId}/core-memories/{blockId}")
     public R<CoreBlockVO> updateCoreBlock(@PathVariable("projectId") Long projectId,
                                           @PathVariable("blockId") Long blockId,
                                           @RequestBody Map<String, Object> body) {
@@ -207,7 +207,7 @@ public class MemoryController {
      *
      * @return 删除确认
      */
-    @DeleteMapping("/projects/{projectId}/core-memories/{blockId}")
+    @DeleteMapping("/worlds/{projectId}/core-memories/{blockId}")
     public R<Map<String, Object>> deleteCoreBlock(@PathVariable("projectId") Long projectId,
                                                   @PathVariable("blockId") Long blockId) {
         coreMemoryService.deleteBlock(projectId, blockId);
@@ -248,7 +248,7 @@ public class MemoryController {
      *
      * @return 分页归档 VO
      */
-    @GetMapping("/projects/{projectId}/archives")
+    @GetMapping("/worlds/{projectId}/archives")
     public R<PageResult<ArchiveVO>> listArchives(@PathVariable("projectId") Long projectId,
                                                  @RequestParam(value = "characterRef", required = false) String characterRef,
                                                  @RequestParam(value = "type", required = false) String type,
@@ -268,7 +268,7 @@ public class MemoryController {
      *
      * @return 实际归档条数
      */
-    @PostMapping("/projects/{projectId}/archives/manual")
+    @PostMapping("/worlds/{projectId}/archives/manual")
     public R<Map<String, Object>> manualArchive(@PathVariable("projectId") Long projectId,
                                                 @RequestBody Map<String, Object> body) {
         String sourceTable = requireString(body, "sourceTable");
@@ -294,7 +294,7 @@ public class MemoryController {
      *
      * @return 归档条数
      */
-    @PostMapping("/projects/{projectId}/archives/scan-age")
+    @PostMapping("/worlds/{projectId}/archives/scan-age")
     public R<Map<String, Object>> scanAge(@PathVariable("projectId") Long projectId) {
         int archived = archiveService.scanAgeArchiving(projectId);
         return R.ok(Map.of("projectId", projectId, "archived", archived));
@@ -311,7 +311,7 @@ public class MemoryController {
      *
      * @return 文本文件流（Content-Disposition 下载）
      */
-    @GetMapping("/projects/{projectId}/archives/export")
+    @GetMapping("/worlds/{projectId}/archives/export")
     public ResponseEntity<byte[]> exportArchives(@PathVariable("projectId") Long projectId,
                                                  @RequestParam(value = "characterRef", required = false) String characterRef,
                                                  @RequestParam(value = "format", defaultValue = "json") String format) {
@@ -382,7 +382,7 @@ public class MemoryController {
      *
      * @return 注入结果 Map
      */
-    @GetMapping("/projects/{projectId}/memory-injection/preview")
+    @GetMapping("/worlds/{projectId}/memory-injection/preview")
     public R<Map<String, Object>> injectionPreview(@PathVariable("projectId") Long projectId,
                                                    @RequestParam(value = "characterRef", required = false) String characterRef,
                                                    @RequestParam(value = "scenario", defaultValue = "dialog") String scenario,
@@ -420,7 +420,7 @@ public class MemoryController {
      *
      * @return 健康度 Map
      */
-    @GetMapping("/projects/{projectId}/memory-health")
+    @GetMapping("/worlds/{projectId}/memory-health")
     public R<Map<String, Object>> memoryHealth(@PathVariable("projectId") Long projectId,
                                                @RequestParam(value = "characterRef", required = false) String characterRef) {
         return R.ok(healthService.health(projectId, characterRef));
@@ -538,7 +538,7 @@ public class MemoryController {
      *
      * @param status 状态（active/distilled/archived，可空=全部）
      */
-    @GetMapping("/projects/{projectId}/memories/fuzz")
+    @GetMapping("/worlds/{projectId}/memories/fuzz")
     public R<List<Map<String, Object>>> listFuzz(@PathVariable("projectId") Long projectId,
                                                  @RequestParam(value = "characterRef", required = false) String characterRef,
                                                  @RequestParam(value = "status", required = false) String status) {
@@ -552,7 +552,7 @@ public class MemoryController {
     /**
      * 单条模糊详情。
      */
-    @GetMapping("/projects/{projectId}/memories/fuzz/{workingId}")
+    @GetMapping("/worlds/{projectId}/memories/fuzz/{workingId}")
     public R<Map<String, Object>> fuzzDetail(@PathVariable("projectId") Long projectId,
                                              @PathVariable("workingId") Long workingId) {
         if (fuzzService == null) {
@@ -565,7 +565,7 @@ public class MemoryController {
     /**
      * 手动触发单条模糊。
      */
-    @PostMapping("/projects/{projectId}/memories/fuzz/trigger")
+    @PostMapping("/worlds/{projectId}/memories/fuzz/trigger")
     public R<Map<String, Object>> triggerFuzz(@PathVariable("projectId") Long projectId,
                                               @RequestBody(required = false) Map<String, Object> body) {
         if (fuzzService == null) {
@@ -582,7 +582,7 @@ public class MemoryController {
     /**
      * 记忆谱系。
      */
-    @GetMapping("/projects/{projectId}/memories/lineage")
+    @GetMapping("/worlds/{projectId}/memories/lineage")
     public R<List<Map<String, Object>>> lineage(@PathVariable("projectId") Long projectId,
                                                 @RequestParam("targetMemoryId") Long targetMemoryId) {
         if (distillService == null) {
@@ -608,7 +608,7 @@ public class MemoryController {
     /**
      * 注入路由预览。
      */
-    @GetMapping("/projects/{projectId}/memories/inject-route")
+    @GetMapping("/worlds/{projectId}/memories/inject-route")
     public R<Map<String, Object>> injectRoutePreview(@PathVariable("projectId") Long projectId,
                                                      @RequestParam(value = "characterRef", required = false) String characterRef,
                                                      @RequestParam(value = "scenario", defaultValue = "dialog") String scenario,
@@ -626,7 +626,7 @@ public class MemoryController {
     /**
      * 注入路由 trace 回放。
      */
-    @GetMapping("/projects/{projectId}/memories/inject-route/trace")
+    @GetMapping("/worlds/{projectId}/memories/inject-route/trace")
     public R<List<Map<String, Object>>> injectRouteTrace(@PathVariable("projectId") Long projectId,
                                                          @RequestParam(value = "characterRef", required = false) String characterRef) {
         if (injectionRouter == null) {

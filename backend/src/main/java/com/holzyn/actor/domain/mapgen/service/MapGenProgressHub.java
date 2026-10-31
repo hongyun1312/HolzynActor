@@ -39,7 +39,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <p><b>为什么按项目而不按任务</b>：地图生成是「一个项目一张图」的语义——前端打开首页时只知道
  * 「我在看哪个项目的地图」，不知道 runId；重掷/单阶段重跑都会产生新的 run，如果按 run 分频道，
  * 前端每次都要先拿 runId 再订阅，页面一刷新就断流。按项目分频道后，
- * {@code GET /api/projects/{id}/world-map/stream} 永远有效，重跑自动复用同一个通道。</p>
+ * {@code GET /api/worlds/{id}/world-map/stream} 永远有效，重跑自动复用同一个通道。</p>
  *
  * <p><b>迟到订阅</b>：频道保留最近 {@link #BUFFER_MAX} 条事件（含上一次运行的 stage/log），
  * 所以「点了生成再打开页面」也能立刻看到进度条走到哪一步，而不是空白等第一条事件。</p>

@@ -354,7 +354,7 @@ function onResizeReset(pane) {
   white-space: nowrap;
 }
 .wsplit-rail-count {
-  font-size: 11px;
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
 </style>

@@ -21,7 +21,7 @@ package com.holzyn.actor.domain.growth.mask;
 /**
  * 面具破绽判定点接口。
  * <p><b>设计动机</b>：破绽检测是高频布尔判定（「当前文本/处境是否命中
- * 触发物、抑制该降多少」）——程序化实现确定可测； 之后 NanoJev 接入时只替换本接口
+ * 触发物、抑制该降多少」）——程序化实现确定可测； 之后 决策模型 接入时只替换本接口
  * 实现（boolean 题型：states=情境+触发物上下文，questions=是否破绽 / score=抑制降幅），
  * <b>不重改面具主流程</b>（与 {@link MaskContextSource} 同一预留范式）。</p>
  * <p><b>触发物来源</b>（程序化实现读取）：档案 ⑪ 维 {@code dims.mask.breaches}（破绽条目：

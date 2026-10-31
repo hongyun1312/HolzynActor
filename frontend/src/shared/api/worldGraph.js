@@ -21,7 +21,7 @@
 import http from './http'
 
 /** 图谱接口前缀 */
-const base = (projectId) => `/api/projects/${projectId}/world-graph`
+const base = (projectId) => `/api/worlds/${projectId}/world-graph`
 
 /**
  * 全局概览（时间 + 六维计数 + 宏观物资 + 最近事件 + 最近编年史）。

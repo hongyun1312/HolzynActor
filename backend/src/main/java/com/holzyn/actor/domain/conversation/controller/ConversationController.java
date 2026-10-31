@@ -66,7 +66,7 @@ public class ConversationController {
      *
      * @return 创建后的会话
      */
-    @PostMapping("/projects/{projectId}/conversations")
+    @PostMapping("/worlds/{projectId}/conversations")
     public R<ConversationVO> create(@PathVariable("projectId") Long projectId, @Valid @RequestBody ConversationDTO dto) {
         return R.ok(conversationService.create(projectId, dto));
     }
@@ -79,7 +79,7 @@ public class ConversationController {
      *
      * @param dto 入参（characterId/location/gameTimeText 均可空）
      */
-    @PostMapping("/projects/{projectId}/conversations/generate-title")
+    @PostMapping("/worlds/{projectId}/conversations/generate-title")
     public R<Map<String, Object>> generateTitle(@PathVariable("projectId") Long projectId,
                                                 @RequestBody(required = false) ConversationTitleDTO dto) {
         ConversationTitleDTO req = dto == null ? new ConversationTitleDTO(null, null, null) : dto;
@@ -123,7 +123,7 @@ public class ConversationController {
      *
      * @return 会话列表
      */
-    @GetMapping("/projects/{projectId}/conversations")
+    @GetMapping("/worlds/{projectId}/conversations")
     public R<List<ConversationVO>> list(@PathVariable("projectId") Long projectId) {
         return R.ok(conversationService.list(projectId));
     }

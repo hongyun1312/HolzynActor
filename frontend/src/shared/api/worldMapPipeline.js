@@ -35,7 +35,7 @@ const terrainUrlOf = (overview) => overview?.terrainUrl || null
  * @returns {Promise<object|null>} 未生成过返回 null
  */
 export const fetchMapOverview = (projectId) =>
-  http.get(`/api/projects/${projectId}/map`)
+  http.get(`/api/worlds/${projectId}/map`)
 
 /**
  * 渲染包：调色板 + 道路 + 要素 + 组 + 街区（一次拿全，避免首屏多次往返）。
@@ -44,7 +44,48 @@ export const fetchMapOverview = (projectId) =>
  * @returns {Promise<object>} { overview, palette, roads[], features[], groups[], districts[] }
  */
 export const fetchMapBundle = (projectId) =>
-  http.get(`/api/projects/${projectId}/map/bundle`, { timeout: 30000 })
+  http.get(`/api/worlds/${projectId}/map/bundle`, { timeout: 30000 })
+
+/**
+ * 角色快照（薄数据：40 个点 + 在途轨迹 + 世界时钟）。
+ *
+ * <p>为什么单独一个接口：bundle 是整张图的几何（1 MB 级），只在开页/改布局时拉；
+ * 角色位置每几秒都在变，混在 bundle 里会逼着前端每 5 秒重拉 1 MB。</p>
+ *
+ * @param {number|string} projectId 项目 ID
+ * @returns {Promise<{clock:{gameSecond:number,paused:boolean,rate:number}, actors:object[]}>}
+ */
+export const fetchMapActors = (projectId) =>
+  http.get(`/api/worlds/${projectId}/map/actors`)
+
+/**
+ * 提交布局编辑（整批原子；有一条不合法就整批 409 并逐条给原因）。
+ *
+ * @param {number|string} projectId 项目 ID
+ * @param {{baseRevision:number, edits:Array<{code:string,x:number,z:number,rotation:number}>}} payload
+ * @returns {Promise<object>} LayoutEditResultVO
+ */
+export const saveLayoutEdits = (projectId, payload) =>
+  http.post(`/api/worlds/${projectId}/map/layout/edits`, payload, { timeout: 30000 })
+
+/**
+ * 列出手改（「已修改」角标 + 单条恢复）。
+ *
+ * @param {number|string} projectId 项目 ID
+ * @returns {Promise<{revision:number, count:number, overrides:object[]}>}
+ */
+export const fetchLayoutOverrides = (projectId) =>
+  http.get(`/api/worlds/${projectId}/map/layout/overrides`)
+
+/**
+ * 清除单条手改（立即恢复 AI 原版）。
+ *
+ * @param {number|string} projectId 项目 ID
+ * @param {string} code 要素 code
+ * @returns {Promise<{cleared:number, revision:number}>}
+ */
+export const clearLayoutOverride = (projectId, code) =>
+  http.delete(`/api/worlds/${projectId}/map/layout/overrides/${encodeURIComponent(code)}`)
 
 /**
  * 触发生成（异步任务；进度走 SSE）。种子相同 ⇒ 结果相同（决定论）。
@@ -54,7 +95,7 @@ export const fetchMapBundle = (projectId) =>
  * @returns {Promise<{mapId:number, status:string}>}
  */
 export const generateWorldMap = (projectId, opts = {}) =>
-  http.post(`/api/projects/${projectId}/map/generate`, opts, { timeout: 30000 })
+  http.post(`/api/worlds/${projectId}/map/generate`, opts, { timeout: 30000 })
 
 /**
  * 单阶段重跑（S0/S1/S2/S3/S4/S5），下游自动标记失效。
@@ -64,7 +105,7 @@ export const generateWorldMap = (projectId, opts = {}) =>
  * @returns {Promise<object>}
  */
 export const rerunMapStage = (projectId, stage) =>
-  http.post(`/api/projects/${projectId}/map/stages/${stage}/rerun`, {}, { timeout: 30000 })
+  http.post(`/api/worlds/${projectId}/map/stages/${stage}/rerun`, {}, { timeout: 30000 })
 
 /**
  * 生成进度 SSE 地址（原生 EventSource 用，故不走 axios）。
@@ -72,7 +113,7 @@ export const rerunMapStage = (projectId, stage) =>
  * @param {number|string} projectId 项目 ID
  * @returns {string} 相对 URL
  */
-export const mapStreamUrl = (projectId) => `/api/projects/${projectId}/map/stream`
+export const mapStreamUrl = (projectId) => `/api/worlds/${projectId}/map/stream`
 
 /**
  * 地形底图地址（overview 里带的版本化路径）。

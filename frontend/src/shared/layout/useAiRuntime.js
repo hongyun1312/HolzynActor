@@ -65,7 +65,7 @@ const SCENE_LABELS = {
   perception: '感知',
   reflection: '反思',
   interrupt_probe: '打断判定',
-  nanojev: 'NanoJev 快判',
+  decision_sample: '决策模型 判定',
   card_gen: '角色卡生成',
   fill_b: '档案补全',
   worldgen: '世界观生成',
@@ -151,7 +151,7 @@ export function refreshAiRuntime() {
 /**
  * AI 运行状态轮询（顶栏活动点 + 「AI 运行状态」任务中心抽屉的数据源）。
  *
- * <p>职责：定时拉取**聚合只读接口** {@code GET /api/projects/{projectId}/ai-runtime/status}
+ * <p>职责：定时拉取**聚合只读接口** {@code GET /api/worlds/{projectId}/ai-runtime/status}
  * （批次③ 起启用），产出快照写入 layout store：</p>
  * <pre>
  * {

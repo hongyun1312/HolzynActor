@@ -140,6 +140,11 @@ public class PromptSpecRegistry {
         // 世界常识摘要（V2.0 段 1A 稳定世界观注入源，2026-10-08 外网冒烟新增）：依最新世界观
         // 提炼 300-500 字「该世界角色都知道的常识」，纯文本正文（非 JSON）——PLAIN_TEXT 0.4 / 900。
         register("world_common_knowledge", 1, PromptContractType.PLAIN_TEXT, 900, 0.4);
+        // 世界名与简介建议（world_meta_suggest，新建世界向导「世界名与简介」步）：
+        // 从已生成的世界观反推画廊卡片两字段（name 6-14 字 / summary 60-100 字）。
+        // SCHEMA_JSON 0.8 / 300——命名要有辨识度（温度高一点避免套模板），
+        // 但输出只是两个短字段，300 token 足够（超了说明模型在跑偏）。
+        register("world_meta_suggest", 1, PromptContractType.SCHEMA_JSON, 300, 0.8);
         // 记忆-知识桥接判定（P1 ②-3，knowledge_bridge）：反思洞察 → 可复用事实型知识候选
         // 抽取（SCHEMA_JSON：knowledge_candidates[{content,importance,is_knowledge}]），
         // 0.3 / 512——「哪些洞察值得沉淀为知识」是严谨判定：低温抑制发散（is_knowledge=false
@@ -253,15 +258,15 @@ public class PromptSpecRegistry {
 
         // ===== 轨道：遗传婚育谱系（新建）=====
         //
-        // 判定类低温稳定（对齐 shift eval 风格）；契约与 NanoJev boolean question 同构（N 轨道可替换实现）
+        // 判定类低温稳定（对齐 shift eval 风格）；契约与 决策模型 boolean question 同构（N 轨道可替换实现）
         // v2（2026-10-10 批 5 世界与叙事）：判定前置 段1A+1C+2D+2E（memoryChainContext）
         register("growth_romance_decision", 2, PromptContractType.SCHEMA_JSON, 300, 0.4);
         //
-        // 契约与 NanoJev choice question（propose/wait/give_up）同构
+        // 契约与 决策模型 choice question（propose/wait/give_up）同构
         // v2（2026-10-10 批 5 世界与叙事）：判定前置 段1A+1C+2D+2E（memoryChainContext）
         register("growth_proposal_decision", 2, PromptContractType.SCHEMA_JSON, 300, 0.4);
         // 生育意愿判定（growth_fertility_decision）：SCHEMA_JSON（{want,reason}），0.4 / 300——
-        // 契约与 NanoJev score/boolean question 同构
+        // 契约与 决策模型 score/boolean question 同构
         // v2（2026-10-10 批 5 世界与叙事）：判定前置 段1A+1C+2D+2E（memoryChainContext）
         register("growth_fertility_decision", 2, PromptContractType.SCHEMA_JSON, 300, 0.4);
         // 新生儿档案（growth_newborn_persona）：SCHEMA_JSON（{given_name,appearance,...}），0.6 / 600——
@@ -271,9 +276,13 @@ public class PromptSpecRegistry {
         // 婚礼叙事（growth_wedding_narrative）：正文 PLAIN_TEXT，0.8 / 400——喜庆场合，温度略高增强文学性
         // v2（2026-10-10 批 5 世界与叙事）：叙事前置 段1A+1C+2D+2E（memoryChainContext）
         register("growth_wedding_narrative", 2, PromptContractType.PLAIN_TEXT, 400, 0.8);
+        // 开局家族·档案精修（growth_family_profile_infer）：SCHEMA_JSON（{"people":[{name,gender,age}]}），
+        // 0.2 / 900——只做"从既有身份/档案里读出性别与年龄"的客观整理，低温防编造；
+        // 900 上限是因为一次批量覆盖十几到几十个角色（每行约 30 字），宁可留余量也不要被截断
+        register("growth_family_profile_infer", 2, PromptContractType.SCHEMA_JSON, 900, 0.2);
 
-        // ===== N 轨道：NanoJev 判定场景登记骨架（ai/nanojev 独立 evaluate client） =====
-        // 说明：NanoJev 不走 chat 网关（不吃 messages、不生成文字、输出概率分布零解码），
+        // ===== N 轨道：决策模型 判定场景登记骨架（ai/decision 独立 evaluate client） =====
+        // 说明：决策模型 不走 chat 网关（不吃 messages、不生成文字、输出概率分布零解码），
         // 本登记的 contract/maxOutputTokens/temperature 为信息性占位（供 trace prompt_version/
         // 版本留痕/ 模板版本化），真正受约束的是各场景的 instructions/criteria 模板本身——
         // 按《Prompt 工程规范》§7 变更流程升版（version+1），档位描述必须自包含（改写即换索引）。
@@ -283,54 +292,54 @@ public class PromptSpecRegistry {
         // （AiContextInjector.decisionInput 全量拼接为单串：1A 稳定世界观/1B 系统指令/1C 角色核心卡/
         // 2D 当前世界动态/2H 本轮输入/3I 行为护栏/3J 输出契约）→ 运行时判定场景统一升版 2→3 留痕。
         // 冒烟/调试样例题
-        register("nanojev_sample", 1, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_sample", 1, PromptContractType.SCHEMA_JSON, 1024, 1.0);
         // 婚育三插拔点
-        register("nanojev_romance_attract", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_proposal", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_fertility", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_romance_attract", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_proposal", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_fertility", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
         // 面具两判定点
-        register("nanojev_mask_context", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_mask_breach", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_mask_context", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_mask_breach", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
         // 判定类首批：情绪评估 / 普通 NPC 批量决策 / 社交意愿门控 / 群聊发言判定 / 打断仲裁 / 护栏语义
-        // ⚠️ 三类场景已实际编写 instructions/criteria（ai/nanojev/ab/NanoJevAbTemplates），
+        // ⚠️ 三类场景已实际编写 instructions/criteria（ai/decision/ab/DecisionAbTemplates），
         // 按《Prompt 工程规范》§7 升版 version 1→2 留痕（档位/候选描述自包含）。
-        register("nanojev_emotion_eval", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_crowd_decision", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_social_willingness", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_group_speak", 1, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        // ：打断仲裁 / 护栏语义运行时模板内容已编写（NanoJevDecisionTemplates）→ v2
-        register("nanojev_negotiate", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_guard_semantic", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_emotion_eval", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_crowd_decision", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_social_willingness", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_group_speak", 1, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        // ：打断仲裁 / 护栏语义运行时模板内容已编写（DecisionTemplates）→ v2
+        register("decision_negotiate", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_guard_semantic", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
         // ：社交意愿升级重问场景（运行时 Qwen 同题重问记账；内容=判定题转 Qwen）
-        register("nanojev_social_willingness_escalation", 1, PromptContractType.SCHEMA_JSON, 512, 0.3);
+        register("decision_social_willingness_escalation", 1, PromptContractType.SCHEMA_JSON, 512, 0.3);
         // 此刻可发生空间：候选选择 + forbidden 合规复核
-        // ⚠️：运行时模板内容已编写（NanoJevDecisionTemplates.spacePreconditionQuestion /
+        // ⚠️：运行时模板内容已编写（DecisionTemplates.spacePreconditionQuestion /
         // spaceActionQuestion / SpaceDecisionServiceUtils 一次前向编排）→ v2 留痕
-        register("nanojev_space_precondition", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_space_choice", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        // ：空间候选选择总场景（场景码 space_decision，NanoJevDecisionScenes）——
+        register("decision_space_precondition", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_space_choice", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        // ：空间候选选择总场景（场景码 space_decision，DecisionScenes）——
         // precondition 语义 boolean 批量 + 行动 choice 单 state 一次前向；sample 直接采纳无升级阈值
-        register("nanojev_space_decision", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_space_decision", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
         // 认知 LOD 注意力 + 演化判定
-        // ⚠️：运行时模板内容已编写（NanoJevDecisionTemplates.attentionStateQuestion /
+        // ⚠️：运行时模板内容已编写（DecisionTemplates.attentionStateQuestion /
         // eventRelevanceQuestion / microIntentQuestion / spaceTriggerQuestion / personaShiftEvidenceQuestion /
         // personaShiftDirectionQuestion / relationDeltaMagnitudeQuestion / relationDeltaDirectionQuestion /
         // accidentQuestion）→ 升版 v2 留痕；新场景登记（micro_decision / space_trigger / accident）
-        register("nanojev_lod_attention", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_shift_eval", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_relation_delta", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_micro_decision", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_space_trigger", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
-        register("nanojev_accident", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_lod_attention", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_shift_eval", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_relation_delta", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_micro_decision", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_space_trigger", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
+        register("decision_accident", 3, PromptContractType.SCHEMA_JSON, 1024, 1.0);
 
-        // ===== N 轨道：A/B 质量评估辅助场景（ai/nanojev/ab） =====
+        // ===== N 轨道：A/B 质量评估辅助场景（ai/decision/ab） =====
         // Qwen 同题型重问（对照基线）：走 chat 网关（jsonMode 输出选中项），场景码供
         // AiCallContext trace/用量归属与 Prompt 版本留痕；temperature/maxTokens 由
-        // holzyn.actor.ai.nanojev.ab.qwen.* 实际控制，本登记为信息性占位。
-        register("nanojev_ab_qwen", 1, PromptContractType.SCHEMA_JSON, 512, 0.3);
+        // holzyn.actor.ai.decision.ab.qwen.* 实际控制，本登记为信息性占位。
+        register("decision_ab_qwen", 1, PromptContractType.SCHEMA_JSON, 512, 0.3);
         // Judge 四维合理性评分（复用 JudgeChatClient + PromptTemplateService 模板
-        // nanojev_ab_judge；judge 调用不落 actor_ai_call_log，本登记供模板版本留痕/指标）。
-        register("nanojev_ab_judge", 1, PromptContractType.SCHEMA_JSON, 1024, 0.0);
+        // decision_ab_judge；judge 调用不落 actor_ai_call_log，本登记供模板版本留痕/指标）。
+        register("decision_ab_judge", 1, PromptContractType.SCHEMA_JSON, 1024, 0.0);
 
         // ===== 项目级 AI 助手（2026-10-10 第 50 次 · M1+M2）=====
         // assistant_tool：工具决策一步（jsonMode 结构化）——「判断是否需要查询数据并声明工具调用」

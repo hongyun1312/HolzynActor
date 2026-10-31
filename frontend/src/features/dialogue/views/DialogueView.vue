@@ -12,7 +12,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <template>
-  <div class="dialogue-page">
+  <div class="dialogue-page project-col">
     <div class="dialogue-body" :class="{ 'is-narrow': narrow, 'is-very-narrow': veryNarrow }">
       <!-- 窄屏遮罩：点空白关掉覆盖式侧栏（P1-3） -->
       <div v-if="(narrow && ctxOpen) || (veryNarrow && listOpen)" class="dlg-scrim" @click="closeOverlays"></div>
@@ -43,7 +43,8 @@
               <span class="dlg-fact"><el-icon :size="12"><HIcon name="VideoPause" /></el-icon>聊天期间世界零推进</span>
               <span class="dlg-fact"><el-icon :size="12"><HIcon name="VideoPlay" /></el-icon>可随时手动恢复</span>
             </div>
-            <el-button type="primary" round class="dlg-hero-cta" @click="createDialog.visible = true">
+            <!-- data-tour：引导「对谈：怎么开口」在「还没有会话」时的目标（此时输入框还不存在） -->
+            <el-button type="primary" round class="dlg-hero-cta" data-tour="dlg-hero-new" @click="createDialog.visible = true">
               <el-icon><HIcon name="Plus" /></el-icon>&nbsp;新建对谈
             </el-button>
             <div v-if="characters.length" class="dlg-hero-chars">
@@ -91,7 +92,15 @@
               <el-button size="small" text @click="openRename(currentSession)">
                 <el-icon><HIcon name="Edit" /></el-icon>&nbsp;重命名
               </el-button>
-              <button v-if="narrow" type="button" class="dlg-head-toggle is-panel" title="对谈详情（角色档案 / 关系 / 世界书）" @click="ctxOpen = !ctxOpen">
+              <!-- data-tour：窄屏下右侧「对谈详情」收成这个按钮，新手引导指向它（宽屏时该按钮不渲染，引导改指面板本身） -->
+              <button
+                v-if="narrow"
+                type="button"
+                class="dlg-head-toggle is-panel"
+                data-tour="dlg-context"
+                title="对谈详情（角色档案 / 关系 / 世界书）"
+                @click="ctxOpen = !ctxOpen"
+              >
                 <el-icon :size="15"><HIcon name="ic_public_file" /></el-icon>
                 <span>详情</span>
               </button>
@@ -131,8 +140,8 @@
             </div>
           </div>
 
-          <!-- 输入区 -->
-          <div class="dlg-composer">
+          <!-- 输入区（data-tour：新手引导「对谈：怎么开口」的聚光灯目标） -->
+          <div class="dlg-composer" data-tour="dlg-composer">
             <div class="dlg-composer-card">
               <div class="dlg-composer-scroll">
                 <textarea
@@ -246,7 +255,7 @@
  * <p>职责：与「浮生」主模式同级的静止世界聊天页——三栏布局（会话列表 / 聊天流 / 上下文面板）、
  * AI 动态开场白、SSE 流式单聊（meta→token→done|error）、消息操作（换一条/重写/编辑/删除/停止）、
  * 冻结世界语义提示（创建即冻结 + 手动恢复）。</p>
- * <p>数据来源：/api/projects/{id}/dialogue/*（M1 后端）。流式端点走统一
+ * <p>数据来源：/api/worlds/{id}/dialogue/*（M1 后端）。流式端点走统一
  * {@code streamFetch}（POST SSE；EventSource 仅支持 GET）。</p>
  * <p>停止语义：取消流 → 后端断流不落库（M2 后端增强），本地移除占位后重拉消息对齐。</p>
  *
@@ -921,7 +930,8 @@ onBeforeUnmount(() => {
   width: 100%; max-width: 560px;
   display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px;
   padding: 28px 24px;
-  border: 1px solid var(--border-l1); border-radius: var(--radius-lg);
+  border: 1px solid var(--border-l2); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lv2);
   background: linear-gradient(180deg, var(--accent-softer, transparent), transparent 60%), var(--bg-layer-1);
 }
 .dlg-hero-art {

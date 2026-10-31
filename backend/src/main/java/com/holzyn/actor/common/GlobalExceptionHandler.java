@@ -183,15 +183,44 @@ public class GlobalExceptionHandler {
     /**
      * 运行时异常兜底。
      *
+     * <p>V1.1.2-beta.1：先在 cause 链里找 {@link BizException}。世界写守卫
+     * （{@code GlobalMirrorWriteGuard}）是在 Hibernate 准备语句时抛的，而那一刻通常正处在
+     * 事务提交中（脏检查 flush），Spring 会把它包成
+     * {@code TransactionSystemException("Could not commit JPA transaction")}。
+     * 不拆包的话用户只看到"500 服务器内部错误"——而这句
+     * "全局配置只能在目录库写，当前处于世界上下文"正是守卫存在的意义，丢了它就等于没装。</p>
+     *
      * @param e 运行时异常
      *
-     * @return 500 错误响应
+     * @return 被包裹的业务异常按其状态码返回；其余 500
      */
     @ExceptionHandler(RuntimeException.class)
-    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-    public R<Void> handleRuntime(RuntimeException e) {
+    public ResponseEntity<R<Void>> handleRuntime(RuntimeException e) {
+        BizException biz = findBizException(e);
+        if (biz != null) {
+            return handleBiz(biz);
+        }
         log.error("运行时异常: {}", e.getMessage(), e);
-        return R.fail(500, "服务器内部错误", ErrorResponse.of(e.getMessage()));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(R.fail(500, "服务器内部错误", ErrorResponse.of(e.getMessage())));
+    }
+
+    /**
+     * 沿 cause 链找业务异常（限 8 层，防病态自引用链）。
+     *
+     * @param t 原始异常
+     *
+     * @return 找到的业务异常；没有返回 null
+     */
+    private static BizException findBizException(Throwable t) {
+        Throwable cur = t;
+        for (int depth = 0; cur != null && depth < 8; depth++) {
+            if (cur instanceof BizException biz) {
+                return biz;
+            }
+            cur = cur.getCause();
+        }
+        return null;
     }
 
     /**

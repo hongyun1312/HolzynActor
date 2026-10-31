@@ -123,3 +123,55 @@ export function polygonArea(poly) {
   }
   return Math.abs(s) / 2
 }
+
+/**
+ * 折线总长（米）。
+ *
+ * <p>与后端 {@code GridAStar.polylineLength} 同一算法：轨迹的「走了多远」必须两边一致，
+ * 否则前端算出来的 t 会偏，人会在半路突然跳一下。</p>
+ *
+ * @param {number[][]} pts 折线（米）
+ * @returns {number} 长度（米）
+ */
+export function polylineLength(pts) {
+  if (!Array.isArray(pts) || pts.length < 2) return 0
+  let sum = 0
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]
+    const b = pts[i]
+    const dx = (Number(b?.[0]) || 0) - (Number(a?.[0]) || 0)
+    const dz = (Number(b?.[1]) || 0) - (Number(a?.[1]) || 0)
+    sum += Math.hypot(dx, dz)
+  }
+  return sum
+}
+
+/**
+ * 沿折线按弧长取点（与后端 {@code GridAStar.pointAt} 同语义，超出钳到端点）。
+ *
+ * @param {number[][]} pts  折线（米）
+ * @param {number} along    已走距离（米）
+ * @returns {number[]|null} [x, z]；空折线返回 null
+ */
+export function pointAtArc(pts, along) {
+  if (!Array.isArray(pts) || pts.length === 0) return null
+  if (pts.length === 1) return [Number(pts[0][0]) || 0, Number(pts[0][1]) || 0]
+  let remain = Math.max(0, Number(along) || 0)
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]
+    const b = pts[i]
+    const ax = Number(a?.[0]) || 0
+    const az = Number(a?.[1]) || 0
+    const bx = Number(b?.[0]) || 0
+    const bz = Number(b?.[1]) || 0
+    const seg = Math.hypot(bx - ax, bz - az)
+    if (seg <= 1e-9) continue
+    if (remain <= seg) {
+      const t = remain / seg
+      return [ax + (bx - ax) * t, az + (bz - az) * t]
+    }
+    remain -= seg
+  }
+  const last = pts[pts.length - 1]
+  return [Number(last?.[0]) || 0, Number(last?.[1]) || 0]
+}

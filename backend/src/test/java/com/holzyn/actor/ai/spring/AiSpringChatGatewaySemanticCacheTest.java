@@ -80,7 +80,7 @@ class AiSpringChatGatewaySemanticCacheTest {
         gateway = new AiSpringChatGateway(factory, traceService, modelApiService, semanticCacheService,
                 new HolzynTraceAdvisor());
 
-        when(modelApiService.resolveProviderConfig(any(), any(), any())).thenReturn(CHAT_CONFIG);
+        when(modelApiService.resolveProviderConfig(any(), any(), any(), any())).thenReturn(CHAT_CONFIG);
         when(modelApiService.resolveEmbeddingProvider(any(), any())).thenReturn(EMB_CONFIG);
         when(embeddingFactory.get(EMB_CONFIG)).thenReturn(embeddingModel);
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(new Embedding(new float[]{1f, 0f, 0f})));

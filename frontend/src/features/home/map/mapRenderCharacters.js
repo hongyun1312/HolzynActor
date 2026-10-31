@@ -104,5 +104,16 @@ export function drawCharacters(g, items, view) {
       color: c.selected ? 0xffe6a8 : 0xffffff,
       alpha: (c.selected ? 1 : 0.85) * nightAlpha
     })
+    // 朝向箭头（只在近景画）：让「他在往哪走」看得见。
+    // 朝向约定与后端一致：0=北（-Z），顺时针递增 → 屏幕向量 (sin, -cos)。
+    const hd = Number(c.heading)
+    if (Number.isFinite(hd) && scale >= 1.2) {
+      const rad = (hd * Math.PI) / 180
+      const dx = Math.sin(rad)
+      const dz = -Math.cos(rad)
+      g.moveTo(sx + dx * (r + 1.0), sy + dz * (r + 1.0))
+      g.lineTo(sx + dx * (r + 5.5), sy + dz * (r + 5.5))
+      g.stroke({ width: 1.5, color: 0xffe6a8, alpha: 0.85 * nightAlpha })
+    }
   }
 }

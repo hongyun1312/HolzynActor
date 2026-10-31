@@ -18,12 +18,12 @@
 
 package com.holzyn.actor.domain.growth.space;
 
-import com.holzyn.actor.ai.nanojev.NanoJevQuestion;
-import com.holzyn.actor.ai.nanojev.NanoJevSampler;
-import com.holzyn.actor.ai.nanojev.NanoJevState;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionTemplates;
+import com.holzyn.actor.ai.decision.DecisionQuestion;
+import com.holzyn.actor.ai.decision.DecisionSampler;
+import com.holzyn.actor.ai.decision.DecisionState;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
+import com.holzyn.actor.ai.decision.gate.DecisionTemplates;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,13 +33,13 @@ import java.util.Random;
 
 /**
  * 空间候选选择 · 判定编排工具。
- * <p><b>职责</b>：把候选集 + precondition 上下文 + 情境文本编排为一次 NanoJev 混合判定
+ * <p><b>职责</b>：把候选集 + precondition 上下文 + 情境文本编排为一次 决策模型 混合判定
  * （1 state = N 个语义条件 boolean + 1 个行动 choice，<b>一次前向</b>）并解析选中候选：</p>
  * <ol>
  * <li><b>precondition 程序化过滤</b>（{@link SpacePreconditionEvaluator}）：可程序化判定的
  * 条件直接过滤（不满足出局）；语义性条件归 UNKNOWN → 进 boolean 批量；</li>
- * <li><b>问题组装</b>：每个 UNKNOWN 条件一个 boolean 题（{@link NanoJevDecisionTemplates#spacePreconditionQuestion}）
- * + 一个 choice 题（{@link NanoJevDecisionTemplates#spaceActionQuestion}，候选=过滤后剩余集）——
+ * <li><b>问题组装</b>：每个 UNKNOWN 条件一个 boolean 题（{@link DecisionTemplates#spacePreconditionQuestion}）
+ * + 一个 choice 题（{@link DecisionTemplates#spaceActionQuestion}，候选=过滤后剩余集）——
  * 同一 state 一次请求（候选 ≤8 → 题数 ≤9，远低于 96 上限）；</li>
  * <li><b>选中复核</b>：choice 选中项的语义条件 boolean=false → 从可接受集
  * （程序化满足 + 语义条件判定为真）按 choice 分布<b>归一化重采样</b>——模型判据与
@@ -64,7 +64,7 @@ public final class SpaceDecisionServiceUtils {
      * 空间候选判定编排（一次前向）：precondition 程序化过滤 → boolean 批量 + choice →
      * 选中复核/重采样 → 返回选中候选。
      *
-     * @param gate NanoJev 判定门（null → null）
+     * @param gate 决策模型 判定门（null → null）
      *
      * @param projectId 项目 ID
      *
@@ -79,13 +79,13 @@ public final class SpaceDecisionServiceUtils {
      * @return 选中候选（null=判定不可用/未启用/失败/可接受集为空 → 调用方回退）
      */
     public static SpaceDecisionCandidates.SpaceCandidate decide(
-            NanoJevDecisionGate gate, Long projectId, Long characterId,
+            DecisionGate gate, Long projectId, Long characterId,
             List<SpaceDecisionCandidates.SpaceCandidate> candidates,
             SpacePreconditionEvaluator.Context pctx, String stateText) {
         if (gate == null || candidates == null || candidates.size() < 2) {
             return null;
         }
-        if (!gate.isEnabled(NanoJevDecisionScenes.SPACE_DECISION)) {
+        if (!gate.isEnabled(DecisionScenes.SPACE_DECISION)) {
             return null;
         }
         try {
@@ -111,14 +111,14 @@ public final class SpaceDecisionServiceUtils {
                 return null;
             }
             // ② 问题组装（语义条件 boolean 批量 + 行动 choice，同一 state 一次前向）
-            Map<String, NanoJevQuestion> questions = NanoJevState.newQuestions();
+            Map<String, DecisionQuestion> questions = DecisionState.newQuestions();
             Map<String, String> qidKinds = new LinkedHashMap<>();
             Map<String, String> qidToKey = new LinkedHashMap<>();
             int i = 0;
             for (SpaceDecisionCandidates.SpaceCandidate c : unknownPc.values()) {
                 String qid = PRECOND_QID_PREFIX + (i++);
-                questions.put(qid, NanoJevDecisionTemplates.spacePreconditionQuestion(c.precondition()));
-                qidKinds.put(qid, NanoJevQuestion.TYPE_BOOLEAN);
+                questions.put(qid, DecisionTemplates.spacePreconditionQuestion(c.precondition()));
+                qidKinds.put(qid, DecisionQuestion.TYPE_BOOLEAN);
                 qidToKey.put(qid, c.key());
             }
             Map<String, String> criteria = new LinkedHashMap<>();
@@ -127,11 +127,11 @@ public final class SpaceDecisionServiceUtils {
                 criteria.put(c.key(), c.questionText());
                 byKey.put(c.key(), c);
             }
-            questions.put(ACTION_QID, NanoJevDecisionTemplates.spaceActionQuestion(criteria));
-            qidKinds.put(ACTION_QID, NanoJevQuestion.TYPE_CHOICE);
-            NanoJevState state = NanoJevState.text("space" + characterId, stateText, questions);
+            questions.put(ACTION_QID, DecisionTemplates.spaceActionQuestion(criteria));
+            qidKinds.put(ACTION_QID, DecisionQuestion.TYPE_CHOICE);
+            DecisionState state = DecisionState.text("space" + characterId, stateText, questions);
             Map<String, Object> results = gate.mixedDecisions(projectId, characterId,
-                    NanoJevDecisionScenes.SPACE_DECISION, state, qidKinds);
+                    DecisionScenes.SPACE_DECISION, state, qidKinds);
             if (results == null || results.isEmpty()) {
                 return null;
             }
@@ -144,15 +144,15 @@ public final class SpaceDecisionServiceUtils {
                 }
                 String qid = findQid(qidToKey, c.key());
                 Object out = qid == null ? null : results.get(qid);
-                if (out instanceof NanoJevDecisionGate.BooleanOutcome bo && bo.adopted() && bo.value()) {
+                if (out instanceof DecisionGate.BooleanOutcome bo && bo.adopted() && bo.value()) {
                     acceptedKeys.add(c.key());
                 }
             }
             if (acceptedKeys.isEmpty()) {
                 return null;
             }
-            NanoJevDecisionGate.ChoiceOutcome choice =
-                    (NanoJevDecisionGate.ChoiceOutcome) results.get(ACTION_QID);
+            DecisionGate.ChoiceOutcome choice =
+                    (DecisionGate.ChoiceOutcome) results.get(ACTION_QID);
             if (choice == null || !choice.adopted() || choice.chosen() == null) {
                 return null;
             }
@@ -177,7 +177,7 @@ public final class SpaceDecisionServiceUtils {
 
     /** 按 choice 分布 ∩ 可接受集归一化重采样（分布缺失 → 均匀随机）。 */
     private static SpaceDecisionCandidates.SpaceCandidate reSampleAccepted(
-            NanoJevDecisionGate gate, NanoJevDecisionGate.ChoiceOutcome choice,
+            DecisionGate gate, DecisionGate.ChoiceOutcome choice,
             List<String> acceptedKeys,
             Map<String, SpaceDecisionCandidates.SpaceCandidate> byKey) {
         Map<String, Double> dist = new LinkedHashMap<>();
@@ -200,7 +200,7 @@ public final class SpaceDecisionServiceUtils {
         for (Map.Entry<String, Double> e : dist.entrySet()) {
             norm.put(e.getKey(), e.getValue() / s);
         }
-        String re = NanoJevSampler.choose(norm, gate.samplingMode(NanoJevDecisionScenes.SPACE_DECISION), null);
+        String re = DecisionSampler.choose(norm, gate.samplingMode(DecisionScenes.SPACE_DECISION), null);
         return re == null ? null : byKey.get(re);
     }
 

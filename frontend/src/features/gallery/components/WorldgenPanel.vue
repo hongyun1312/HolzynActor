@@ -19,7 +19,9 @@
       ============================================================
     -->
     <template v-if="mode === 'form'">
+      <!-- 嵌入向导时页头由向导统一提供（一页一头）；独立使用时面板自带页头 -->
       <PageHeader
+        v-if="!props.embedded"
         size="sm"
         title="创意发散生成"
         desc="输入一段题材创意与题材类型，AI 按 6 维链式工作流自动生成完整世界观（核心法则 → 时空地理 → 社会势力 → 历史文明 → 存在基础 → 信息传播），完成后预览确认再落库（覆盖更新保留历史版本）。"
@@ -56,7 +58,10 @@
               placeholder="一段或多段话描述这个世界。如：灵气循雾脉流转的架空大陆，宗门垄断修炼资源，凡人在雾海中挣扎求生…" />
           </el-form-item>
           <el-form-item label="题材类型" required>
-            <el-input v-model="form.genre" placeholder="奇幻 / 科幻 / 都市 / 历史 / 末世…" maxlength="50" style="width: 280px" />
+            <el-select v-model="form.genre" placeholder="从固定八类中选择" clearable style="width: 280px">
+              <el-option v-for="c in categories" :key="c.code" :label="c.label" :value="c.label" />
+            </el-select>
+            <span class="genre-hint">固定八类，决定生成与判定口径（生成后仍可在第 2 步改）</span>
           </el-form-item>
           <el-form-item label="输出语言">
             <el-input v-model="form.language" placeholder="默认中文" maxlength="20" style="width: 200px" />
@@ -66,8 +71,9 @@
               <el-option v-for="w in workflows" :key="w.code" :label="`${w.name}（${w.nodeCount} 节点）`" :value="w.code" />
             </el-select>
           </el-form-item>
-          <!-- 生成模式——仅世界观（默认） / 完整项目（worldview+character+初始化） -->
-          <el-form-item label="生成模式">
+          <!-- 生成模式——仅世界观（默认） / 完整项目（worldview+character+初始化）
+               嵌入新建向导时不提供「完整项目」：向导自身会串接初始化，两个入口并存会重复生成 -->
+          <el-form-item v-if="!props.embedded" label="生成模式">
             <el-radio-group v-model="form.mode">
               <el-radio value="worldview_only">仅世界观设定</el-radio>
               <el-radio value="full">完整项目（世界观 + 核心角色 + 初始化）</el-radio>
@@ -79,6 +85,17 @@
           </el-form-item>
         </el-form>
       </div>
+
+      <!--
+        嵌入向导时页头被隐藏，「开始生成」原本是页头里的按钮——必须在面板底部补一个，
+        否则嵌入模式下用户找不到提交入口（实测：只有表单，没有任何可点的提交按钮）。
+      -->
+      <div v-if="props.embedded" class="embed-ops">
+        <span class="embed-tip">「开始生成」会先建一个草稿世界，6 维世界观生成完成后回到本页第 2 步，可逐字段修改。</span>
+        <el-button type="primary" :loading="submitting" :disabled="!canSubmit" @click="doSubmit">
+          <el-icon><HIcon name="MagicStick" /></el-icon>&nbsp;开始生成
+        </el-button>
+      </div>
     </template>
 
     <!--
@@ -87,7 +104,7 @@
       ============================================================
     -->
     <template v-else-if="mode === 'console'">
-      <PageHeader size="sm">
+      <PageHeader v-if="!props.embedded" size="sm">
         <template #default>
           任务控制台
           <el-tag v-if="taskStatusText" size="small" :type="taskStatusTagType" effect="light" class="status-tag">{{ taskStatusText }}</el-tag>
@@ -147,8 +164,11 @@
             <el-button size="small" :loading="previewLoading" @click="loadPreview">
               <el-icon><HIcon name="Refresh" /></el-icon>&nbsp;刷新预览
             </el-button>
-            <el-button size="small" type="primary" :loading="confirming" :disabled="!preview" @click="doConfirm">
+            <el-button v-if="!props.embedded" size="small" type="primary" :loading="confirming" :disabled="!preview" @click="doConfirm">
               <el-icon><HIcon name="Check" /></el-icon>&nbsp;确认落库
+            </el-button>
+            <el-button v-else size="small" type="primary" :disabled="!preview" @click="emitGenerated">
+              <el-icon><HIcon name="Back" /></el-icon>&nbsp;用这份世界观继续（下一步可改）
             </el-button>
           </div>
         </div>
@@ -258,7 +278,7 @@
  * 失败卡片（失败节点 + 错误 + 重试本节点 / 跳过，CAS expectedAttemptCount）+
  * 完成后 6 维产物结构化预览（GET /tasks/{taskId}/preview：essence 定调 / 分节卡片 / 地点表 /
  * 维度 JSON 折叠，参考调试前端 AI 调用详情渲染逻辑）→ 确认落库（POST confirm，防误覆盖）→
- * 跳转项目空间世界详情（/project/:id/world，来源 worldgen 标记可回看）。</p>
+ * 跳转项目空间世界详情（/world/:id/world，来源 worldgen 标记可回看）。</p>
  */
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
@@ -267,8 +287,10 @@ import {
   fetchModelApis, createProject,
   fetchWorldgenWorkflows, createWorldgenTask, fetchWorldgenTask,
   fetchWorldgenPreview, confirmWorldgenTask, retryWorldgenNode, skipWorldgenNode,
-  worldgenStream, worldgenPipelineStream
+  worldgenStream, worldgenPipelineStream,
+  fetchWorldOptions
 } from '@/shared/api'
+import { ensureWorldOpen } from '@/shared/worldSession'
 import WorkflowConsole from './WorkflowConsole.vue'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 // V2.0 批次二：空态统一走 EmptyState
@@ -281,6 +303,20 @@ const mode = ref('form') //
 // ：生成模式（worldview_only 默认=历史行为 / full=完整项目串接）
 const form = reactive({ projectName: '', premise: '', genre: '', language: '中文', workflowCode: '', mode: 'worldview_only' })
 const workflows = ref([])      // 可用工作流定义（GET /workflows）
+
+/**
+ * 题材类型可选项（固定八类）。
+ *
+ * <p>为什么从后端取：类别在落库时会被 {@code WorldCategory.require()} 严格校验，
+ * 前端自己写一份清单迟早与枚举漂移。接口不可用时用兜底清单，保证下拉永远有东西可选。</p>
+ */
+const CATEGORY_FALLBACK = [
+  { code: 'qihuan', label: '奇幻' }, { code: 'kehuan', label: '科幻' },
+  { code: 'dushi', label: '都市' }, { code: 'lishi', label: '历史' },
+  { code: 'moshi', label: '末世' }, { code: 'xianxia', label: '仙侠' },
+  { code: 'richang', label: '日常' }, { code: 'xuanyi', label: '悬疑' }
+]
+const categories = ref(CATEGORY_FALLBACK)
 const apiReady = ref(null)     // AI API 可用性预检
 const apiChecking = ref(false)
 const submitting = ref(false)
@@ -371,8 +407,18 @@ const sectionList = computed(() => {
 })
 
 // ==================== 生命周期 ====================
-onMounted(() => { loadWorkflows(); checkApiReady() })
+onMounted(() => { loadWorkflows(); checkApiReady(); loadWorldOptions() })
 onBeforeUnmount(stopConsole)
+
+/** 拉取固定八类（失败保留兜底清单，绝不因为下拉没数据就拦住用户） */
+async function loadWorldOptions() {
+  try {
+    const opt = await fetchWorldOptions()
+    if (opt && Array.isArray(opt.categories) && opt.categories.length) {
+      categories.value = opt.categories
+    }
+  } catch (_) { /* 保留兜底清单 */ }
+}
 
 // ==================== 工作流 / API 预检 ====================
 /** 加载可用工作流模板，默认选第一个（build_v1） */
@@ -386,10 +432,14 @@ async function loadWorkflows() {
   } catch (_) { workflows.value = [] }
 }
 
-/** 判断某 API 是否可作主 AI（chat/both）用途（与后端 ModelApiService.isChatCapable 对齐） */
+/** 判断某供应商是否存在可用的文本模型（新结构看 models 角色，旧结构回退 purpose/embeddingEnabled） */
 function isChatCapableApi(a) {
-  const p = a && a.purpose
-  if (!p) return !a || a.embeddingEnabled !== 1
+  if (!a) return false
+  if (Array.isArray(a.models)) {
+    return a.models.some(m => (m.role || 'text') === 'text' && m.enabled !== 0)
+  }
+  const p = a.purpose
+  if (!p) return a.embeddingEnabled !== 1
   return p === 'chat' || p === 'both'
 }
 
@@ -441,6 +491,8 @@ async function doSubmit() {
     })
     projectId.value = proj?.id
     projectName.value = proj?.name || name
+    // 分档存储：worldgen 任务与世界产物都落在世界库里，创建后必须先确保这个世界已挂载
+    await ensureWorldOpen(proj.id)
     // ② 创建并异步执行任务
     const res = await createWorldgenTask({
       projectId: proj.id,
@@ -663,7 +715,7 @@ async function doConfirm() {
     }
     ElMessage.success(`已落库：世界观分节更新，地点新增 ${out.locationAdded} 处`)
     // 跳转项目空间世界详情（来源 worldgen 标记可回看）
-    router.push(`/project/${projectId.value}/world`)
+    router.push(`/world/${projectId.value}/world`)
   } catch (e) {
     handleApiError(e, '落库失败')
   } finally {
@@ -730,7 +782,7 @@ async function startPipeline() {
     ElMessage.success(storyDone
       ? '完整项目已生成：世界观 + 核心角色 + 故事规划 + 居民 + 关系 + 时钟 + 知识库全部就绪'
       : '完整项目已生成（故事规划未完成、不阻塞运行，可到世界详情「生成故事规划」补跑）：世界观 + 核心角色 + 居民 + 关系 + 时钟 + 知识库已就绪')
-    router.push(`/project/${projectId.value}/world`)
+    router.push(`/world/${projectId.value}/world`)
   } catch (e) {
     pipelineRunning.value = false
     pipelineConsoleRef.value?.setRunning(false)
@@ -741,7 +793,7 @@ async function startPipeline() {
     ElMessageBox.confirm(
       `完整项目生成中断：${msg}\n\n已生成部分保留。可返回本项目空间手动补齐：\n① 角色任务（任务控制台）\n② 故事规划（世界详情「生成故事规划」）\n③ 「世界初始化」按钮\n④ 重试「确认落库」续跑串接。`,
       '生成中断', { confirmButtonText: '去项目空间', cancelButtonText: '留在本页', type: 'warning' }
-    ).then(() => router.push(`/project/${projectId.value}/world`)).catch(() => { /* 留在本页 */ })
+    ).then(() => router.push(`/world/${projectId.value}/world`)).catch(() => { /* 留在本页 */ })
   }
 }
 
@@ -796,12 +848,47 @@ function now() {
   return new Date().toTimeString().slice(0, 8)
 }
 
-const emit = defineEmits(['open-settings'])
+const emit = defineEmits(['open-settings', 'generated'])
+
+/**
+ * 嵌入模式（新建世界向导的「创意」步）：生成完毕后不在这里落库跳转，
+ * 而是把产物交给父级向导 → 父级把分节回填到「与手动填写同一份」的世界设定表单里让用户二次修改，
+ * 再决定「直接进入世界」还是「继续世界初始化」（两条路径都会先落库）。
+ */
+const props = defineProps({
+  /** true=由父级向导接管后续（隐藏「确认落库」，改为「用这份世界观继续」） */
+  embedded: { type: Boolean, default: false }
+})
+
+/**
+ * 把已生成好的 6 维产物交回父级向导。
+ *
+ * <p>为什么不是直接 confirm 落库：需求要求"生成完成后回填到可编辑表单"，而落库要等用户改完；
+ * 落库动作（confirmWorldgenTask）由父级在保存时统一触发，保证"用户最终看到的就是落库的"。</p>
+ */
+function emitGenerated() {
+  if (!preview.value) {
+    ElMessage.warning('预览尚未就绪，请稍等或点「刷新预览」')
+    return
+  }
+  emit('generated', {
+    taskId: taskId.value,
+    projectId: projectId.value,
+    projectName: projectName.value,
+    preview: preview.value,
+    sections: preview.value?.sections || {}
+  })
+}
 </script>
 
 <style scoped>
 /* V2.0 批次二：1100/820 硬编码 → 全站栅格令牌（新建项目向导内的面板，取正文/表单档） */
-.worldgen-panel { max-width: var(--page-w-content, 1200px); margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+/*
+ * width:100% 不能省：面板是新建向导（flex 纵向容器）的直接子元素，
+ * 只写 `margin: 0 auto` 会让 auto 外边距吃掉全部剩余空间、把面板压成内容宽度
+ * （实测 1200 的容器里面板只有 502 宽，右侧一大片空白）。
+ */
+.worldgen-panel { width: 100%; max-width: var(--page-w-content, 1200px); margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 /* 页头（size="sm"）样式由全局类提供 */
 .status-tag { margin-left: 8px; vertical-align: middle; }
 .api-warn { }
@@ -810,6 +897,8 @@ const emit = defineEmits(['open-settings'])
 .block-title { font-weight: 700; color: var(--text-primary); margin-bottom: 12px; }
 .block-tip { font-size: 0.75rem; color: var(--text-tertiary); font-weight: 400; margin-left: 8px; }
 .gen-form { max-width: var(--page-w-form, 720px); }
+/* 下拉旁的补充说明：与 label 同排、不换行到下一行（下拉宽 280 固定） */
+.genre-hint { margin-left: 10px; font-size: 0.78rem; color: var(--text-regular); }
 .mode-tip { font-size: 0.72rem; color: var(--text-tertiary); line-height: 1.6; margin-top: 4px; max-width: 620px; }
 
 /* ===== 节点列表 ===== */
@@ -858,6 +947,23 @@ const emit = defineEmits(['open-settings'])
 .preview-title { font-weight: 700; color: var(--text-primary); font-size: 0.95rem; }
 .preview-tip { font-size: 0.72rem; color: var(--text-tertiary); font-weight: 400; margin-left: 8px; }
 .preview-ops { display: flex; gap: 8px; }
+
+/* 嵌入向导时的底部操作条（页头被隐藏后唯一的提交入口） */
+.embed-ops { display: flex; align-items: center; gap: 12px; padding: 2px 2px 8px; }
+/*
+ * 提示文字不能裸放在页面底纹上：这一层是液态玻璃画布，越往下越暗（实测底部 rgb ~74,80,88），
+ * 深色小字压上去等于看不见。给个近白药丸底，任何滚动位置都保持可读。
+ */
+.embed-tip {
+  font-size: 0.82rem; color: #3f4a56; margin-right: auto; line-height: 1.6;
+  background: #fdfefe; border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 8px; padding: 7px 12px;
+}
+/* 未填必填项时按钮是 disabled 态，主题里白字压浅绿几乎看不清，这里统一成可读的灰底深字 */
+.embed-ops :deep(.el-button.is-disabled) {
+  color: #7b8794 !important;
+  background: #eef1f3 !important;
+  border-color: #d9dee3 !important;
+}
 .pv-empty { padding: 20px 0; min-height: 120px; }
 .pv-card { padding: 16px 20px; }
 .pv-title { font-weight: 700; color: var(--text-primary); margin-bottom: 10px; font-size: 0.88rem; }

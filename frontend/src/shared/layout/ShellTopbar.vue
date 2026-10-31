@@ -14,7 +14,7 @@
 <template>
   <!--
     顶部栏（52px）：全局唯一实现。
-    三段结构：左侧（返回/侧栏开关/项目切换/标题面包屑）· 中部（全局搜索=命令面板入口）· 右侧（酒馆式图标抽屉栏 + 主题/密度 + 通知 + 应用菜单 + 窗口三键）。
+    三段结构：左侧（返回/项目切换/标题面包屑；侧栏开关只在窄屏覆盖式侧栏收起时兜底出现）· 中部（全局搜索=命令面板入口）· 右侧（酒馆式图标抽屉栏 + 主题/密度 + 通知 + 应用菜单 + 窗口三键）。
     历史背景：此前项目空间顶栏与 ConsoleTopbar 是两套独立实现，导致「画廊能用的入口进项目就没了」；
     现统一到本组件，用 mode 区分数据来源（项目模式显示项目切换与面包屑，全局模式显示品牌）。
     桌面端：主窗口是**无边框**的，本顶栏同时承担窗口标题栏——整条是拖拽移动区
@@ -22,9 +22,11 @@
   -->
   <header class="shell-topbar">
     <div class="tb-left">
-      <button v-if="showBack" class="tb-icon-btn" title="返回项目画廊" @click="$emit('back')">
+      <button v-if="showBack" class="tb-icon-btn" :title="backTitle" @click="$emit('back')">
         <el-icon :size="17"><HIcon name="ArrowLeft" /></el-icon>
       </button>
+      <!-- 覆盖式（窄屏）侧栏收起时，侧栏本身不可见，这里保留唯一的唤起入口；
+           常驻/图标栏形态的开关已经移到侧栏自己身上（DomainSidebar 头部），顶栏不再重复。 -->
       <button
         v-if="showSidebarToggle"
         class="tb-icon-btn"
@@ -34,16 +36,18 @@
         <el-icon :size="17"><HIcon :name="sidebarCollapsed ? 'Expand' : 'Fold'" /></el-icon>
       </button>
 
-      <!-- 项目切换器：单击展开最近项目列表（数据来自 /api/projects，只读） -->
+      <!-- 世界切换器：单击展开最近世界列表（数据来自 /api/worlds，只读）。
+           V1.1.2-beta.1 M5：单活动世界模型下"切世界 = 关掉当前世界再开目标"，
+           因此这里只负责发导航意图，真正的 close→open 由路由守卫（/world/:id/** 深链兜底）完成。 -->
       <el-dropdown v-if="mode === 'project'" trigger="click" @command="switchProject">
-        <button class="tb-project" title="切换项目">
-          <span class="tb-project-name">{{ project?.name || '项目' }}</span>
+        <button class="tb-project" title="切换世界">
+          <span class="tb-project-name">{{ project?.name || '世界' }}</span>
           <el-icon :size="12"><HIcon name="ArrowDown" /></el-icon>
         </button>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item :disabled="true">
-              <span class="tb-dd-title">最近项目</span>
+              <span class="tb-dd-title">最近世界</span>
             </el-dropdown-item>
             <el-dropdown-item
               v-for="p in projects"
@@ -53,8 +57,8 @@
             >
               {{ p.name }}
             </el-dropdown-item>
-            <el-dropdown-item v-if="!projects.length" :disabled="true">暂无其它项目</el-dropdown-item>
-            <el-dropdown-item divided command="__gallery__">前往项目画廊…</el-dropdown-item>
+            <el-dropdown-item v-if="!projects.length" :disabled="true">暂无其它世界</el-dropdown-item>
+            <el-dropdown-item divided command="__gallery__">返回世界画廊…</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -241,6 +245,7 @@ import { useTheme } from '@/shared/theme'
 import { useLayoutStore, DENSITY_MODES, CONTENT_MODES } from '@/shared/store/layout'
 import { TOPBAR_ENTRIES, DRAWER_PANELS, interfaceInfo } from './navModel'
 import { fetchProjects } from '@/shared/api'
+import { leaveToLibrary } from '@/shared/worldSession'
 import NotificationBell from '@/shared/components/console/NotificationBell.vue'
 import AppMenu from '@/shared/components/console/AppMenu.vue'
 import WindowControls from './WindowControls.vue'
@@ -267,8 +272,10 @@ const props = defineProps({
   brandLabel: { type: String, default: '控制台' },
   /** 是否显示返回画廊按钮 */
   showBack: { type: Boolean, default: true },
-  /** 是否显示侧栏开关 */
-  showSidebarToggle: { type: Boolean, default: true },
+  /** 返回按钮 tooltip（开发者模式等宿主可改成「退出开发者模式」，避免文案与实际落点不符） */
+  backTitle: { type: String, default: '返回世界画廊' },
+  /** 是否显示侧栏开关（仅覆盖式侧栏收起时由壳传入：那时侧栏自己不可见，需要顶栏兜底入口） */
+  showSidebarToggle: { type: Boolean, default: false },
   /** 侧栏是否处于折叠/窄栏形态（决定图标方向） */
   sidebarCollapsed: { type: Boolean, default: false }
 })
@@ -314,12 +321,14 @@ onMounted(async () => {
   } catch (_) { projects.value = [] }
 })
 
-/** 切换项目 / 前往画廊 */
+/** 切换世界 / 前往世界画廊 */
 function switchProject(id) {
-  if (id === '__gallery__') { router.push('/'); return }
+  // 「返回世界画廊」= 关闭当前世界（压盘）再跳转：纯 router.push('/') 会把世界留成挂载态，
+  // 世界画廊里它一直显示"运行中"，下次打开别处还会 409（见 shared/worldSession.js）。
+  if (id === '__gallery__') { leaveToLibrary(router); return }
   if (!id || id === props.projectId) return
   emit('switch-project', id)
-  router.push(`/project/${id}/sandbox`)
+  router.push(`/world/${id}/sandbox`)
 }
 
 /**

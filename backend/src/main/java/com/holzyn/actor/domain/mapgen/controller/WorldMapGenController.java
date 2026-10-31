@@ -50,7 +50,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 世界地图生成管线 V1.1 的 REST / SSE 入口（{@code /api/projects/{projectId}/map/**}）。
+ * 世界地图生成管线 V1.1 的 REST / SSE 入口（{@code /api/worlds/{projectId}/map/**}）。
  *
  * <p><b>为什么路径是 {@code /map} 而不是 {@code /world-map}</b>：旧管线（{@code domain/worldmap}）
  * 已经占用了 {@code /world-map} 上的 {@code POST /generate} 与 {@code GET /}，两套同时在跑、
@@ -76,7 +76,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/projects/{projectId}/map")
+@RequestMapping("/api/worlds/{projectId}/map")
 @RequiredArgsConstructor
 public class WorldMapGenController {
 
@@ -86,17 +86,17 @@ public class WorldMapGenController {
      * 由 {@link MapBundleQueryService} 生成，直接引用这个常量，避免前端拿到的 URL 与实际
      * 映射不一致（这种错最典型的表现是「地图页一直是空白底图」）。</p>
      */
-    public static final String TERRAIN_URL_TEMPLATE = "/api/projects/%d/map/terrain.png?v=%d";
+    public static final String TERRAIN_URL_TEMPLATE = "/api/worlds/%d/map/terrain.png?v=%d";
 
     /**
      * 写实底图 URL 模板（{@code %d}=项目，{@code %d}=版本，{@code %d}=像素档 1024/2048/4096）。
      */
     public static final String COMPOSITE_URL_TEMPLATE =
-            "/api/projects/%d/map/composite.png?v=%d&size=%d";
+            "/api/worlds/%d/map/composite.png?v=%d&size=%d";
 
     /** 夜景写实底图 URL 模板。 */
     public static final String COMPOSITE_NIGHT_URL_TEMPLATE =
-            "/api/projects/%d/map/composite-night.png?v=%d&size=%d";
+            "/api/worlds/%d/map/composite-night.png?v=%d&size=%d";
 
     private final MapGenOrchestrator orchestrator;
     private final MapBundleQueryService query;
@@ -107,12 +107,13 @@ public class WorldMapGenController {
     private final ActorMapAssetTypeRepository assetTypeRepository;
 
     /**
-     * 生成请求（两个字段都可空：缺省用配置里的尺度与派生的种子）。
+     * 生成请求（字段都可空：缺省沿用上一张图的种子与配置里的尺度）。
      *
-     * @param seed 种子（给了就是「复现某张图」，不给就是「重掷」）
-     * @param size 边长（格；缺省取 {@code mapgen.size}，仅当与配置不同才生效，便于实验）
+     * @param seed   种子（给了就是「复现某张图」）
+     * @param size   边长（格；缺省取 {@code mapgen.size}，仅当与配置不同才生效，便于实验）
+     * @param reroll 是否重掷种子（true=换一座岛；布局手改会因 {@code feature_code} 对不上而丢弃）
      */
-    public record GenerateRequest(Long seed, Integer size) {
+    public record GenerateRequest(Long seed, Integer size, Boolean reroll) {
     }
 
     /**
@@ -120,17 +121,19 @@ public class WorldMapGenController {
      *
      * @param projectId 项目 ID
      * @param req       生成请求（可空）
-     * @return {@code {mapId, status:"running"}}
+     * @return {@code {mapId, status:"running", reroll}}
      */
     @PostMapping("/generate")
     public R<Map<String, Object>> generate(@PathVariable Long projectId,
                                            @RequestBody(required = false) GenerateRequest req) {
         Long seed = req == null ? null : req.seed();
-        Long mapId = orchestrator.generate(projectId, seed);
+        boolean reroll = req != null && Boolean.TRUE.equals(req.reroll());
+        Long mapId = orchestrator.generate(projectId, seed, reroll);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("mapId", mapId);
         out.put("status", "running");
         out.put("seed", seed);
+        out.put("reroll", reroll);
         return R.ok(out);
     }
 

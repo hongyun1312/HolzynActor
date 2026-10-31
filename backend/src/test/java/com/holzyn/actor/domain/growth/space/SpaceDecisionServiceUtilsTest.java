@@ -1,7 +1,7 @@
 package com.holzyn.actor.domain.growth.space;
 
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionGate;
-import com.holzyn.actor.ai.nanojev.decision.NanoJevDecisionScenes;
+import com.holzyn.actor.ai.decision.gate.DecisionGate;
+import com.holzyn.actor.ai.decision.gate.DecisionScenes;
 import com.holzyn.actor.domain.npc.state.entity.ActorNpcState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,13 +30,13 @@ import static org.mockito.Mockito.when;
  */
 class SpaceDecisionServiceUtilsTest {
 
-    private NanoJevDecisionGate gate;
+    private DecisionGate gate;
 
     @BeforeEach
     void setUp() {
-        gate = mock(NanoJevDecisionGate.class);
-        when(gate.isEnabled(NanoJevDecisionScenes.SPACE_DECISION)).thenReturn(true);
-        when(gate.samplingMode(NanoJevDecisionScenes.SPACE_DECISION)).thenReturn("sample");
+        gate = mock(DecisionGate.class);
+        when(gate.isEnabled(DecisionScenes.SPACE_DECISION)).thenReturn(true);
+        when(gate.samplingMode(DecisionScenes.SPACE_DECISION)).thenReturn("sample");
     }
 
     private static SpaceDecisionCandidates.SpaceCandidate cand(String key, String action, String precondition) {
@@ -55,12 +55,12 @@ class SpaceDecisionServiceUtilsTest {
         int i = 0;
         for (String key : pcTrue) {
             results.put(SpaceDecisionServiceUtils.PRECOND_QID_PREFIX + (i++),
-                    new NanoJevDecisionGate.BooleanOutcome(true, true,
-                            NanoJevDecisionGate.DISP_ADOPTED, 0.9, 0.9, 0.3, 50));
+                    new DecisionGate.BooleanOutcome(true, true,
+                            DecisionGate.DISP_ADOPTED, 0.9, 0.9, 0.3, 50));
         }
         results.put(SpaceDecisionServiceUtils.ACTION_QID,
-                new NanoJevDecisionGate.ChoiceOutcome(chosenKey, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, distribution, 0.8, 0.7, 50));
+                new DecisionGate.ChoiceOutcome(chosenKey, true,
+                        DecisionGate.DISP_ADOPTED, distribution, 0.8, 0.7, 50));
         return results;
     }
 
@@ -71,7 +71,7 @@ class SpaceDecisionServiceUtilsTest {
                 List.of(cand("a", "甲", null), cand("b", "乙", null)), ctx(), "情境"));
         assertNull(SpaceDecisionServiceUtils.decide(gate, 1L, 1L,
                 List.of(cand("a", "甲", null)), ctx(), "情境"));
-        when(gate.isEnabled(NanoJevDecisionScenes.SPACE_DECISION)).thenReturn(false);
+        when(gate.isEnabled(DecisionScenes.SPACE_DECISION)).thenReturn(false);
         assertNull(SpaceDecisionServiceUtils.decide(gate, 1L, 1L,
                 List.of(cand("a", "甲", null), cand("b", "乙", null)), ctx(), "情境"));
     }
@@ -83,9 +83,9 @@ class SpaceDecisionServiceUtilsTest {
                 cand("a", "去河边挑水", null), cand("b", "坐下发呆", null));
         Map<String, Object> results = new LinkedHashMap<>();
         results.put(SpaceDecisionServiceUtils.ACTION_QID,
-                new NanoJevDecisionGate.ChoiceOutcome("b", true,
-                        NanoJevDecisionGate.DISP_ADOPTED, Map.of("a", 0.2, "b", 0.8), 0.8, 0.7, 50));
-        when(gate.mixedDecisions(eq(1L), eq(1L), eq(NanoJevDecisionScenes.SPACE_DECISION),
+                new DecisionGate.ChoiceOutcome("b", true,
+                        DecisionGate.DISP_ADOPTED, Map.of("a", 0.2, "b", 0.8), 0.8, 0.7, 50));
+        when(gate.mixedDecisions(eq(1L), eq(1L), eq(DecisionScenes.SPACE_DECISION),
                 any(), any())).thenReturn(results);
         SpaceDecisionCandidates.SpaceCandidate chosen =
                 SpaceDecisionServiceUtils.decide(gate, 1L, 1L, cands, ctx(), "情境");
@@ -109,7 +109,7 @@ class SpaceDecisionServiceUtilsTest {
                 cand("a", "去河边挑水", "若有人同去"), cand("b", "坐下发呆", null));
         // 语义条件（pc0）判定为真 + choice 选中 a
         Map<String, Object> results = mixed(List.of("a"), "a", Map.of("a", 0.6, "b", 0.4));
-        when(gate.mixedDecisions(eq(1L), eq(1L), eq(NanoJevDecisionScenes.SPACE_DECISION),
+        when(gate.mixedDecisions(eq(1L), eq(1L), eq(DecisionScenes.SPACE_DECISION),
                 any(), any())).thenReturn(results);
         SpaceDecisionCandidates.SpaceCandidate chosen =
                 SpaceDecisionServiceUtils.decide(gate, 1L, 1L, cands, ctx(), "情境");
@@ -125,12 +125,12 @@ class SpaceDecisionServiceUtilsTest {
         // pc0=false：a 出可接受集；choice 仍选 a（模型误判）→ 重采样到 b（唯一可接受）
         Map<String, Object> results = new LinkedHashMap<>();
         results.put(SpaceDecisionServiceUtils.PRECOND_QID_PREFIX + "0",
-                new NanoJevDecisionGate.BooleanOutcome(false, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, 0.1, 0.9, 0.3, 50));
+                new DecisionGate.BooleanOutcome(false, true,
+                        DecisionGate.DISP_ADOPTED, 0.1, 0.9, 0.3, 50));
         results.put(SpaceDecisionServiceUtils.ACTION_QID,
-                new NanoJevDecisionGate.ChoiceOutcome("a", true,
-                        NanoJevDecisionGate.DISP_ADOPTED, Map.of("a", 0.9, "b", 0.1), 0.9, 0.5, 50));
-        when(gate.mixedDecisions(eq(1L), eq(1L), eq(NanoJevDecisionScenes.SPACE_DECISION),
+                new DecisionGate.ChoiceOutcome("a", true,
+                        DecisionGate.DISP_ADOPTED, Map.of("a", 0.9, "b", 0.1), 0.9, 0.5, 50));
+        when(gate.mixedDecisions(eq(1L), eq(1L), eq(DecisionScenes.SPACE_DECISION),
                 any(), any())).thenReturn(results);
         SpaceDecisionCandidates.SpaceCandidate chosen =
                 SpaceDecisionServiceUtils.decide(gate, 1L, 1L, cands, ctx(), "情境");
@@ -146,20 +146,20 @@ class SpaceDecisionServiceUtilsTest {
         // 语义条件判定 failed（无 BooleanOutcome）→ 可接受集仅 b；choice 选未知键 → null
         Map<String, Object> results = new LinkedHashMap<>();
         results.put(SpaceDecisionServiceUtils.ACTION_QID,
-                new NanoJevDecisionGate.ChoiceOutcome("bogus", true,
-                        NanoJevDecisionGate.DISP_ADOPTED, Map.of("bogus", 1.0), 1.0, 0.0, 50));
-        when(gate.mixedDecisions(eq(1L), eq(1L), eq(NanoJevDecisionScenes.SPACE_DECISION),
+                new DecisionGate.ChoiceOutcome("bogus", true,
+                        DecisionGate.DISP_ADOPTED, Map.of("bogus", 1.0), 1.0, 0.0, 50));
+        when(gate.mixedDecisions(eq(1L), eq(1L), eq(DecisionScenes.SPACE_DECISION),
                 any(), any())).thenReturn(results);
         assertNull(SpaceDecisionServiceUtils.decide(gate, 1L, 1L, cands, ctx(), "情境"));
         // 语义条件为假 + choice 选 a → 重采样失败（b 不在分布）→ 均匀回退仍可返回 b
         Map<String, Object> results2 = new LinkedHashMap<>();
         results2.put(SpaceDecisionServiceUtils.PRECOND_QID_PREFIX + "0",
-                new NanoJevDecisionGate.BooleanOutcome(false, true,
-                        NanoJevDecisionGate.DISP_ADOPTED, 0.1, 0.9, 0.3, 50));
+                new DecisionGate.BooleanOutcome(false, true,
+                        DecisionGate.DISP_ADOPTED, 0.1, 0.9, 0.3, 50));
         results2.put(SpaceDecisionServiceUtils.ACTION_QID,
-                new NanoJevDecisionGate.ChoiceOutcome("a", true,
-                        NanoJevDecisionGate.DISP_ADOPTED, Map.of("a", 0.9), 0.9, 0.5, 50));
-        when(gate.mixedDecisions(eq(1L), eq(1L), eq(NanoJevDecisionScenes.SPACE_DECISION),
+                new DecisionGate.ChoiceOutcome("a", true,
+                        DecisionGate.DISP_ADOPTED, Map.of("a", 0.9), 0.9, 0.5, 50));
+        when(gate.mixedDecisions(eq(1L), eq(1L), eq(DecisionScenes.SPACE_DECISION),
                 any(), any())).thenReturn(results2);
         SpaceDecisionCandidates.SpaceCandidate chosen =
                 SpaceDecisionServiceUtils.decide(gate, 1L, 1L, cands, ctx(), "情境");

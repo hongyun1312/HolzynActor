@@ -41,7 +41,7 @@ import java.util.List;
  * GET movements（M2 当前在途移动列表）。供新首页 2D 世界地图 / 图谱消费。</p>
  */
 @RestController
-@RequestMapping("/api/projects/{projectId}/world-map")
+@RequestMapping("/api/worlds/{projectId}/world-map")
 @Slf4j
 @RequiredArgsConstructor
 public class WorldMapController {

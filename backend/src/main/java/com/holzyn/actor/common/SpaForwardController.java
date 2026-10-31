@@ -28,25 +28,30 @@ import org.springframework.web.bind.annotation.GetMapping;
  * <p>原理：Spring Boot 默认仅对 static 目录下的静态文件做映射，
  * 不会将未知路径回退到 index.html。此控制器显式拦截前端路由并转发。</p>
  * <p>不影响：/api/** 由各自 Controller 处理；静态资源（JS/CSS/图片）由 Spring Boot 默认 ResourceHandler 优先匹配。</p>
- * <p>路由范围（actor）：/login（OIDC 登录引导）、/register（注册页）、/project/**（项目/对话/行动/人群）、/admin/**（管理后台）。</p>
+ * <p>路由范围（actor）：/login（OIDC 登录引导）、/register（注册页）、/worlds（存档列表）、/world/**（世界内页）、/admin/**（管理后台）。</p>
  */
 @Controller
 public class SpaForwardController {
 
     /**
-     * 前端 SPA 路由回退：/login、/register、/projects、/project、/project/**、/admin、/admin/**、
-     * /settings、/settings/**、/account、/onboarding、/tutorial -> index.html。
-     * <p>说明：登录/注册已随无登录化移除，但保留转发以兼容历史直达 URL；/settings 为首页全局设置四子页；
-     * /tutorial 为布局重构批次③ 的新手上手教程（全局页）。</p>
+     * 前端 SPA 路由回退：/login、/register、/worlds、/world、/world/**、/admin、/admin/**、
+     * /settings、/settings/**、/account、/onboarding、/tutorial、/dev、/dev/** -> index.html。
      *
-     * <p><b>维护提醒</b>：新增顶层前端路由（如 /tutorial）必须同步登记在此，否则直接访问该 URL
+     * <p>V1.1.2-beta.1 M5：`/project(s)` 整体改名 `/world(s)`（世界 = 存档）。旧路径不再转发——
+     * 前端已无 `/project` 路由，留着只会让"收藏夹里的旧地址"进到一个空页面而不报错。</p>
+     *
+     * <p>说明：登录/注册已随无登录化移除，但保留转发以兼容历史直达 URL；/settings 为首页全局设置四子页；
+     * /tutorial 为布局重构批次③ 的新手上手教程（全局页）；
+     * /dev 为开发者模式控制台（一轮新增：独立路由树 + 桌面端独立窗口，深链/刷新必须能直达）。</p>
+     *
+     * <p><b>维护提醒</b>：新增顶层前端路由（如 /tutorial、/dev）必须同步登记在此，否则直接访问该 URL
      * （刷新页面、收藏夹直达、外部链接）会返回 404 JSON —— 开发态由 Vite 的 history 回退兜住，
      * 只有打到 jar 的生产态才会暴露该问题。</p>
      *
      * @return Spring 视图名称 "forward:/index.html"
      */
-    @GetMapping({"/login", "/register", "/projects", "/projects/**", "/project", "/project/**", "/admin", "/admin/**",
-            "/settings", "/settings/**", "/account", "/onboarding", "/tutorial"})
+    @GetMapping({"/login", "/register", "/worlds", "/worlds/**", "/world", "/world/**", "/admin", "/admin/**",
+            "/settings", "/settings/**", "/account", "/onboarding", "/tutorial", "/dev", "/dev/**"})
     public String forwardPortal() {
         return "forward:/index.html";
     }

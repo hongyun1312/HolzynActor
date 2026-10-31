@@ -98,7 +98,7 @@
  * <li><b>草稿模式</b>（不传 projectId，新建项目预览用）：以 v-model 双向绑定外部列表，
  * 编辑直接改本地数组并同步父级，不调后端。</li>
  * </ul>
- * <p>数据来源：/api/projects/{id}/world-locations（项目级，随 .holzyn 导入导出）。</p>
+ * <p>数据来源：/api/worlds/{id}/world-locations（项目级，随 .holzyn 导入导出）。</p>
  */
 import { ref, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -199,7 +199,7 @@ async function doExtract() {
     let finished = false
     let firstDone = null
     const { promise } = streamFetch({
-      url: `/api/projects/${props.projectId}/world-locations/extract/stream`,
+      url: `/api/worlds/${props.projectId}/world-locations/extract/stream`,
       method: 'POST',
       onEvent: (name, data) => {
         if (name === SSE_EVENTS.LOCATION && data && typeof data === 'object') {

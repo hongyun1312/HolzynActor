@@ -24,7 +24,7 @@ import java.time.LocalDateTime;
 
 /**
  * 玩家-角色关系视图对象。
- * <p>职责：作为玩家-角色关系接口（GET/PUT /api/projects/{projectId}/player-profile/relations/*）的
+ * <p>职责：作为玩家-角色关系接口（GET/PUT /api/worlds/{projectId}/player-profile/relations/*）的
  * 返回载体——好感/信任/关系阶段/备注（M3 可编辑基线）+ AI 维护的关系状态摘要/沉淀版本
  * （M6 沉淀写回，本编辑器只读展示）。</p>
  */

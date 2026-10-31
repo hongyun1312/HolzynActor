@@ -55,7 +55,7 @@ public class LearningRelationEventSubscriber implements WorldEventSubscriber {
     private final RelationDynamicsService relationDynamicsService;
 
     /**
-     * 空间重算触发判定（关系变化量评估——世界事件参与角色两两经 NanoJev
+     * 空间重算触发判定（关系变化量评估——世界事件参与角色两两经 决策模型
      * score 幅度 + choice 方向平滑更新好感，失败回退固定增量；异步执行零阻断；
      * 字段注入保持构造器不变）
      */
@@ -109,7 +109,7 @@ public class LearningRelationEventSubscriber implements WorldEventSubscriber {
                     ? "事件" : event.getTitle().trim();
             String reason = "共同经历事件：" + title;
             // 参与者两两双向增减（共同经历让彼此更亲近）
-            // ：关系变化量评估——NanoJev（relation_delta 场景：幅度 score +
+            // ：关系变化量评估——决策模型（relation_delta 场景：幅度 score +
             // 方向 choice 同 state 一次前向）按幅度×方向平滑更新好感（替代固定增量 event-delta），
             // 失败/未启用 → 回退固定增量（零阻断；异步执行，不占本订阅调用方事务）
             for (int i = 0; i < refs.size(); i++) {

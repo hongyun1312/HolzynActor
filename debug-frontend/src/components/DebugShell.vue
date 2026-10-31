@@ -153,7 +153,7 @@ const GROUPS = [
     name: '对接与接入',
     items: [
       { path: '/unity-bridge', label: 'Unity 对接 U1', icon: '◈' },
-      { path: '/nanojev-decision', label: 'NanoJev 判定 N3/N4', icon: '⨯' },
+      { path: '/decision-gate', label: '决策模型判定 N3/N4', icon: '⨯' },
       { path: '/n5-cognition', label: '认知 LOD + 微决策 N5', icon: '✧' }
     ]
   },

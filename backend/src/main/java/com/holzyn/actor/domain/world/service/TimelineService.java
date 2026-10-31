@@ -84,6 +84,23 @@ public class TimelineService {
     /** AI 生成事件输出最大 token */
     private static final int EVENT_MAX_TOKENS = 1024;
 
+    /**
+     * 时间线分页默认条数（前端首屏一批）。
+     *
+     * <p>为什么是 100 而不是 25：25 条一批意味着用户要不停下滑才看到「世界最近发生了什么」，
+     * 实测（本项目时间线页）首屏 25 条时滚到底要连滑 4 次才够一天的历史；100 条在 1440×900 下
+     * 约等于「一屏 3 张卡片 × 33 屏」，足够覆盖近期事件且首屏渲染仍在 100ms 量级。</p>
+     */
+    private static final int PAGE_DEFAULT_LIMIT = 100;
+
+    /**
+     * 时间线单次请求条数上限。
+     *
+     * <p>防 {@code limit=100000} 把整本编年史塞进一次响应（前端若一次性要全量，也应该由
+     * 「滚到底续加载」一批批取，而不是一个请求打爆内存与首屏渲染）。</p>
+     */
+    private static final int PAGE_MAX_LIMIT = 500;
+
     private final ActorEventRepository eventRepository;
     private final ActorProjectRepository projectRepository;
     private final ActorCharacterRepository characterRepository;
@@ -273,6 +290,70 @@ public class TimelineService {
             n.put("gameTime", worldTimeTextOf(projectId, t, calendar));
         }
         return nodes;
+    }
+
+    /**
+     * 分页聚合项目时间线（统一节点，新→旧）。
+     *
+     * <p>为什么要分页而不是继续一次性返回：编年史只增不减（世界跑一周就是几千条行动/事件/记忆），
+     * 一次全量既让首屏等 JSON 传完，也让 {@code v-for} 一次建几千张卡片。分页后首屏只取
+     * {@value #PAGE_DEFAULT_LIMIT} 条，滚到底再取下一批。</p>
+     *
+     * <p>返回结构：{@code {nodes, total, limit, offset, hasMore}}——{@code total} 是过滤后的
+     * <b>总条数</b>（不是本批条数），前端靠它显示「已显示 X / 共 Y 条」；{@code hasMore}
+     * 是 {@code offset + nodes.size() < total}，前端据此停止续拉。</p>
+     *
+     * <p>排序语义与 {@link #aggregate} 完全一致（gameHour 优先、真实时间兜底，新→旧）：
+     * 分页只是切片，不改顺序，所以「第 2 批」必然接在第 1 批之后，不会跳条。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param types 类型过滤（event/action/memory，空=全部）
+     *
+     * @param characterId 角色过滤（可空）
+     *
+     * @param startDate 起始日期（可空）
+     *
+     * @param endDate 结束日期（可空）
+     *
+     * @param limit 本批条数（空/≤0=默认 100，超上限按 500 截断）
+     *
+     * @param offset 起始偏移（空/负数=0，超总数按总数收口）
+     *
+     * @return 分页结果（nodes/total/limit/offset/hasMore）
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> aggregatePage(Long projectId, Set<String> types, Long characterId,
+                                            String startDate, String endDate, Integer limit, Integer offset) {
+        List<Map<String, Object>> all = aggregate(projectId, types, characterId, startDate, endDate);
+        int total = all.size();
+        int size = clampLimit(limit);
+        int from = offset == null || offset < 0 ? 0 : Math.min(offset, total);
+        int to = Math.min(from + size, total);
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("nodes", new ArrayList<>(all.subList(from, to)));
+        page.put("total", total);
+        page.put("limit", size);
+        page.put("offset", from);
+        page.put("hasMore", to < total);
+        return page;
+    }
+
+    /**
+     * 归一化分页条数：空/非正数回落默认 100，超过上限按 500 截断。
+     *
+     * <p>包级可见（非 private）是为了让单测能直接钉住这两个边界——它们是「一次别拉太多」的
+     * 唯一闸门，改成 0 或负数必须被看见。</p>
+     *
+     * @param limit 请求条数（可空）
+     *
+     * @return 生效条数（1..500）
+     */
+    static int clampLimit(Integer limit) {
+        if (limit == null || limit <= 0) {
+            return PAGE_DEFAULT_LIMIT;
+        }
+        return Math.min(limit, PAGE_MAX_LIMIT);
     }
 
     /**

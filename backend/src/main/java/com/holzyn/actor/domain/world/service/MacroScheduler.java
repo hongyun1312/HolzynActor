@@ -102,6 +102,17 @@ public class MacroScheduler {
     private MacroEmergenceService macroEmergenceService;
 
     /**
+     * 世界程度门禁（：休闲/轻度档不调度宏观层——"休闲世界里不应出现势力斗争与宏观调控"
+     * 是设定冲突，不是性能问题，所以这里是<b>硬开关</b>而不是降频）。
+     * <p>为什么用 {@code @Lazy}：{@code WorldToneService} 读目录库索引列，一旦与
+     * 世界引擎侧的装配顺序纠缠就会形成 Bean 环（AGENTS §8.1.5）；懒注入 + null 容错
+     * 让单测里 {@code new MacroScheduler(...)} 依然可用。</p>
+     */
+    @org.springframework.context.annotation.Lazy
+    @Autowired(required = false)
+    private WorldToneService worldToneService;
+
+    /**
      * 每类型每游戏日已触发标记：projectId → 最后处理游戏日（内存态，重启丢失=跨日重触发，
      * 但快照 uk 幂等兜底不重复推进数值——引擎位置不回溯则无害）
      */
@@ -156,6 +167,21 @@ public class MacroScheduler {
         if (!props.isEnabled() || projectId == null || gameSecond == null) {
             return;
         }
+        // 世界程度门禁：休闲档（allowMacro=false）整个宏观层不调度——既不出势力斗争，
+        // 也不出宏观事件/涌现，更不写快照；直接 return 比"降频"更符合设定（不该有的内容
+        // 一次都不出现）。轻度档保留每日链（人口/经济/收成这类生活层）但跳过势力对抗链。
+        boolean factionAllowed = true;
+        if (worldToneService != null) {
+            try {
+                if (!worldToneService.allowMacro(projectId)) {
+                    return;
+                }
+                factionAllowed = worldToneService.allowFactionEngine(projectId);
+            } catch (RuntimeException e) {
+                // 门禁读不到档位时 fail-open 到"改造前行为"，绝不能因为读不到就不推进世界
+                log.debug("[宏观] 世界程度门禁读取失败，按标准档继续: project={} 原因={}", projectId, e.toString());
+            }
+        }
         long day = Math.floorDiv(gameSecond, 86400L);
         int minuteOfHour = (int) (Math.floorMod(gameSecond, 3600L) / 60);
         MacroProperties.Schedule s = props.getSchedule();
@@ -169,7 +195,7 @@ public class MacroScheduler {
         }
         Long lastFaction = lastFactionDay.get(projectId);
         // 每旬首日 00:10~00:14 窗口（00:10 槽）
-        if (minuteOfHour >= 10 && minuteOfHour <= 14
+        if (factionAllowed && minuteOfHour >= 10 && minuteOfHour <= 14
                 && Math.floorMod(day, s.getDaysPerXun()) == 0 && (lastFaction == null || lastFaction != day)) {
             lastFactionDay.put(projectId, day);
             dispatchMacroTick(projectId, day, gameSecond, "旬宏观 tick（00:10 槽）",
