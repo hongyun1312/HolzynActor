@@ -84,6 +84,16 @@ public class ActorDecisionLog {
     @Column(name = "trigger_type", length = 20)
     private String triggerType;
 
+    /**
+     * 决策落点解析留痕（三方对账，V208 加列）。
+     *
+     * <p>JSON：{@code {targetRef,x,z,featureCode,resolvedBy,snapped,pathLengthM,etaGameSecond}}。
+     * 由 {@code AgentActionService} 在「AI 给引用 → 服务端算落点」之后回填——它是
+     * 「模型守不守契约」（{@code resolvedBy} 分布）与「AI 让人去哪 vs 图上人在哪」唯一对账依据。</p>
+     */
+    @Column(name = "resolved_json", columnDefinition = "LONGTEXT")
+    private String resolvedJson;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

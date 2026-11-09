@@ -111,6 +111,18 @@ public class AgentMemoryService {
     @Value("${holzyn.actor.memory.recency-decay-hours:24}")
     private int recencyDecayHours;
 
+    /**
+     * recency 时间基准（时间性验证修复）：
+     * <ul>
+     *   <li>{@code event}（默认）：按记忆<b>事件发生时间</b> created_at 计算——时间真实流逝，
+     *       旧事不会被反复检索"变年轻"；</li>
+     *   <li>{@code access}：按最近检索命中时间 last_access_at 计算（旧行为，检索强化）。</li>
+     * </ul>
+     * 旧行为会让一个月前的事只要被频繁命中就与昨天等权，审计实测 access 基准衰减曲线完全平坦。
+     */
+    @Value("${holzyn.actor.memory.recency-basis:event}")
+    private String recencyBasis;
+
     /** R3 staleness：高重要事实标记「可能过时」的重要度阈值（默认 3，重要度≥该值才参与 staleness 判定） */
     @Value("${holzyn.actor.memory.stale-importance-threshold:3}")
     private int staleImportanceThreshold;
@@ -552,7 +564,7 @@ public class AgentMemoryService {
         }
         List<Scored> scored = new ArrayList<>();
         for (ActorMemory m : candidates) {
-            LocalDateTime base = m.getLastAccessAt() != null ? m.getLastAccessAt() : m.getCreatedAt();
+            LocalDateTime base = recencyBase(m);
             double recency = recencyScore(base, now, recencyDecayHours);
             double relevance = (query == null || query.isBlank())
                     ? 0 : relevanceScore(query, m.getContent());
@@ -638,9 +650,29 @@ public class AgentMemoryService {
     }
 
     /**
-     * recency 指数衰减分（0~1）：距基准时刻越近越高，衰减半程 decayHours 小时。静态可测。
+     * recency 的时间基准：event=事件发生时间（created_at，默认）；access=最近检索命中时间。
+     * <p>last_access_at 语义是「上次被检索」，不是「上次发生」——用它做衰减会把旧事反复刷新成新事。</p>
      */
-    static double recencyScore(LocalDateTime base, LocalDateTime now, int decayHours) {
+    private LocalDateTime recencyBase(ActorMemory m) {
+        return recencyBase(recencyBasis, m.getCreatedAt(), m.getLastAccessAt());
+    }
+
+    /**
+     * recency 基准选择（静态可测，供 AgentMemoryService / MemoryInjectorService 共用）：
+     * {@code event}（默认）=创建时间；{@code access}=最近检索命中时间（无则创建时间）。
+     */
+    public static LocalDateTime recencyBase(String basis, LocalDateTime createdAt, LocalDateTime lastAccessAt) {
+        if ("access".equalsIgnoreCase(basis == null ? "" : basis.trim())) {
+            return lastAccessAt != null ? lastAccessAt : createdAt;
+        }
+        return createdAt;
+    }
+
+    /**
+     * recency 指数衰减分（0~1）：距基准时刻越近越高，衰减半程 decayHours 小时。静态可测。
+     * <p>public 供时间性审计直接复用同一公式——审计若另写一份，两条曲线就不可比。</p>
+     */
+    public static double recencyScore(LocalDateTime base, LocalDateTime now, int decayHours) {
         if (base == null || now == null) {
             return 0;
         }
@@ -661,8 +693,9 @@ public class AgentMemoryService {
 
     /**
      * Smallville 检索总评分 = 2×重要度 + 3×recency + 2×relevance。静态可测。
+     * <p>public 供时间性审计复用同一公式。</p>
      */
-    static double retrievalScore(int importance, double recency, double relevance) {
+    public static double retrievalScore(int importance, double recency, double relevance) {
         return 2.0 * importance + 3.0 * recency + 2.0 * relevance;
     }
 
@@ -1495,7 +1528,7 @@ public class AgentMemoryService {
                 return m.getCharacterId();
             }
         }
-        return memberRepository.findByConversationId(conv.getId()).stream()
+        return memberRepository.findActiveByConversationId(conv.getId()).stream()
                 .findFirst().map(ActorConversationMember::getCharacterId).orElse(null);
     }
 

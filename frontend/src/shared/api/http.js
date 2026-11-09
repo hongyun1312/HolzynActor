@@ -19,6 +19,17 @@
 // 共享 HTTP 客户端：axios 实例 + 统一响应解包（R 格式 { code, message, data }）
 import axios from 'axios'
 
+/**
+ * AI 生成类请求的超时（300s）。
+ *
+ * <p>为什么单独给一个常量而不是改全局默认：全局 10s 是「列表/详情」的快速失败线，
+ * 调大它会让真正的网络故障也要等 5 分钟才报错；而 AI 生成是长任务，本机/自托管的
+ * 大模型单次输出常到 60~120s，角色卡这类长结构化输出偶尔超过 2 分钟——旧的 60/120s
+ * 会在生成仍在进行时把请求掐断，用户看到「超时」但服务端其实成功（白付一次费用）。
+ * 后端读超时本来就是 300s（application.yml timeout-read-seconds: 300），前端与之对齐。</p>
+ */
+export const AI_TIMEOUT = 300000
+
 const http = axios.create({ baseURL: '/', timeout: 10000 })
 http.interceptors.response.use(
   (resp) => {

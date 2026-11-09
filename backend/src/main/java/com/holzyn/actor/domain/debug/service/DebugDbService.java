@@ -90,6 +90,8 @@ public class DebugDbService {
             "actor_memory_working",
             "actor_memory_core",
             "actor_memory_archive",
+            // 事件冷存储表（热表滚动淘汰前归档；调试浏览器可见，取证用）
+            "actor_event_archive",
             // S1（世界沙盘，）：沙盘场景/资产/状态 三表 + S3 摆放表（调试浏览器可见）
             "actor_sandbox_scene",
             "actor_sandbox_asset",
@@ -130,7 +132,27 @@ public class DebugDbService {
             // 对谈模式（M4 记忆/世界书等价物，2026-10-13）：会话级世界书条目表（调试浏览器可见）
             "actor_talk_worldbook",
             // 对谈模式（M5 群聊，2026-10-13）：群聊成员表（场景化成员：在场 present + 拉人 manual，调试浏览器可见）
-            "actor_talk_group_member"
+            "actor_talk_group_member",
+            // 决策台账（：AI/兜底/缺失可追溯；此前只能在聚合接口看 bySource，无法核对单条）
+            "actor_decision_log",
+            // 时间性审计：探针结果表（调试浏览器可见，便于逐条复核否定状态/因果断言）
+            "actor_temporal_probe",
+            // 对接：事实层三表（世界事实谁知道变更流水）。
+            // 缺了它们，物品与市场写出的 stock:* 事实在数据页完全不可见——
+            // 「谁把货买空了、旁人什么时候知道」只能靠翻 AI 日志反推。
+            "actor_world_fact",
+            "actor_world_fact_knowledge",
+            "actor_world_fact_log",
+            // I 阶段四表：物品定义/持有栈/装备槽/流水账 + 配方、制作作业、市场报价与成交。
+            // 这七张表是「世界里的东西」的唯一落点，整世界长跑取证必须能直接看。
+            "actor_item_def",
+            "actor_item_stack",
+            "actor_item_equipment",
+            "actor_item_ledger",
+            "actor_item_recipe",
+            "actor_craft_job",
+            "actor_market_quote",
+            "actor_market_trade"
     );
 
     /** 敏感列黑名单（永不展示；名称不区分大小写） */

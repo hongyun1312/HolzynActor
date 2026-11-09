@@ -124,12 +124,12 @@ class LegacySplitMigratorTest {
         assertTrue(outcome.pass(), "迁移必须整体 PASS，实际错误=" + outcome.errors());
         assertEquals(2, outcome.worlds().size(), "两个世界都要迁");
 
-        // ---- 世界库存在且是 116 张（113 基线 + V207 的布局覆盖/角色坐标/移动轨迹）
+        // ---- 世界库存在且是 130 张（113 基线 + V207 的布局覆盖/角色坐标/移动轨迹 + V210 探针表 + V211 事实层 4 张 + V212 物品域 4 张 + V213 市场 2 张 + V214 制作作业 1 张 + V215 装备 1 张 + V218 事件冷存储 1 张）
         for (String uid : List.of(UID_A, UID_B)) {
             assertTrue(Files.isRegularFile(paths.worldDbFile(uid)), "世界库必须存在：" + uid);
         }
-        assertEquals(116, tableCount(world(UID_A)), "世界库必须是 116 张表");
-        assertEquals(116, tableCount(world(UID_B)), "世界库必须是 116 张表");
+        assertEquals(130, tableCount(world(UID_A)), "世界库必须是 130 张表");
+        assertEquals(130, tableCount(world(UID_B)), "世界库必须是 130 张表");
 
         // ---- 逐表行数：各世界只拿到自己的行
         DataSource wa = world(UID_A);

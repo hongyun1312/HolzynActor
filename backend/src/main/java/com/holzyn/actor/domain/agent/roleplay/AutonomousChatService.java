@@ -115,6 +115,10 @@ public class AutonomousChatService {
     private final WorldLocationRepository locationRepository;
     private final WorldEventBus worldEventBus;
     private final BudgetGuard budgetGuard;
+
+    /** 对话回写世界（自主群聊逐节拍 dialog 事件 + 剧集收尾 digest；开关关时 no-op） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.dialog.service.DialogWorldService dialogWorldService;
     private final AiSpringChatGateway aiChatGateway;
     private final PromptTemplateService promptTemplateService;
     private final UsageLogService usageLogService;
@@ -685,14 +689,14 @@ public class AutonomousChatService {
                 ruleBasedLeave(conv, random.get());
             }
             // ⑥ 在场成员不足 2 → 自然收尾
-            if (memberRepository.findByConversationId(conv.getId()).size() <= 1) {
+            if (memberRepository.findActiveByConversationId(conv.getId()).size() <= 1) {
                 finished = true;
                 if (finishReason == null || finishReason.isBlank()) {
                     finishReason = "场景中只剩下一名角色，对话自然收束。";
                 }
             }
             // ⑦ 预算完全耗尽且无成员离场进展 → 收尾防死循环
-            if (!budgetOk && memberRepository.findByConversationId(conv.getId()).size() >= 2) {
+            if (!budgetOk && memberRepository.findActiveByConversationId(conv.getId()).size() >= 2) {
                 finished = true;
                 if (finishReason == null || finishReason.isBlank()) {
                     finishReason = "AI 预算用尽，本场闲聊就此收束。";
@@ -731,6 +735,28 @@ public class AutonomousChatService {
         // ⑨ 收尾归档：会话归档关闭 + 总括事件（参与成员经历记忆由订阅者沉淀）
         Map<String, Object> archive = archiveEpisode(projectId, userId, conv, locationId, locationName,
                 gameHour, participants, beats, triggerType, eventContent, finishReason);
+        // 剧集收尾抽一次 claims/记忆（不按每 6 轮；自主群聊高频，避免 AI 成本失控）
+        if (dialogWorldService != null && dialogWorldService.enabled() && totalReplies > 0) {
+            try {
+                dialogWorldService.onAutonomousEpisodeEnd(
+                        com.holzyn.actor.domain.world.dialog.model.DialogRound.builder()
+                                .channel("conversation")
+                                .projectId(projectId)
+                                .userId(userId)
+                                .sessionId(conv.getId())
+                                .sessionKey("autonomous:" + conv.getId())
+                                .locationId(locationId)
+                                .locationName(locationName)
+                                .participantRefs(new ArrayList<>(participants))
+                                .summary("NPC 自发闲聊收尾：" + beats + " 轮")
+                                .lastMessageId(null)
+                                .gameSecond(gameHour == null ? null : gameHour * 3600L)
+                                .autonomous(true)
+                                .build());
+            } catch (Exception e) {
+                log.warn("[无玩家群聊] 剧集收尾世界回写失败（fail-open）: conv={} : {}", conv.getId(), e.getMessage());
+            }
+        }
         out.put("status", "finished");
         out.put("conversationId", conv.getId());
         out.put("beats", beats);
@@ -800,13 +826,22 @@ public class AutonomousChatService {
      */
     private List<ActorConversationMember> refreshMembers(ActorConversation conv, Long projectId,
                                                          Long locationId, String locationName) {
-        List<ActorConversationMember> current = memberRepository.findByConversationId(conv.getId());
+        List<ActorConversationMember> current = memberRepository.findActiveByConversationId(conv.getId());
         // 现有成员 key（member_type:characterId）
         Set<String> present = new java.util.HashSet<>();
+        List<ActorConversationMember> members = new ArrayList<>();
         for (ActorConversationMember m : current) {
+            // 已软删角色（deleted=1）不得继续作为对话成员发声：成员行是历史快照，
+            // 角色被删除后仍留在会话里会让「幽灵 NPC」继续参与群聊。
+            if (m.getCharacterId() != null) {
+                ActorCharacter ch = characterRepository.findById(m.getCharacterId()).orElse(null);
+                if (ch != null && Integer.valueOf(1).equals(ch.getDeleted())) {
+                    continue;
+                }
+            }
             present.add(keyOf(m.getMemberType(), m.getCharacterId()));
+            members.add(m);
         }
-        List<ActorConversationMember> members = new ArrayList<>(current);
         // 特殊型角色
         for (ActorCharacter ch : characterRepository
                 .findByProjectIdAndTypeAndDeletedOrderByIdAsc(projectId, NpcRefs.TYPE_SPECIAL, 0)) {
@@ -832,7 +867,8 @@ public class AutonomousChatService {
         // 普通型 NPC
         for (ActorCharacter npc : npcRepository
                 .findByProjectIdAndTypeOrderByIdAsc(projectId, NpcRefs.TYPE_COMMON)) {
-            if (npc == null || npc.getId() == null || !npcAtLocation(npc.getLocationId(), npc.getLocation(),
+            if (npc == null || npc.getId() == null || Integer.valueOf(1).equals(npc.getDeleted())
+                    || !npcAtLocation(npc.getLocationId(), npc.getLocation(),
                     locationId, locationName)) {
                 continue;
             }
@@ -879,7 +915,7 @@ public class AutonomousChatService {
         }
         for (ActorCharacter npc : npcRepository
                 .findByProjectIdAndTypeOrderByIdAsc(projectId, NpcRefs.TYPE_COMMON)) {
-            if (npc != null && npc.getId() != null
+            if (npc != null && npc.getId() != null && !Integer.valueOf(1).equals(npc.getDeleted())
                     && npcAtLocation(npc.getLocationId(), npc.getLocation(), locationId, locationName)) {
                 count++;
             }
@@ -914,7 +950,7 @@ public class AutonomousChatService {
         }
         for (ActorCharacter npc : npcRepository
                 .findByProjectIdAndTypeOrderByIdAsc(projectId, NpcRefs.TYPE_COMMON)) {
-            if (npc != null && npc.getId() != null
+            if (npc != null && npc.getId() != null && !Integer.valueOf(1).equals(npc.getDeleted())
                     && npcAtLocation(npc.getLocationId(), npc.getLocation(), locationId, locationName)
                     && roleplayService.isAwakeCharacter(npc, gameHour)) {
                 count++;
@@ -1003,7 +1039,7 @@ public class AutonomousChatService {
                                                            Long gameHour, String triggerType, String eventContent,
                                                            Set<String> participants) {
         try {
-            List<ActorConversationMember> members = memberRepository.findByConversationId(conv.getId());
+            List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conv.getId());
             if (members.isEmpty()) {
                 return null;
             }
@@ -1194,7 +1230,7 @@ public class AutonomousChatService {
      * </ul>
      */
     private void ruleBasedLeave(ActorConversation conv, Random rng) {
-        List<ActorConversationMember> members = memberRepository.findByConversationId(conv.getId());
+        List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conv.getId());
         if (members.size() <= 1) {
             return;
         }
@@ -1346,6 +1382,25 @@ public class AutonomousChatService {
                     .gameHour(gameHour)
                     .sourceKey("roleplay:round:" + projectId + ":" + conv.getId() + ":" + beat)
                     .build());
+            // 同一节拍补一条 kind=dialog 汇总事件（与 roleplay 事件同源、不同 kind；
+            // 订阅者按 kind 分流，不会触发“议论→事件→议论”自触发环）
+            if (dialogWorldService != null && dialogWorldService.enabled()) {
+                dialogWorldService.onAutonomousRound(
+                        com.holzyn.actor.domain.world.dialog.model.DialogRound.builder()
+                                .channel("conversation")
+                                .projectId(projectId)
+                                .userId(userId)
+                                .sessionId(conv.getId())
+                                .sessionKey("autonomous:" + conv.getId())
+                                .locationId(locationId)
+                                .locationName(locationName)
+                                .participantRefs(new ArrayList<>(participants))
+                                .summary(content)
+                                .roundIndex(beat)
+                                .autonomous(true)
+                                .gameHour(gameHour)
+                                .build());
+            }
         } catch (Exception e) {
             log.warn("[无玩家群聊] 逐轮事件发布失败（主流程不受影响）: conv={} beat={} : {}",
                     conv.getId(), beat, e.getMessage());
@@ -1443,7 +1498,7 @@ public class AutonomousChatService {
      */
     private void recycleEmptyConversation(ActorConversation conv, String reason) {
         try {
-            List<ActorConversationMember> members = memberRepository.findByConversationId(conv.getId());
+            List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conv.getId());
             if (!members.isEmpty()) {
                 memberRepository.deleteAll(members);
             }
@@ -1480,7 +1535,7 @@ public class AutonomousChatService {
     private void recycleEmptyEpisode(ActorConversation conv, Long projectId, Long locationId, String locationName,
                                      String triggerType, int beats, String finishReason) {
         try {
-            List<ActorConversationMember> members = memberRepository.findByConversationId(conv.getId());
+            List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conv.getId());
             if (!members.isEmpty()) {
                 memberRepository.deleteAll(members);
             }

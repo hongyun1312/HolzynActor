@@ -569,4 +569,34 @@ class WorldFrameServiceTest {
         when(frameRepository.findByProjectIdAndStatus(1L, "active")).thenReturn(List.of(f));
         assertEquals("", service.activeFrameSummary(1L), "帧 JSON 异常 → 空串（不抛异常）");
     }
+
+    // ====================信息包去重键 ====================
+
+    /**
+     * 同一句话（只有标点/空白差异）归一为同一个键——实跑里「邻镇有人开始收茧…」重复 5 条、
+     * 「催铁料」重复 3 条，重复包各自扩散会把「这事传了几个人」直接算虚。
+     */
+    @Test
+    void packetDedupeKeyNormalizesWhitespaceAndPunctuation() {
+        String a = WorldFrameService.packetDedupeKey("I-1", "邻镇有人开始收茧，价还给得高。");
+        String b = WorldFrameService.packetDedupeKey("I-2", " 邻镇有人开始收茧,价还给得高 ");
+        assertEquals(a, b, "标点/空白差异应视为同一个包");
+        assertNotNull(a);
+    }
+
+    /** 正文不同 → 不同键（不去重真实的多条消息）。 */
+    @Test
+    void packetDedupeKeyDistinguishesDifferentContent() {
+        String a = WorldFrameService.packetDedupeKey("I-1", "邻镇有人开始收茧");
+        String b = WorldFrameService.packetDedupeKey("I-2", "铁料还没到，炉子凉了三天");
+        assertFalse(a.equals(b));
+    }
+
+    /** 正文为空 → 退回 infoId；两者都空 → null（不参与去重）。 */
+    @Test
+    void packetDedupeKeyFallsBackToInfoId() {
+        assertEquals("i:I-9", WorldFrameService.packetDedupeKey("I-9", "   "));
+        assertNull(WorldFrameService.packetDedupeKey(null, null));
+        assertNull(WorldFrameService.packetDedupeKey("  ", ""));
+    }
 }

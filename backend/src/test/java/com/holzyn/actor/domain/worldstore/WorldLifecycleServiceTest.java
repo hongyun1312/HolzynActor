@@ -111,7 +111,7 @@ class WorldLifecycleServiceTest {
     }
 
     @Test
-    @DisplayName("打开空世界：建 113 张表 + 刷 12 张镜像 + 挂载 + 回写索引（AC2 耗时）")
+    @DisplayName("打开空世界：建 130 张表 + 刷 12 张镜像 + 挂载 + 回写索引（AC2 耗时）")
     void openEmptyWorld() {
         long id = createWorld(UID_A, "青禾村");
 
@@ -124,7 +124,7 @@ class WorldLifecycleServiceTest {
         assertTrue(elapsed < 5000, "打开空世界耗时 " + elapsed + "ms（AC2 目标 ≤3s，测试留余量）");
         assertEquals(UID_A, sessions.current().orElseThrow(), "打开后必须成为当前世界");
         assertTrue(Files.isRegularFile(paths.worldDbFile(UID_A)), "世界库文件必须已创建");
-        assertEquals(116, worldTableCount(UID_A), "世界库必须是 116 张表（113 基线 + V207 三张）");
+        assertEquals(130, worldTableCount(UID_A), "世界库必须是 130 张表（113 基线 + V207 三张 + V210 探针表 + V211 事实层 4 张 + V212 物品域 4 张 + V213 市场 2 张 + V214 制作作业 1 张 + V215 装备 1 张 + V218 事件冷存储 1 张）");
 
         WorldIndexDao.WorldIndexRow row = indexDao.readById(id).orElseThrow();
         assertEquals(WorldStatus.MOUNTED, row.status());

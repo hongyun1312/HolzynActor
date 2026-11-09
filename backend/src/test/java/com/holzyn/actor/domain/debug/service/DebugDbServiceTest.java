@@ -248,4 +248,29 @@ class DebugDbServiceTest {
             }
         }
     }
+
+    /**
+     * 对接（整世界长跑取证）：事实层三表 + 物品/市场/制作八表必须可在调试 DB 浏览。
+     *
+     * <p>为什么这条要单独守：这十一张表是「世界里的东西」与「旁人知道什么」的唯一落点，
+     * 但它们是在 I 阶段分批加的，漏登记白名单不会有任何报错——只会在整世界长跑时表现为
+     * 「数据页看不到库存、看不到事实」，逼着人去翻 AI 日志反推。冒烟实测踩过。</p>
+     */
+    @Test
+    void iPhaseTablesInWhitelist() {
+        DebugDbService service = new DebugDbService(null);
+        for (String table : new String[]{
+                "actor_world_fact", "actor_world_fact_knowledge", "actor_world_fact_log",
+                "actor_item_def", "actor_item_stack", "actor_item_equipment", "actor_item_ledger",
+                "actor_item_recipe", "actor_craft_job", "actor_market_quote", "actor_market_trade"}) {
+            try {
+                service.browse(table, 1, 10, null);
+            } catch (NullPointerException npe) {
+                // 校验放行后才会因 jdbcTemplate==null 走到 NPE —— 证明未被白名单拒绝 ✓
+                continue;
+            } catch (BizException be) {
+                throw new AssertionError("表 " + table + " 应在调试 DB 白名单内（校验被拒）", be);
+            }
+        }
+    }
 }

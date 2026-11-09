@@ -21,7 +21,7 @@ desktop/
 
 ## 打包流程（Windows）
 
-1. 构建后端 fat jar（含前端产物）：仓库根 `build.bat`，产物 `backend\target\holzyn-actor-1.1.2-beta.1.jar`。
+1. 构建后端 fat jar（含前端产物）：仓库根 `build.bat`，产物 `backend\target\holzyn-actor-1.1.3-beta.1.jar`。
 2. 生成裁剪 JRE 运行时：`packaging/runtime`（jlink，约 62MB；缺失时 `build-desktop.bat` 会自动生成）。
 3. 打包安装包：在 `desktop/` 目录执行：
 

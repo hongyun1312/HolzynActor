@@ -385,6 +385,17 @@ public class WorldEngine {
     private com.holzyn.actor.domain.world.service.InfoDiffusionService infoDiffusionService;
 
     /**
+     * 事实小时 sweep（契约/事实到期 + 腐坏扩展钩子；字段注入避免改构造器）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.fact.service.FactSweepService factSweepService;
+
+    /** NPC 主动性小时扫描（零 AI；@Lazy 破环，null=未装配跳过）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private com.holzyn.actor.domain.agent.initiative.service.NpcInitiativeService npcInitiativeService;
+
+    /**
      * 记忆系统重构：项目记忆编年史每日提炼挂钩（③-c 游戏日 01:00 错峰帧生成
      * 批量提炼；幂等=当日 source=daily 条目存在即跳过；字段注入避免改构造器）
      */
@@ -1176,8 +1187,9 @@ public class WorldEngine {
         int actions = 0, crowds = 0, events = 0, missingDecisions = 0;
         // 长跑抓修：调度名单必须排除已故（DECEASED）角色——死亡链路只置 stage 标记
         // 不改 deleted，旧查询会把死人拉进每小时决策/感知/闲聊，产出荒谬行动并浪费 AI 预算
+        // 玩家角色（controller=player）同构进 actor_profile，但不由 NPC 自主决策循环驱动
         List<ActorCharacter> characters = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
-                .stream().filter(ch -> ch != null && !ch.isDeceased()).toList();
+                .stream().filter(ch -> ch != null && !ch.isDeceased() && !ch.isPlayer()).toList();
         if (tickSeconds <= 0) {
             tickSeconds = 300; // 配置非法回退 5 游戏分钟
         }
@@ -1210,7 +1222,7 @@ public class WorldEngine {
         // R1 异步派发统计：预热 + 边界补发实际派发的角色数（摘要可观测）
         int lookaheadDispatched = 0;
         for (long s = fromSecond + tickSeconds; s <= toSecond; s += tickSeconds) {
-            // ==================== ⓪ tick 屏障（，：每 tick 等所有请求完成后才推进） ====================
+            // ==================== ⓪ tick 屏障（每 tick 等所有请求完成后才推进） ====================
             // 为什么在 tick 循环最外层：本 tick 派生出的异步写回链（角色决策/刺激即时决策/情绪评估）
             // 必须在「世界时间推进到下一 tick」之前全部落地，否则会出现「NPC 基于 tick N 的感知、
             // 把反应写在 tick N+2」的时序错乱。
@@ -1324,6 +1336,16 @@ public class WorldEngine {
                 dispatchTimeouts += dispatched.timedOut();
                 lookaheadSkipped += dispatched.skipped();
                 lookaheadDispatched += dispatched.completed();
+
+                // ②-a2M5：NPC 主动性小时扫描（契约到期/久别/传闻；零 AI，项目级每小时最多 2 个）
+                if (npcInitiativeService != null) {
+                    try {
+                        npcInitiativeService.scan(projectId, hour * 3600L);
+                    } catch (Exception e) {
+                        log.warn("[世界引擎] NPC 主动性扫描失败（隔离继续）: project={} : {}",
+                                projectId, e.getMessage());
+                    }
+                }
 
                 // ②-b 普通 NPC： ——
                 // dispatch.all-npc-hourly=true 时普通 NPC 已由 ②-a 逐人走引擎决策（感知/思考/行动/
@@ -1499,6 +1521,16 @@ public class WorldEngine {
                         infoDiffusionService.diffuseProject(projectId, hour * 3600L);
                     } catch (Exception e) {
                         log.warn("[世界引擎] 信息包扩散失败（隔离继续）: project={} : {}", projectId, e.getMessage());
+                    }
+                }
+
+                // ②-e2事实 sweep：契约/事实到期 + 腐坏扩展钩子（零 AI；到期事实由
+                // WorldFactService 统一发 fact 过期事件，感知层据此不再展示）
+                if (factSweepService != null) {
+                    try {
+                        factSweepService.hourly(projectId, hour * 3600L);
+                    } catch (Exception e) {
+                        log.warn("[世界引擎] 事实小时 sweep 失败（隔离继续）: project={} : {}", projectId, e.getMessage());
                     }
                 }
 
@@ -1766,6 +1798,10 @@ public class WorldEngine {
      * 2=决策缺失（决策失败；已入队重试=本时段暂无决策待补算，或未入队=本时段无决策记录）
      */
     private int dispatchOneCharacter(ActorCharacter ch, Long projectId, Long userId, long gameSecond) {
+        // （§7.2）：玩家同构进 actor_profile，但不参与 NPC 每小时 AI 决策派发
+        if (ch == null || ch.isPlayer()) {
+            return 0;
+        }
         long hour = Math.floorDiv(gameSecond, 3600L);
         String ref = com.holzyn.actor.common.NpcRefs.of(ch.getId());
         try {
@@ -2012,7 +2048,7 @@ public class WorldEngine {
         Long project = job.getProjectId();
         try {
             ActorCharacter ch = characterRepository.findById(job.getCharacterId()).orElse(null);
-            if (ch == null || Integer.valueOf(1).equals(ch.getDeleted()) || ch.isDeceased()) {
+            if (ch == null || Integer.valueOf(1).equals(ch.getDeleted()) || ch.isDeceased() || ch.isPlayer()) {
                 log.warn("[世界引擎] 决策重试角色不可用（放弃补算）: job={} char={} 原定时刻={}",
                         job.getId(), job.getCharacterId(), job.getGameSecond());
                 decisionRetryService.markAbandoned(job, "角色不存在/已删除/已故，放弃补算");
@@ -2344,9 +2380,18 @@ public class WorldEngine {
             return;
         }
         Long projectId = project.getId();
+        // 目标状态机：跨日先做一次生命周期扫描（卡住/放弃流转），再做规划与目标生成。
+        // 顺序不能反：先扫出「卡住了」的目标，才轮得到后面的规划把它们换掉；
+        // 且扫描是确定性规则（0 AI 成本），失败隔离不影响规划。
+        try {
+            planningService.sweepGoalLifecycle(projectId, hour * 3600L);
+        } catch (Exception e) {
+            log.warn("[世界引擎] 目标生命周期扫描失败（隔离继续）: project={} : {}", projectId, e.getMessage());
+        }
         // 长跑抓修：已故角色不做跨日规划（plan_day/目标生成）
+        // 玩家不做 NPC 的跨日规划（玩家行动由人驱动，规划由对话/行动入口承担）
         List<ActorCharacter> characters = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
-                .stream().filter(ch -> ch != null && !ch.isDeceased()).toList();
+                .stream().filter(ch -> ch != null && !ch.isDeceased() && !ch.isPlayer()).toList();
         for (ActorCharacter ch : characters) {
             try {
                 String ref = com.holzyn.actor.common.NpcRefs.of(ch.getId());

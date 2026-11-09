@@ -198,6 +198,14 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
     private final AtomicInteger inFlight = new AtomicInteger();
 
     /**
+     * 同角色在途决策登记（key = {@code projectId:npcRef}）。
+     *
+     * <p>用途：同一角色已有决策流水线在跑时，后续刺激直接合并跳过——否则 AgentRuntime
+     * 的防重入会让它们空转重试，把小模型服务拖成超时风暴（实跑事故）。</p>
+     */
+    private final java.util.Set<String> pendingRefs = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
      * 启动注册：总开关开启时注册为世界事件总线旁路订阅者（对齐 DebugEventHub 模式，
      * 发布后回调 onEvent；总线对订阅者异常隔离，不影响主广播）。
      */
@@ -227,6 +235,11 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
         if (!realtimeDecisionActivationService.isActive(event.getProjectId())) {
             return;
         }
+        // fact 事件的触发对象必须由 FactPerceptionSubscriber 按可见性精确计算
+        // （private 只给当事人），不能走这里的通用“同地点/global”解析，否则会泄露私密事实。
+        if ("fact".equalsIgnoreCase(normalize(event.getKind()))) {
+            return;
+        }
         Integer importance = event.getImportance();
         if (importance == null || importance < props.getEventImportanceThreshold()) {
             log.debug("[实时决策] 事件重要度低于阈值，仅记录不触发: project={} id={} importance={} 阈值={}",
@@ -235,8 +248,9 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
         }
         Long projectId = event.getProjectId();
         // 长跑抓修：刺激目标名单排除已故角色（死人不应被刺激/触发反应）
+        // 玩家不作为 NPC 刺激目标（玩家由人驱动，不被 AI 决策）
         List<ActorCharacter> chars = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
-                .stream().filter(ch -> ch != null && !ch.isDeceased()).toList();
+                .stream().filter(ch -> ch != null && !ch.isDeceased() && !ch.isPlayer()).toList();
         List<String> targets = resolveEventTargets(event, chars);
         // 他角色行动（kind=action）：行动者自身不触发——"他角色"语义=其他人对此次行动做出反应，
         // 行动者已为自己的行动完成过决策，再触发即自我二次决策（精分风险）；冷却防的是同源重复，
@@ -288,8 +302,9 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
             return;
         }
         // 长跑抓修：靠近刺激目标名单排除已故角色
+        // 玩家不作为 NPC 靠近刺激的 AI 决策目标
         List<ActorCharacter> chars = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
-                .stream().filter(ch -> ch != null && !ch.isDeceased()).toList();
+                .stream().filter(ch -> ch != null && !ch.isDeceased() && !ch.isPlayer()).toList();
         List<String> targets = resolveLocationTargets(locationName, chars, moverRef);
         if (targets.isEmpty()) {
             return;
@@ -331,6 +346,31 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
         }
         String text = "状态紧急程度提升（" + urgencyLevelText(fromLevel) + " → " + urgencyLevelText(toLevel) + "）";
         onStimulus(projectId, npcRef, StimulusType.STATE_URGENCY, text, gameSecond, null, null);
+    }
+
+    /**
+     * 事实变更刺激：由 {@code FactPerceptionSubscriber} 精确给出“该知道的在场者”，
+     * 避免通用事件目标解析把 private 事实扩散给同地点无关者。
+     *
+     * @param projectId 项目 ID
+     * @param refs      收到刺激的角色 ref（已由订阅者按可见性过滤）
+     * @param text      可观察文本
+     * @param gameSecond 游戏秒（可空=当前）
+     */
+    public void onFactChanged(Long projectId, List<String> refs, String text, Long gameSecond) {
+        if (!props.isEnabled() || projectId == null || refs == null || refs.isEmpty()) {
+            return;
+        }
+        if (!realtimeDecisionActivationService.isActive(projectId)) {
+            return;
+        }
+        String stimulus = text == null || text.isBlank() ? "身边的事实发生了变化" : text;
+        for (String ref : refs) {
+            if (ref == null || ref.isBlank()) {
+                continue;
+            }
+            onStimulus(projectId, ref, StimulusType.FACT_CHANGED, stimulus, gameSecond, null, null);
+        }
     }
 
     /**
@@ -397,6 +437,13 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
     private void onStimulus(Long projectId, String npcRef, StimulusType type, String stimulusText,
                             Long gameSecond, Integer importance, List<String> relatedNames) {
         if (!props.isEnabled() || projectId == null || npcRef == null || type == null) {
+            return;
+        }
+        // （§7.2）：玩家同构进 actor_profile，但玩家不做 AI 即时决策
+        // （玩家行动由人驱动；生理/情绪状态仍照常衰减，只是不触发 NPC 式反应）
+        if (isPlayerRef(projectId, npcRef)) {
+            log.debug("[实时决策] 玩家角色不触发即时决策（行动由人驱动）: ref={} type={}", npcRef, type.code());
+            logStimulus(projectId, gameSecond, type.code(), npcRef, stimulusText, "player", "玩家行动由人驱动，不做 AI 决策");
             return;
         }
         // 激活闸门（用户需求）：统一入口兜底门控——三入口（onEvent/onNpcApproach/
@@ -612,8 +659,15 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
      * @return 刺激类型（null 事件回退 WORLD_EVENT）
      */
     static StimulusType eventStimulusType(ActorEvent event) {
-        if (event != null && "action".equalsIgnoreCase(normalize(event.getKind()))) {
+        if (event == null) {
+            return StimulusType.WORLD_EVENT;
+        }
+        String kind = normalize(event.getKind());
+        if ("action".equalsIgnoreCase(kind)) {
             return StimulusType.NPC_ACTION;
+        }
+        if ("fact".equalsIgnoreCase(kind)) {
+            return StimulusType.FACT_CHANGED;
         }
         return StimulusType.WORLD_EVENT;
     }
@@ -758,6 +812,27 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
                     projectId, npcRef, type.code());
             return;
         }
+        // ==================== 同角色在途合并（防重入风暴第一道闸） ====================
+        // 同一角色已有决策在途时，新刺激不再起第二条流水线：AgentRuntime 的防重入会让它
+        // 空转重试（旧配置 20 次 × 3s），而决策模型侧只看到无意义的并发。这里直接合并跳过，
+        // 在途决策本身会读取角色最新状态，不会漏掉这次刺激的语义（实跑事故修复）。
+        String pendingKey = projectId + ":" + npcRef;
+        if (!pendingRefs.add(pendingKey)) {
+            log.info("[实时决策] 同角色已有决策在途，刺激合并跳过: project={} ref={} type={} 刺激={}",
+                    projectId, npcRef, type.code(), abbreviate(base.stimulusText(), 40));
+            return;
+        }
+        // ==================== 在途流水线上限（防洪水第二道闸） ====================
+        // 决策模型单进程吞吐有限（实测 11KB 报文约 1.2s/次、并发 12 时尾延迟 8.8s），
+        // 一次扫描可能同时对 12 个角色发刺激 → 必须限流，超出即降级跳过（角色保持当前计划），
+        // 下一 tick 若仍然紧急会再次触发（实跑事故修复）。
+        int maxInFlight = Math.max(0, props.getMaxConcurrentDecisions());
+        if (maxInFlight > 0 && inFlight.get() >= maxInFlight) {
+            pendingRefs.remove(pendingKey);
+            log.info("[实时决策] 在途决策已达上限（{}），本刺激降级跳过: project={} ref={} type={}",
+                    maxInFlight, projectId, npcRef, type.code());
+            return;
+        }
         if (tickBarrier != null) {
             tickBarrier.register(projectId);
         }
@@ -887,6 +962,7 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
                     if (ownsTick) {
                         budgetGuard.endTick(projectId);
                     }
+                    pendingRefs.remove(projectId + ":" + npcRef);
                     inFlight.decrementAndGet();
                     // 阶段⑤：本 tick 在途工作完成——屏障据此判断"可否推进下一 tick"
                     if (tickBarrier != null) {
@@ -898,6 +974,7 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
         } finally {
             if (!submitted) {
                 // 提交失败（线程池拒绝等）：回滚在途登记，避免屏障永久等待（自愈之外的第二道保险）
+                pendingRefs.remove(projectId + ":" + npcRef);
                 inFlight.decrementAndGet();
                 if (tickBarrier != null) {
                     tickBarrier.complete(projectId);
@@ -1150,6 +1227,30 @@ public class RealTimeDecisionService implements WorldEventSubscriber {
                 Thread.currentThread().interrupt();
                 return;
             }
+        }
+    }
+
+    /**
+     * 引用是否指向玩家角色。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param npcRef    角色引用
+     *
+     * @return true=玩家；查询失败按非玩家处理（不阻断 NPC 链路）
+     */
+    private boolean isPlayerRef(Long projectId, String npcRef) {
+        Long id = com.holzyn.actor.common.NpcRefs.idOf(npcRef);
+        if (projectId == null || id == null) {
+            return false;
+        }
+        try {
+            return characterRepository.findById(id)
+                    .filter(ch -> projectId.equals(ch.getProjectId()))
+                    .map(ActorCharacter::isPlayer)
+                    .orElse(false);
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 }

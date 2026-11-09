@@ -39,6 +39,9 @@ public enum StimulusType {
     /** 世界事件/重大行动（actor_event kind=world/evolution/system 等，事件总线实时） */
     WORLD_EVENT("world_event", "世界事件/重大行动"),
 
+    /** 事实变更（在场者看到门开了/契约失效等；由 FactPerceptionSubscriber 定向触发） */
+    FACT_CHANGED("fact_changed", "身边的事实发生了变化"),
+
     /** 他角色行动 */
     NPC_ACTION("npc_action", "他角色行动"),
 

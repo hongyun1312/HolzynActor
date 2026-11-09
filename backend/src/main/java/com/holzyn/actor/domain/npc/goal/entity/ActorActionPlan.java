@@ -75,6 +75,22 @@ public class ActorActionPlan {
     @Column(name = "executed_at")
     private LocalDateTime executedAt;
 
+    /** 裁决结论：success / partial / fail（空=未裁决，保持旧行为） */
+    @Column(length = 12)
+    private String verdict;
+
+    /** 裁决原因码（如 ROUTE_BLOCKED / AI_PARSE_FALLBACK） */
+    @Column(name = "reason_code", length = 40)
+    private String reasonCode;
+
+    /** 效果草稿 JSON（只落草稿，应用） */
+    @Column(name = "effects_json", columnDefinition = "TEXT")
+    private String effectsJson;
+
+    /** 行动结果事件 ID（actor_event.id） */
+    @Column(name = "event_id")
+    private Long eventId;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

@@ -17,7 +17,12 @@
     <div class="char-side">
       <div class="side-header">
         <span>NPC 角色（{{ characters.length }}）</span>
-        <el-button size="small" type="primary" text @click="openCharDialog()"><el-icon><HIcon name="Plus" /></el-icon>新增</el-button>
+        <div class="side-header-actions">
+          <el-button size="small" type="primary" plain @click="openAiCast">
+            <el-icon><HIcon name="MagicStick" /></el-icon>AI 生成
+          </el-button>
+          <el-button size="small" type="primary" text @click="openCharDialog()"><el-icon><HIcon name="Plus" /></el-icon>新增</el-button>
+        </div>
       </div>
       <div class="side-filter">
         <el-select v-model="typeFilter" size="small" clearable placeholder="类型筛选" style="width: 100%">
@@ -595,6 +600,39 @@
       </template>
     </el-dialog>
 
+    <!-- AI 生成角色（按世界观造人，复用 worldgen_character_v1；不覆盖已有同名角色） -->
+    <el-dialog v-model="castDialog" title="AI 生成角色" width="520px" :close-on-click-modal="false" :close-on-press-escape="!castTaskRunning">
+      <div class="cast-body">
+        <p class="cast-desc">
+          AI 读取本项目世界观设定，决定「这个世界应该有哪些人」，为其生成姓名/身份/势力/职业与逐角色深度档案，
+          再写入角色列表。角色必须落在既有世界观与地点之内；已存在的同名角色会自动跳过，不会覆盖你手工建的人。
+        </p>
+        <div class="cast-progress">
+          <div class="cast-phase">{{ castCurrentLabel }}</div>
+          <el-progress
+            :percentage="castPercent"
+            :status="castTaskStatus === 'failed' || castTaskStatus === 'canceled' ? 'exception' : (castTaskStatus === 'succeeded' ? 'success' : undefined)"
+            :stroke-width="8"
+          />
+          <div class="cast-meta">{{ castDoneCount }}/{{ castTotalCount }} 个阶段 · {{ castStatusText }}</div>
+        </div>
+        <el-alert
+          v-if="castTaskStatus === 'failed' || castTaskStatus === 'canceled'"
+          type="error"
+          :closable="false"
+          show-icon
+          title="生成未完成"
+          :description="castErrorText || '可关闭本窗口后重试；已生成的角色会保留。'"
+        />
+      </div>
+      <template #footer>
+        <el-button :disabled="castTaskRunning" @click="castDialog = false">关闭</el-button>
+        <el-button type="primary" :loading="castTaskRunning" :disabled="castTaskRunning" @click="startAiCast">
+          {{ castTaskRunning ? '生成中…' : (castTaskStatus === 'succeeded' ? '再生成一批' : '开始生成') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -610,7 +648,7 @@
  * <p>数据来源：/api/worlds/{id}/characters、/api/characters/{id}/card(versions)、
  * /api/debug/npc-state、/api/debug/growth/*（记忆族接口见 CharacterMemoryPanel）。</p>
  */
-import { ref, reactive, computed, onMounted, nextTick, defineAsyncComponent } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -626,7 +664,9 @@ import {
   // O6 G2 全生命周期阶段机：项目全 NPC 发育概览（年龄/阶段/认知 LOD/空间源，只读）
   fetchGrowthOverview,
   // O6 G3 人格演化 + 社会面具：偏移日志（含证据链）+ 面具状态（真实/表达 PAD 分离，只读）
-  fetchGrowthShiftLogs, fetchGrowthMaskStatus
+  fetchGrowthShiftLogs, fetchGrowthMaskStatus,
+  // AI 生成角色：复用 worldgen character 工作流（按世界观造人 + 逐角色深度档案）
+  createWorldgenTask, fetchWorldgenTask
 } from '@/shared/api'
 // V2.0 §8.3 首屏拆包：关系拓扑用 AntV G6（打包后 1.44 MB / gzip 414 KB），而它是 12 个标签页里的
 // 第 7 个、且标签本身已是 lazy——静态 import 会让**每次打开角色详情**都先下载 G6，与用户是否看图无关。
@@ -765,6 +805,112 @@ const versionDialog = ref(false)
 const versionLoading = ref(false)
 const versions = ref([])
 const versionDetail = ref(null)
+
+/**
+ * AI 生成角色（按世界观造人）。
+ *
+ * <p>为什么不在这里写提示词：角色阵容 + 逐角色深度档案 + 落库幂等已经是
+ * {@code worldgen_character_v1} 工作流的职责，前端只负责「创建任务 → 显示进度 → 刷新列表」。
+ * 该工作流的输入由后端从世界观设定拼装，因此新角色天然受世界观与地点约束，
+ * 不会凭空造出设定里不存在的种族/势力。</p>
+ */
+const castDialog = ref(false)
+const castStarting = ref(false)
+const castTask = ref(null)
+const castError = ref('')
+let castPollTimer = null
+
+const castTaskStatus = computed(() => castTask.value?.status || '')
+/** 生成中（含建任务瞬间）：禁用关闭以外的所有操作 */
+const castTaskRunning = computed(() => castStarting.value || castTaskStatus.value === 'running')
+const castNodes = computed(() => castTask.value?.nodes || [])
+const castDoneCount = computed(() => castNodes.value.filter((n) => n.status === 'succeeded').length)
+const castTotalCount = computed(() => castTask.value?.workflowNodeCount || castNodes.value.length)
+const castPercent = computed(() => {
+  const total = castTotalCount.value
+  if (!total) return castTaskRunning.value ? 5 : 0
+  return Math.min(100, Math.round((castDoneCount.value / total) * 100))
+})
+const castCurrentLabel = computed(() => {
+  const running = castNodes.value.find((n) => n.status === 'running')
+  if (running) return running.label ? `正在生成：${running.label}` : '正在生成…'
+  if (castTaskStatus.value === 'succeeded') return '角色已生成完毕'
+  if (castTaskStatus.value === 'failed') return '生成中断'
+  if (castTaskStatus.value === 'canceled') return '生成已取消'
+  if (castError.value) return '任务创建失败'
+  return castStarting.value ? '正在创建任务…' : '准备就绪'
+})
+const castStatusText = computed(() => {
+  const s = castTaskStatus.value
+  if (s === 'running') return '生成中，请勿关闭应用'
+  if (s === 'succeeded') return '已写入角色列表'
+  if (s === 'failed') return '生成失败'
+  if (s === 'canceled') return '已取消'
+  return castError.value ? '未开始' : '待开始'
+})
+const castErrorText = computed(() => {
+  if (castError.value) return castError.value
+  const failed = castNodes.value.find((n) => n.status === 'failed')
+  return failed?.error || ''
+})
+
+/** 打开窗口并立即开始（已有任务在跑时只打开窗口看进度） */
+function openAiCast() {
+  castDialog.value = true
+  if (!castTaskRunning.value && castTaskStatus.value !== 'succeeded') {
+    startAiCast()
+  }
+}
+
+/** 创建 character 工作流任务并开始轮询 */
+async function startAiCast() {
+  if (castTaskRunning.value) return
+  castError.value = ''
+  castTask.value = null
+  castStarting.value = true
+  try {
+    const res = await createWorldgenTask({
+      projectId,
+      workflowCode: 'worldgen_character_v1',
+      inputs: {},
+      mode: 'worldview_only'
+    })
+    await refreshCastTask(res.taskId)
+    startCastPolling(res.taskId)
+  } catch (e) {
+    castError.value = e.message || '角色生成任务创建失败'
+    ElMessage.error(castError.value)
+  } finally {
+    castStarting.value = false
+  }
+}
+
+function startCastPolling(taskId) {
+  stopCastPolling()
+  castPollTimer = setInterval(() => refreshCastTask(taskId), 2000)
+}
+function stopCastPolling() {
+  if (castPollTimer) {
+    clearInterval(castPollTimer)
+    castPollTimer = null
+  }
+}
+async function refreshCastTask(taskId) {
+  try {
+    const t = await fetchWorldgenTask(taskId)
+    castTask.value = t
+    if (t && (t.status === 'succeeded' || t.status === 'failed' || t.status === 'canceled')) {
+      stopCastPolling()
+      if (t.status === 'succeeded') {
+        await loadChars()
+        ElMessage.success('角色已生成并写入列表')
+      }
+    }
+    return t
+  } catch (_) {
+    return castTask.value
+  }
+}
 
 /** 加载角色列表 */
 async function loadChars() {
@@ -1304,6 +1450,9 @@ onMounted(async () => {
     openSupplement(supplementName)
   }
 })
+
+// 离页必须停轮询：否则回到画廊/主页后仍在每 2s 打一次接口
+onBeforeUnmount(stopCastPolling)
 </script>
 
 <style scoped>
@@ -1471,4 +1620,12 @@ onMounted(async () => {
 /* 角色新增/编辑对话框 */
 .char-adv-collapse { margin-bottom: 8px; border: none; }
 .char-auto-hint { font-size: 0.78rem; color: var(--text-secondary); margin-left: 8px; }
+
+/* ==================== AI 生成角色 ==================== */
+.side-header-actions { display: flex; align-items: center; gap: 4px; }
+.cast-body { display: flex; flex-direction: column; gap: 14px; }
+.cast-desc { margin: 0; font-size: 0.84rem; line-height: 1.75; color: var(--text-regular); }
+.cast-progress { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border-light); border-radius: 10px; background: var(--bg-layer-2); }
+.cast-phase { font-size: 0.88rem; font-weight: 600; color: var(--text-primary); }
+.cast-meta { font-size: 0.76rem; color: var(--text-secondary); }
 </style>

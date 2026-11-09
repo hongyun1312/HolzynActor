@@ -501,7 +501,7 @@ public class WorldGraphQueryService {
     /** 角色实体 → 角色节点。 */
     private WorldGraphVO.CharacterNode toCharacterNode(ActorCharacter c) {
         return new WorldGraphVO.CharacterNode(
-                c.getId(), c.npcRef(), c.getName(), c.getTitle(), c.getType(),
+                c.getId(), c.npcRef(), c.getName(), c.getTitle(), c.getType(), c.getController(),
                 c.getAffiliation(), c.getOccupation(), c.getLocation(), c.getLocationId(),
                 c.getStage(), c.getImportance(), c.getIsProtagonist());
     }

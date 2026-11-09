@@ -218,6 +218,20 @@ class AgentMemoryServiceTest {
     // ==================== 检索（Smallville 评分） ====================
 
     /**
+     * recency 基准选择：event 用事件发生时间，旧事不会因被反复检索而"变年轻"；
+     * access 保留旧行为（最近命中优先，无命中回退创建时间）。
+     */
+    @Test
+    void recencyBasisSelectsEventOrAccess() {
+        LocalDateTime created = LocalDateTime.of(2026, 8, 1, 12, 0);
+        LocalDateTime accessed = LocalDateTime.of(2026, 8, 21, 12, 0);
+        assertEquals(created, AgentMemoryService.recencyBase("event", created, accessed), "event=创建时间");
+        assertEquals(created, AgentMemoryService.recencyBase(null, created, accessed), "缺省=event");
+        assertEquals(accessed, AgentMemoryService.recencyBase("access", created, accessed), "access=最近命中");
+        assertEquals(created, AgentMemoryService.recencyBase("access", created, null), "无命中回退创建时间");
+    }
+
+    /**
      * recency 指数衰减：无基准=0；刚发生=1；衰减半程后≈e^-1；负龄钳制为 1。
      */
     @Test

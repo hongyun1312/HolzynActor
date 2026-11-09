@@ -150,6 +150,14 @@ public class NpcStateService {
     @Autowired(required = false)
     private WorldClockService worldClockService;
 
+    /**
+     * 地点读口：候选装配需要「他现在在谁家的什么地方」，
+     * 与感知/空间重算共用同一判定（{@code NpcPlaceView}），不再各查一套表。
+     * 字段注入保持构造器不变；null=未装配时不改写「继续当前」候选。
+     */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcPlaceView npcPlaceView;
+
     // ==================== 情绪模型依赖（字段注入，纯数据单测可置空跳过） ====================
 
     /** 情绪锚点仓库（主导情绪最近锚点判定；null=锚点缺失回退 calm） */
@@ -366,12 +374,91 @@ public class NpcStateService {
      *
      * @return 状态行（null=参数非法）
      */
+    /**
+     * 按效果增量调整 urgency 档位（{@code state.urgency}）。
+     *
+     * <p>urgency 原本由需求/健康派生；效果层的「突发事件」允许直接推一档，
+     * 下次衰减推进时会重新派生。0–3 钳制；升档时复用既有
+     * {@link RealTimeDecisionService#onStateUrgencyRise} 刺激，降档/持平只广播状态。</p>
+     *
+     * @param projectId 项目 ID
+     * @param npcRef    角色 ref
+     * @param delta     档位增量（可负）
+     * @param reason    原因（非空时写入 urgency_text）
+     * @return 调整后的档位；角色状态不存在返回 0
+     */
+    @Transactional
+    public int applyUrgencyDelta(Long projectId, String npcRef, int delta, String reason) {
+        if (projectId == null || npcRef == null || npcRef.isBlank()) {
+            return 0;
+        }
+        ActorNpcState st = stateFor(projectId, npcRef);
+        if (st == null) {
+            return 0;
+        }
+        int old = st.getUrgencyLevel() == null ? 0 : st.getUrgencyLevel();
+        int next = Math.max(0, Math.min(3, old + delta));
+        st.setUrgencyLevel(next);
+        if (reason != null && !reason.isBlank()) {
+            st.setUrgencyText(reason.trim());
+        }
+        stateRepository.save(st);
+        publishStateAfterChange(projectId, npcRef, st);
+        if (next > old && realtimeDecisionService != null) {
+            try {
+                Long gs = st.getGameSecond() == null ? 0L : st.getGameSecond();
+                realtimeDecisionService.onStateUrgencyRise(projectId, npcRef, old, next, gs);
+            } catch (Exception e) {
+                log.warn("[状态] urgency 效果升档触发失败（隔离继续）: ref={} : {}", npcRef, e.getMessage());
+            }
+        }
+        log.info("[状态] urgency 效果调整：project={} ref={} {}→{} reason={}",
+                projectId, npcRef, old, next, reason);
+        return next;
+    }
+
     public ActorNpcState stateFor(Long projectId, String npcRef) {
         if (projectId == null || npcRef == null || npcRef.isBlank()) {
             return null;
         }
         ActorNpcState st = stateRepository.findByProjectIdAndNpcRef(projectId, npcRef).orElse(null);
         return st != null ? st : ensureState(projectId, refTypeOf(projectId, npcRef), npcRef, null);
+    }
+
+    /**
+     * 健康增减（被砍伤/慢慢养回来）。
+     *
+     * <p><b>为什么不在这里判死</b>：本期没有死亡与继承（§4.4.3 明确不在范围内）。
+     * {@code health=0} 只是「卧床」标记，由状态模块既有的 urgency 3 表达；
+     * 本方法只负责把数值改对，不越界去写「谁死了」。</p>
+     *
+     * @param projectId 项目 ID
+     * @param npcRef    角色 ref
+     * @param delta     健康增量（负=受伤）
+     * @param reason    原因（写日志；不覆盖 urgency_text）
+     *
+     * @return 变化后的健康值；角色状态不存在返回 -1
+     */
+    @Transactional
+    public int applyHealthDelta(Long projectId, String npcRef, int delta, String reason) {
+        if (projectId == null || npcRef == null || npcRef.isBlank() || delta == 0) {
+            return -1;
+        }
+        ActorNpcState st = stateFor(projectId, npcRef);
+        if (st == null) {
+            return -1;
+        }
+        int before = st.getHealth() == null ? 100 : st.getHealth();
+        int after = Math.max(0, Math.min(100, before + delta));
+        if (after == before) {
+            return before;
+        }
+        st.setHealth(after);
+        stateRepository.save(st);
+        publishStateAfterChange(projectId, npcRef, st);
+        log.info("[状态] 健康变化：project={} ref={} {}→{}（{}）reason={}",
+                projectId, npcRef, before, after, delta > 0 ? "+" + delta : delta, reason);
+        return after;
     }
 
     // ====================：生理基线 ↔ 状态模块联动 ====================
@@ -2139,8 +2226,15 @@ public class NpcStateService {
             }
             com.holzyn.actor.domain.growth.space.SpacePreconditionEvaluator.Context pctx =
                     buildSpacePreconditionContext(projectId, npc, gs, st);
+            // 候选装配带地点口径——「继续当前正在做的事」在别人家门口会被改写成
+            // 「得先回能做这件事的地方」，让「此处不便」进入选项本身（而不是只写在约束句里）。
+            com.holzyn.actor.domain.mapnav.service.NpcPlaceView.Place here =
+                    npcPlaceView == null ? null : npcPlaceView.at(projectId, npcRef);
+            String hereName = here == null ? null : here.name();
+            String hereCategory = here == null ? null : here.category();
             java.util.List<com.holzyn.actor.domain.growth.space.SpaceDecisionCandidates.SpaceCandidate> candidates =
-                    com.holzyn.actor.domain.growth.space.SpaceDecisionCandidates.candidatesFrom(doc, st);
+                    com.holzyn.actor.domain.growth.space.SpaceDecisionCandidates.candidatesFrom(
+                            doc, st, java.util.List.of(), false, currentActivity, hereName, hereCategory);
             // 注入候选合并（社交聚集 + 生理低值，一次重组装；普通 NPC 与核心角色同源口径：
             // 生理候选命中 → 抑制通用「歇一歇/找人说说话」轻行动——配比分层）
             // 昼夜口径 = 引擎推进位置
@@ -2169,7 +2263,7 @@ public class NpcStateService {
             }
             if (!extra.isEmpty()) {
                 candidates = com.holzyn.actor.domain.growth.space.SpaceDecisionCandidates
-                        .candidatesFrom(doc, st, extra, suppressLight);
+                        .candidatesFrom(doc, st, extra, suppressLight, currentActivity, hereName, hereCategory);
             }
             if (candidates.size() < 2) {
                 return null;
@@ -2467,28 +2561,31 @@ public class NpcStateService {
         // 移动至目标地点（真实执行档；目标地点经 onNpcAction 恢复对应需求）
         if (action.target() != null && !action.target().isBlank()) {
             String target = truncatePlain(action.target().trim(), 100);
-            npc.setLocation(target);
-            // 治理批次 0 · 卡1：locationId 与 location 归一一致（特殊 NPC move 行动同口径，
-            // 修「人群移动不写 locationId → 在场过滤用陈旧值」；归一服务缺失/未命中=null 自由文本兜底）
-            Long targetLocationId = null;
-            if (locationNormalizationService != null) {
-                try {
-                    targetLocationId = locationNormalizationService.normalizedId(projectId, target);
-                    npc.setLocationId(targetLocationId);
-                } catch (Exception e) {
-                    log.warn("[状态驱动] 人群移动位置归一失败（保留自由文本）: ref={} : {}", npc.getId(), e.getMessage());
-                }
-            }
-            // 位置移动与地图生成系统 · M2：人群基础版——装配 MovementService 时发起真实移动
-            // （walking→arrived 插值推进，坐标权威由 MovementService.tick 驱动；零 AI）。
-            // 未装配[单测]回退既有瞬移语义（setLocation + syncCrowdStates 派生坐标），零破坏。
-            if (movementService != null) {
-                try {
-                    movementService.startMove(projectId, NpcRefs.of(npc.getId()), NpcRefs.normalizeType(npc.getType()),
-                            com.holzyn.actor.domain.worldmap.entity.ActorMovement.REASON_PLAN,
-                            targetLocationId, target, gameSecond);
-                } catch (Exception e) {
-                    log.warn("[状态驱动] 人群真实移动发起失败（回退瞬移）: ref={} : {}", npc.getId(), e.getMessage());
+            // 地点写入规范化（与 AgentActionService 同口径）：人群决策的 target 也可能是动作片段
+            // 或模型臆造的地名；归不上地点表就不改位置、也不发起移动，避免「人住在椅背里」。
+            String canonical = canonicalLocation(projectId, target);
+            if (canonical == null) {
+                log.info("[状态驱动] 人群移动目标不是已知地点，位置保持不变: ref={} target={}",
+                        npc.getId(), target);
+            } else {
+                target = canonical;
+                npc.setLocation(target);
+                // 治理批次 0 · 卡1：locationId 与 location 归一一致（特殊 NPC move 行动同口径，
+                // 修「人群移动不写 locationId → 在场过滤用陈旧值」）
+                Long targetLocationId = normalizeLocationId(projectId, target);
+                npc.setLocationId(targetLocationId);
+                // 位置移动与地图生成系统：人群基础版——装配 MovementService 时发起真实移动
+                // （walking→arrived 插值推进，坐标权威由 MovementService.tick 驱动；零 AI）。
+                // 未装配[单测]回退既有瞬移语义（setLocation + syncCrowdStates 派生坐标），零破坏。
+                if (movementService != null) {
+                    try {
+                        movementService.startMove(projectId, NpcRefs.of(npc.getId()),
+                                NpcRefs.normalizeType(npc.getType()),
+                                com.holzyn.actor.domain.worldmap.entity.ActorMovement.REASON_PLAN,
+                                targetLocationId, target, gameSecond);
+                    } catch (Exception e) {
+                        log.warn("[状态驱动] 人群真实移动发起失败（回退瞬移）: ref={} : {}", npc.getId(), e.getMessage());
+                    }
                 }
             }
         }
@@ -2496,6 +2593,57 @@ public class NpcStateService {
         // ：npc:{id} 不再编码类型，此处按意图 B 处理（类型取档案行内 type）
         onNpcAction(projectId, NpcRefs.of(npc.getId()), NpcRefs.normalizeType(npc.getType()),
                 actionText, actionType, gameSecond);
+    }
+
+    /**
+     * 位置严格归一（运行期改写位置前必须过这一关）：命中地点表返回规范名，归不上返回 null。
+     *
+     * <p>与创建期 {@code normalize} 的区别：这里不接受自由文本兜底——「椅背」「肩上拉了拉」
+     * 这类动作片段一旦写进 location，按地名比对的事实可见性/同地点对话/柜台定位会静默失效。
+     * 归一服务未装配（单测）时原样放行，保持既有行为。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param location  自由文本位置（可空）
+     *
+     * @return 地点表规范名；归不上返回 null
+     */
+    private String canonicalLocation(Long projectId, String location) {
+        if (location == null || location.isBlank()) {
+            return null;
+        }
+        if (locationNormalizationService == null || projectId == null) {
+            return location.trim();
+        }
+        try {
+            com.holzyn.actor.domain.world.service.LocationNormalizationService.LocationRef ref =
+                    locationNormalizationService.canonical(projectId, location);
+            return ref == null ? null : ref.name();
+        } catch (Exception e) {
+            log.warn("[状态驱动] 人群移动位置严格归一失败（保持原位置）: project={} : {}", projectId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 位置归一落地点 ID（命中=地点表 id；未命中/归一服务缺失=null）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param location  自由文本位置（可空）
+     *
+     * @return 地点表 ID 或 null
+     */
+    private Long normalizeLocationId(Long projectId, String location) {
+        if (locationNormalizationService == null || projectId == null || location == null || location.isBlank()) {
+            return null;
+        }
+        try {
+            return locationNormalizationService.normalizedId(projectId, location);
+        } catch (Exception e) {
+            log.warn("[状态驱动] 人群移动位置归一失败（按未命中处理）: project={} : {}", projectId, e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -2795,8 +2943,16 @@ public class NpcStateService {
     private static boolean locationMatches(String location, String actionType) {
         String key = location.toLowerCase();
         return switch (actionType) {
-            case "eat" -> containsAny(key, "酒馆", "饭馆", "餐厅", "食肆", "食堂", "茶馆", "饭店", "食铺", "馆子", "面馆", "小吃");
-            case "drink" -> containsAny(key, "井", "泉", "溪", "河", "水", "酒馆", "茶馆");
+            // 对接（整世界长跑实测）：原来只认「酒馆/饭馆/小吃」这类纯食肆名，
+            // 而真实世界的地点叫「集市」「客栈」「药铺」——饥饿角色一个都匹配不上，
+            // pickTarget 返回 null，行动文本退化成「觅食充饥」（没有「买」字），
+            // 裁决器于是永远走不到 TRADE。集市/客栈/铺/摊都是「柜台上有吃食」的地方。
+            // 只加「集市/市集/铺/摊/栈/镇」：镇是聚落（有集市），而「城东市场」「街口」这类
+            // 名字里带城/街的地点不一定是吃饭的地方，收进来会把「去市场办事」也判成觅食。
+            case "eat" -> containsAny(key, "酒馆", "饭馆", "餐厅", "食肆", "食堂", "茶馆", "饭店", "食铺",
+                    "馆子", "面馆", "小吃", "集市", "市集", "铺", "摊", "栈", "镇");
+            case "drink" -> containsAny(key, "井", "泉", "溪", "河", "水", "酒馆", "茶馆",
+                    "集市", "市集", "铺", "摊", "栈", "镇");
             case "toilet" -> containsAny(key, "茅房", "恭房", "厕");
             case "wash" -> containsAny(key, "澡堂", "浴", "井", "河", "溪");
             case "rest" -> containsAny(key, "床", "卧房", "客栈", "卧室", "客房", "居所", "宿");

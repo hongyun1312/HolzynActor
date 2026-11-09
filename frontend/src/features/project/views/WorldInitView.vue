@@ -135,6 +135,9 @@
               <el-button v-if="selected.code === 'characters'" :disabled="!!running" @click="$router.push(`/world/${projectId}/characters`)">
                 查看角色卡
               </el-button>
+              <el-button v-if="selected.code === 'cast'" :disabled="!!running" @click="$router.push(`/world/${projectId}/characters`)">
+                查看角色列表
+              </el-button>
               <el-button v-if="selected.code === 'relations'" :disabled="!!running" @click="$router.push(`/world/${projectId}/topology`)">
                 查看关系拓扑
               </el-button>
@@ -228,6 +231,7 @@ const projectId = Number(route.params.id)
 const STEP_HINTS = {
   worldview: '校验世界观设定是否达标：名称非空 + 至少 3 个分节（地理/势力/规则/文化/历史/补充）有内容。本步不调用 AI；不达标时下方表单可直接补写并保存。',
   locations: 'AI 从「地理设定」中提取世界观地点（城市/遗迹/地标…），去重后写入地点表。地点是后续地图、角色驻留、行动判定的底座。',
+  cast: 'AI 读取世界观设定，生成这个世界「应该有哪些人」——主角与重要配角，连同逐角色深度档案（骨架/信念/深层/声线）一起写入角色列表。已有角色时自动跳过；没有角色时角色卡必然生成 0 张，故本步是角色卡的前置。',
   characters: 'AI 按世界观为已有角色生成角色卡（性格/目标/说话风格/知识面…），角色卡是对话与决策的输入。',
   npcs: 'AI 建立字段字典并生成 5 个普通 NPC（路人/守卫/商贩…），用于让世界"有人"。',
   relations: 'AI 依据角色卡生成角色之间的关系拓扑（亲疏/敌对/血缘），关系是群聊与剧情冲突的来源。',

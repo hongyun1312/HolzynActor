@@ -621,6 +621,10 @@ public class DevelopmentalStageService {
                 if (GrowthStage.DECEASED.name().equalsIgnoreCase(ch.getStage())) {
                     continue;
                 }
+                // （§7.2 / Q2）：玩家不做自然死亡掷点（玩家死亡表现为重伤+强制休息，后续里程碑落地）
+                if (ch.isPlayer()) {
+                    continue;
+                }
                 double dailyProb = deathProbability(ch, gameSecond) / 365.0;
                 if (dailyProb > 0 && random.nextDouble() < dailyProb) {
                     executeDeath(projectId, ch, gameSecond, "年迈体衰（日检自然死亡）");
@@ -642,6 +646,10 @@ public class DevelopmentalStageService {
      */
     public double deathProbability(ActorCharacter ch, Long gameSecond) {
         if (ch == null || ch.getStage() == null) {
+            return 0;
+        }
+        // （Q2）：玩家不参与自然死亡概率（即便被其他调用方直接查询也返回 0）
+        if (ch.isPlayer()) {
             return 0;
         }
         double base = growthProperties.getDeath().getBaseRateByStage()

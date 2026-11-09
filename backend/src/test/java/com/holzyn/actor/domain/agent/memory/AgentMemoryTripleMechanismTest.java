@@ -117,7 +117,7 @@ class AgentMemoryTripleMechanismTest {
         member.setConversationId(1L);
         member.setCharacterId(10L);
         member.setMemberType("special");
-        when(memberRepository.findByConversationId(1L)).thenReturn(List.of(member));
+        when(memberRepository.findActiveByConversationId(1L)).thenReturn(List.of(member));
         when(memoryRepository.findByProjectIdAndCharacterIdAndTypeInAndDeletedOrderByCreatedAtDesc(
                 anyLong(), anyLong(), anyList(), eq(0))).thenReturn(List.of());
         when(promptTemplateService.render(anyLong(), anyLong(), anyString(), any())).thenReturn("prompt");

@@ -89,7 +89,7 @@ class AssistantToolExecutorTest {
         when(characterRepository.findByIdAndProjectId(1L, 1L)).thenReturn(Optional.of(shen));
 
         WorldGraphVO.CharacterNode cNode = new WorldGraphVO.CharacterNode(1L, "npc:1", "沈砚秋", "青禾村村长",
-                "special", "沈氏宗族", "村长", "村东水田", 3L, "adult", 5, 1);
+                "special", "npc", "沈氏宗族", "村长", "村东水田", 3L, "adult", 5, 1);
         when(worldGraph.characters(anyLong(), isNull(), isNull())).thenReturn(List.of(cNode));
         when(worldGraph.locations(anyLong())).thenReturn(List.of(
                 new WorldGraphVO.LocationNode(3L, "村东水田", "农田", "村东的稻田", 3, 1)));

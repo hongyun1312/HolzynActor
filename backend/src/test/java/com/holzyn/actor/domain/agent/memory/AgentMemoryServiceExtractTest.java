@@ -171,7 +171,7 @@ class AgentMemoryServiceExtractTest {
                 new com.holzyn.actor.domain.npc.dialogue.entity.ActorConversationMember();
         member.setCharacterId(3L);
         member.setMemberType("special");
-        when(memberRepository.findByConversationId(9L)).thenReturn(List.of(member));
+        when(memberRepository.findActiveByConversationId(9L)).thenReturn(List.of(member));
 
         service.extractAfterRound(9L, 1L, false);
 
@@ -213,7 +213,7 @@ class AgentMemoryServiceExtractTest {
                 new com.holzyn.actor.domain.npc.dialogue.entity.ActorConversationMember();
         member.setCharacterId(3L);
         member.setMemberType("special");
-        when(memberRepository.findByConversationId(9L)).thenReturn(List.of(member));
+        when(memberRepository.findActiveByConversationId(9L)).thenReturn(List.of(member));
     }
 
     /**

@@ -49,11 +49,19 @@ public final class ActorEventFields {
      */
     public static final Set<String> KINDS = Set.of("event", "manual", "evolution", "system", "action",
             "crowd", "common", "world", "relation", "roleplay", "world_frame", "macro", "death",
-            "world_map", "move_to", "walk", "pass_by", "move_encounter");
+            "world_map", "move_to", "walk", "pass_by", "move_encounter",
+            // 角色↔世界闭环：对话成为世界事件、事实变更、传闻扩散
+            "dialog", "fact", "rumor");
 
     /** 允许的事件来源（{@code actor_event.source}，列宽 30） */
     public static final Set<String> SOURCES = Set.of("manual", "ai", "simulation", "evolution", "dialog",
-            "action", "crowd", "common", "learning", "roleplay", "engine", "macro", "growth");
+            "action", "crowd", "common", "learning", "roleplay", "engine", "macro", "growth",
+            // 角色↔世界闭环
+            "fact", "rumor",
+            // 行为裁决：失败/部分成功事件的来源
+            "adjudication",
+            // NPC 主动性：主动上门事件来源
+            "initiative");
 
     /** 允许的可见范围（{@code actor_event.visibility}，列宽 20） */
     public static final Set<String> VISIBILITIES = Set.of("global", "location", "private");

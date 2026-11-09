@@ -54,6 +54,28 @@ public class WorldGenSchemaValidator {
     private record FieldSpec(String key, String type, List<String> fieldKeys) {
     }
 
+    /** 「时代背景」单行字段上限（与 {@code actor_world_setting.era varchar(50)} 同口径） */
+    public static final int ERA_MAX_CHARS = 50;
+
+    /**
+     * 按句读截断：优先断在 。；，、 之后，避免把「蒸汽前夜：齿轮与煤烟主导」砍成半句。
+     * 断点太靠前（不足上限 60%）时退化为硬截断。
+     *
+     * @param text 原文
+     * @param max  上限字符数
+     *
+     * @return 截断后的文本
+     */
+    static String truncateAtSentence(String text, int max) {
+        if (text == null || text.length() <= max) {
+            return text;
+        }
+        String cut = text.substring(0, max);
+        int best = Math.max(Math.max(cut.lastIndexOf('。'), cut.lastIndexOf('；')),
+                Math.max(cut.lastIndexOf('，'), cut.lastIndexOf('、')));
+        return best >= max * 0.6 ? cut.substring(0, best) : cut;
+    }
+
     /** 各维度 Schema（自写，字段语义对齐方案 §2.4 与渲染 Schema） */
     private static final Map<String, List<FieldSpec>> DIMENSION_SCHEMA = buildSchema();
 
@@ -187,6 +209,22 @@ public class WorldGenSchemaValidator {
         JsonNode essence = dimNode.get("essence");
         if (essence != null && essence.isTextual() && essence.asText().length() > 80) {
             dimNode.put("essence", essence.asText().substring(0, 80));
+        }
+
+        // space_time.era 是「时代背景」单行字段：世界库 actor_world_setting.era 是 varchar(50)，
+        // 超长会让向导第 2 步保存直接 400「时代背景最长 50 字符」，用户就卡在「进不去第三步」。
+        // 提示词里已写 ≤50 字（软约束），这里是不信任模型的硬闸：在 AI 产物入口就截断，
+        // 保证检查点 / 预览 / 落库 / 前端回填全都拿不到超长的 era。
+        if ("space_time".equals(dimKey)) {
+            JsonNode era = dimNode.get("era");
+            if (era != null && era.isTextual()) {
+                String text = era.asText().trim();
+                if (text.length() > ERA_MAX_CHARS) {
+                    dimNode.put("era", truncateAtSentence(text, ERA_MAX_CHARS));
+                } else if (!text.equals(era.asText())) {
+                    dimNode.put("era", text);
+                }
+            }
         }
 
         ObjectNode wrapped = MAPPER.createObjectNode();

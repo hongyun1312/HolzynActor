@@ -467,6 +467,9 @@ onBeforeUnmount(() => {
    overflow:hidden 保证收起时导航文本不外溢 */
 .app-shell.is-overlay-mode :deep(.domain-sidebar) {
   margin-left: 0;
+  /* 覆盖式是「从左边滑出的抽屉」，右留白必须归零：留着 12px 会变成一张浮空卡片，
+     右缘圆角与内容区之间露出背景缝，与「贴左缘的抽屉」语义矛盾。 */
+  margin-right: 0;
   border: 0;
   border-radius: 0 var(--radius-lg, 16px) var(--radius-lg, 16px) 0;
   box-shadow: var(--shadow-lv3);

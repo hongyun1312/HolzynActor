@@ -211,6 +211,55 @@ public class DialogueConsolidationService {
         return vo;
     }
 
+    // ==================== 自动沉淀（修：对话内容必须落 NPC 记忆） ====================
+
+    /**
+     * 自动沉淀一轮（preview + apply 一次跑完，供对话链路在回合末异步调用）。
+     * <p>缺陷来源（评测实测）：{@code actor_dialogue_session} 这条链<b>从不自动写记忆</b>——
+     * 只有前端手动点「沉淀」才落库。于是玩家说过的关键事实（如「你儿子已死」）只活在
+     * {@value DialogueContextAssembler#HISTORY_WINDOW} 条窗口里，出窗即丢，NPC 随后逐字回到基线
+     * （反事实实测：即时反应 100%、跨轮保持 0%）。此处复用既有 preview(1 次 AI 抽取)+apply(零 AI 写库)，
+     * 不新增写入口、不新增表。</p>
+     *
+     * @param projectId 项目 ID
+     * @param userId    用户 ID（须从请求线程捕获后传入）
+     * @param sessionId 会话 ID
+     *
+     * @return 写入的 NPC 记忆条数（0=无可沉淀内容/被跳过）
+     */
+    public int autoConsolidate(Long projectId, Long userId, Long sessionId) {
+        if (sessionId == null || projectId == null || userId == null) {
+            return 0;
+        }
+        DialogueConsolidationVO vo;
+        try {
+            vo = preview(projectId, userId, sessionId);
+        } catch (BizException e) {
+            // 对话太少/无可沉淀 → 正常跳过，不告警
+            log.debug("[对谈沉淀] 本轮跳过自动沉淀: session={} : {}", sessionId, e.getMessage());
+            return 0;
+        }
+        if (vo == null || vo.getCharacters() == null || vo.getCharacters().isEmpty()) {
+            return 0;
+        }
+        List<DialogueConsolidationApplyDTO.CharacterCandidate> candidates = new ArrayList<>();
+        for (DialogueConsolidationVO.CharacterPreview c : vo.getCharacters()) {
+            candidates.add(new DialogueConsolidationApplyDTO.CharacterCandidate(c.getCharacterRef(),
+                    c.getAffinityDelta(), c.getTrustDelta(), c.getStage(), c.getNote(),
+                    c.getStateSummary(), c.getMemoryPoints()));
+        }
+        DialogueConsolidationResultVO result = apply(projectId, userId, sessionId, candidates);
+        int written = 0;
+        if (result != null && result.getCharacters() != null) {
+            for (DialogueConsolidationResultVO.CharacterResult cr : result.getCharacters()) {
+                written += cr.getMemoriesWritten() == null ? 0 : cr.getMemoriesWritten();
+            }
+        }
+        log.info("[对谈沉淀] 自动沉淀完成: session={} 角色={} 记忆条数={}",
+                sessionId, candidates.size(), written);
+        return written;
+    }
+
     // ==================== 应用沉淀（零 AI，短事务） ====================
 
     /**

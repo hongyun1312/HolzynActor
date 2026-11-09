@@ -234,6 +234,7 @@
               >
                 <span class="wg-list-name">{{ c.name }}</span>
                 <span class="wg-list-tag">{{ charTypeLabel(c.type) }}</span>
+                <el-tag v-if="c.controller === 'player'" size="small" type="success" effect="light">玩家</el-tag>
               </div>
               <div v-if="!characters.length && !loading.characters" class="wg-empty">无匹配角色</div>
             </div>
@@ -246,6 +247,7 @@
                 <div class="wg-detail-head">
                   <div class="wg-detail-title">
                     {{ characterView.character?.name }}
+                    <el-tag v-if="characterView.character?.controller === 'player'" size="small" type="success" effect="light" class="wg-mini">玩家</el-tag>
                     <el-tag v-if="characterView.character?.isProtagonist" size="small" type="danger" effect="light" class="wg-mini">主角</el-tag>
                     <el-tag v-if="characterView.character?.stage" size="small" type="warning" effect="plain" class="wg-mini">{{ characterView.character.stage }}</el-tag>
                   </div>
@@ -342,6 +344,7 @@
               <span class="wg-event-title">{{ e.title || '（无标题）' }}</span>
               <span class="wg-row-sub">{{ fmtHour(e.gameHour) }}<template v-if="e.locationName"> · {{ e.locationName }}</template></span>
               <el-tag v-if="e.visibility && e.visibility !== 'public'" size="small" type="info" effect="plain">{{ e.visibility }}</el-tag>
+              <el-button size="small" text type="primary" @click="openCausality(e)">因果链</el-button>
             </div>
             <div v-if="e.content" class="wg-event-content">{{ e.content }}</div>
             <div v-if="e.characterNames?.length" class="wg-chips">
@@ -367,13 +370,19 @@
           </div>
           <el-table v-if="relationRows.length" :data="relationRows" size="small" class="wg-table is-page">
             <el-table-column label="起点" min-width="120">
-              <template #default="{ row }">{{ row.fromName }}<span class="wg-dim"> · {{ row.fromRef }}</span></template>
+              <template #default="{ row }">
+                {{ row.fromName }}<span class="wg-dim"> · {{ row.fromRef }}</span>
+                <el-tag v-if="isPlayerRef(row.fromRef)" size="small" type="success" effect="light" class="wg-player-tag">玩家</el-tag>
+              </template>
             </el-table-column>
             <el-table-column label="" width="46" align="center">
               <template #default>→</template>
             </el-table-column>
             <el-table-column label="终点" min-width="120">
-              <template #default="{ row }">{{ row.toName }}<span class="wg-dim"> · {{ row.toRef }}</span></template>
+              <template #default="{ row }">
+                {{ row.toName }}<span class="wg-dim"> · {{ row.toRef }}</span>
+                <el-tag v-if="isPlayerRef(row.toRef)" size="small" type="success" effect="light" class="wg-player-tag">玩家</el-tag>
+              </template>
             </el-table-column>
             <el-table-column prop="relationType" label="关系" width="120" />
             <el-table-column prop="affinity" label="好感" width="90" sortable />
@@ -498,6 +507,8 @@
         </div>
       </el-tab-pane>
     </PageTabs>
+
+    <CausalityDrawer v-model="causalityVisible" :project-id="projectId" :event-id="causalityEventId" />
   </div>
 </template>
 
@@ -522,6 +533,7 @@ import PageTabs from '@/shared/layout/PageTabs.vue'
 import WorkspaceSplit from '@/shared/layout/WorkspaceSplit.vue'
 import { createPanelContext } from '@/shared/layout/usePanelContext'
 import GraphChildCard from '@/features/observe/components/GraphChildCard.vue'
+import CausalityDrawer from '@/features/causality/CausalityDrawer.vue'
 import { openContextMenu } from '@/shared/layout/useContextMenu'
 
 const route = useRoute()
@@ -555,6 +567,9 @@ const characterView = ref(null)
 const activeCharacterId = ref(null)
 const events = ref([])
 const relations = ref([])
+/** 因果抽屉 */
+const causalityVisible = ref(false)
+const causalityEventId = ref(null)
 const factions = ref([])
 const factionView = ref(null)
 const activeFactionId = ref(null)
@@ -750,6 +765,19 @@ const relationRows = computed(() => {
   const rows = relations.value || []
   return relationLimit.value > 0 ? rows.slice(0, relationLimit.value) : rows
 })
+
+/** 玩家同构角色的 ref 集合（关系表高亮用；CharacterNode.controller 由后端补） */
+const playerRefs = computed(() => new Set(
+  (allCharacters.value || []).filter(c => c.controller === 'player').map(c => c.ref).filter(Boolean)
+))
+function isPlayerRef(ref) { return !!ref && playerRefs.value.has(ref) }
+
+/** 打开因果抽屉（事件列表 / 事件卡） */
+function openCausality(event) {
+  if (!event?.id) return
+  causalityEventId.value = Number(event.id)
+  causalityVisible.value = true
+}
 
 /** 数字格式化（保留 2 位，空值显示 —） */
 function fmtNum(v) {
@@ -1185,6 +1213,7 @@ async function refresh() {
   color: var(--text-secondary);
   font-size: 12px;
 }
+.wg-player-tag { margin-left: 6px; }
 .wg-note {
   line-height: 1.7;
 }

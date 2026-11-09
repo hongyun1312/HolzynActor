@@ -55,6 +55,20 @@ public interface ActorCharacterRepository extends JpaRepository<ActorCharacter, 
     List<ActorCharacter> findByProjectIdAndDeletedOrderByIdAsc(Long projectId, Integer deleted);
 
     /**
+     * 查询某项目指定控制方的角色（玩家同构；controller=npc/player）。
+     *
+     * @param projectId  项目 ID
+     *
+     * @param controller 控制方（npc/player）
+     *
+     * @param deleted    软删除标记（0 正常）
+     *
+     * @return 首个匹配行（玩家唯一索引保证至多一个）
+     */
+    java.util.Optional<ActorCharacter> findFirstByProjectIdAndControllerAndDeletedOrderByIdAsc(
+            Long projectId, String controller, Integer deleted);
+
+    /**
      * 查询全部未删除 NPC（跨项目，按创建顺序）——BrainProfile 存量补行遍历用。
      *
      * @param deleted 软删除标记（0 正常）

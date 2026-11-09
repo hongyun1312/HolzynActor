@@ -445,7 +445,7 @@ public class DecisionGate {
      * （qid → 题型），一次 evaluate 请求出全部结果。
      * <p>每 tick 全 NPC 高频微决策 用：全项目 NPC 各一个 state（此刻情境），
      * 每题共用 qid（如注意力状态 score + 即时意向 choice）——20 NPC × 2 题 = 40 问题 ≤ 96
-     * 上限、states ≤ 32，单次往返亚秒级；：注意力与即时意向同批评估（每 2 tick
+     * 上限、states ≤ 32，单次往返亚秒级；注意力与即时意向同批评估（每 2 tick
      * 默认），异步虚拟线程执行不进 tick 屏障（真实心智活动本就有延迟）。</p>
      *
      * @param projectId 项目 ID（可空）
@@ -610,6 +610,13 @@ public class DecisionGate {
 
     // ==================== 内部 ====================
 
+    /**
+     * 本地打分模型适配器 ID 集合（输入=「情境+判据」短文本，一次前向出概率）。
+     * <p>不在此集合的适配器（如用户接入的普通文本模型）一律走既有全量 Prompt 风格。</p>
+     */
+    private static final java.util.Set<String> SCORER_ADAPTER_IDS =
+            java.util.Set.of("nanojev", "strands-decider-2b", "laya");
+
     /** 调用门面（fail-closed：任何失败返回 null）。 */
     private DecisionResponse call(Long projectId, Long characterId, String scene, DecisionState state) {
         try {
@@ -643,7 +650,11 @@ public class DecisionGate {
         }
         try {
             String ref = characterId == null || characterId <= 0 ? null : "npc:" + characterId;
-            String enriched = aiContextInjector.decisionInput(projectId, ref, text);
+            // 实跑事故：本地打分模型走精简装配（世界一行+角色 3 行+情境+约束）；
+            // 用户把决策模型换成普通文本模型时保持既有全量 Prompt 风格（形态跟随实际适配器）
+            String enriched = compactPromptForActiveAdapter()
+                    ? aiContextInjector.decisionInputCompact(projectId, ref, text)
+                    : aiContextInjector.decisionInput(projectId, ref, text);
             if (enriched == null || enriched.equals(text)) {
                 return state;
             }
@@ -651,6 +662,36 @@ public class DecisionGate {
         } catch (Exception e) {
             log.debug("[决策模型判定] 上下文注入失败（原样返回，零阻断）: scene={} : {}", state.id(), e.getMessage());
             return state;
+        }
+    }
+
+    /**
+     * 判定上下文是否按「精简」形态装配。
+     *
+     * <p><b>为什么按适配器而不是只看配置</b>：决策模型可被用户换成普通文本模型。本地打分模型
+     * （{@code nanojev-batch} 线协议，一次前向出概率）吃的是「情境 + 判据」的短输入；普通文本
+     * 模型需要完整的世界观/角色卡风格 Prompt。形态必须跟随<b>当前实际适配器</b>，否则把短输入
+     * 丢给文本模型会直接掉判定质量。</p>
+     *
+     * <p>判据：全局开关打开 ∧（线协议为 {@code nanojev-batch} 或适配器 ID 属本地打分模型）。
+     * 任何取不到状态的异常都回退 false（=既有全量风格，保守）。</p>
+     *
+     * @return true=精简装配
+     */
+    private boolean compactPromptForActiveAdapter() {
+        if (aiContextInjector == null || !aiContextInjector.decisionCompactEnabled() || decisionClient == null) {
+            return false;
+        }
+        try {
+            String protocol = decisionClient.protocolId();
+            if (protocol != null && "nanojev-batch".equalsIgnoreCase(protocol.trim())) {
+                return true;
+            }
+            String adapter = decisionClient.adapterId();
+            return adapter != null && SCORER_ADAPTER_IDS.contains(adapter.trim().toLowerCase());
+        } catch (Exception e) {
+            log.debug("[决策模型判定] 适配器形态探测失败（按全量装配）: {}", e.getMessage());
+            return false;
         }
     }
 

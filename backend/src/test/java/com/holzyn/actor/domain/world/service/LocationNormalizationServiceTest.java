@@ -131,4 +131,31 @@ class LocationNormalizationServiceTest {
         assertFalse(ref.matched());
         assertEquals("城东市场", ref.name());
     }
+
+    /**
+     * canonical：只接受命中地点表的位置，动作片段一律拒绝（运行期改写位置的唯一关口）。
+     *
+     * <p>实测来源：整世界长跑里模型写出的「椅背」「肩上拉了拉」「灶上烧水」「院子翻晒笋」
+     * 被直接写进 {@code actor_character.location}，于是事实可见性、同地点对话、交易柜台
+     * 全部按一个不存在的地名比对——不报错，只是世界什么都不发生。</p>
+     */
+    @Test
+    void canonicalRejectsActionFragments() {
+        when(locationRepository.findByProjectIdOrderBySortOrderAscIdAsc(1L))
+                .thenReturn(List.of(loc(1L, "集市"), loc(2L, "铁匠铺"), loc(3L, "青溪村")));
+
+        // 命中：精确 / 包含子地点
+        assertEquals("集市", service.canonical(1L, "集市").name());
+        assertEquals("铁匠铺", service.canonical(1L, "铁匠铺后屋").name());
+        assertEquals("集市", service.canonical(1L, "  集市 ").name());
+
+        // 拒绝：动作片段、臆造地名、空值
+        assertNull(service.canonical(1L, "椅背"));
+        assertNull(service.canonical(1L, "肩上拉了拉"));
+        assertNull(service.canonical(1L, "灶上烧水"));
+        assertNull(service.canonical(1L, "院子翻晒笋"));
+        assertNull(service.canonical(1L, "卖吃食的摊"));
+        assertNull(service.canonical(1L, null));
+        assertNull(service.canonical(1L, "  "));
+    }
 }

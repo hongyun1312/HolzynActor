@@ -394,6 +394,9 @@ public class ProactiveRetrievalService {
             String injected = aiContextInjector == null ? ""
                     : aiContextInjector.memoryChainContext(projectId, characterRef, null);
             String finalPrompt = injected.isBlank() ? prompt : injected + "\n\n" + prompt;
+            // 同族缺陷（实跑取证）：注入段与模板段各带一份【核心记忆】，34/47 条 prompt 重复。
+            // 段装配去重（内容感知：同段头 + 同内容才合并，同名不同义的两段都留）。
+            finalPrompt = com.holzyn.actor.domain.agent.prompt.PromptSegments.dedupe(finalPrompt);
             String system = promptTemplateService.systemMessage(uid, projectId, SCENE_PROACTIVE_RETRIEVAL, null);
             if (system == null || system.isBlank()) {
                 system = "你只输出严格的 JSON 对象，不输出任何其他文字。";

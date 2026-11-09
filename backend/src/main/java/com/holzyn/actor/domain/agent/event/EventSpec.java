@@ -102,4 +102,23 @@ public class EventSpec {
      * 发布前按 project_id+source_key 去重，防重复发布，修）
      */
     private String sourceKey;
+
+    /**
+     * 直接原因事件 ID（因果链）。
+     * <p>非空时总线会读取父事件的 depth/correlation_id 自动推导子事件的两个字段；
+     * 父事件不存在时降级为根事件并 WARN（不阻断发布）。</p>
+     */
+    private Long causeEventId;
+
+    /**
+     * 因果链根标识（可空）。
+     * <p>根事件留空=总线在落库后用自身 id 回填；子事件通常留空，由 causeEventId 继承。</p>
+     */
+    private String correlationId;
+
+    /**
+     * 期望链深（可空；仅当无法读取父事件时使用）。
+     * <p>正常路径由总线按父事件计算，调用方不必手工维护。</p>
+     */
+    private Integer depth;
 }

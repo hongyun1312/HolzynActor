@@ -210,6 +210,82 @@ class WorldEventBusTest {
     }
 
     /**
+     * 淘汰前先把最旧事件搬进冷表（event_id / game_day 可回捞），再删热表。
+     */
+    @Test
+    void retentionArchivesBeforeDelete() throws Exception {
+        com.holzyn.actor.domain.world.repository.ActorEventArchiveRepository archiveRepo =
+                Mockito.mock(com.holzyn.actor.domain.world.repository.ActorEventArchiveRepository.class);
+        setField(bus, "eventArchiveRepository", archiveRepo);
+        setField(bus, "eventsMaxPerProject", 3);
+        when(eventRepository.countByProjectId(100L)).thenReturn(5L);
+        // 引擎位置 = 第 3 游戏日（86400*3 + 100），归档行应记 game_day=3
+        when(worldClockService.currentEngineGameSecond(100L)).thenReturn(86400L * 3 + 100);
+        when(eventRepository.findByProjectIdOrderByIdAsc(100L))
+                .thenReturn(List.of(event(1L), event(2L), event(3L), event(4L), event(5L)));
+
+        bus.publish(1L, 100L, EventSpec.builder().kind("world").source("ai").build());
+
+        ArgumentCaptor<List<com.holzyn.actor.domain.world.entity.ActorEventArchive>> captor =
+                ArgumentCaptor.forClass(List.class);
+        verify(archiveRepo).saveAll(captor.capture());
+        List<com.holzyn.actor.domain.world.entity.ActorEventArchive> archived = captor.getValue();
+        assertEquals(2, archived.size(), "与删除条数一致：最旧 2 条先归档");
+        assertEquals(1L, archived.get(0).getEventId());
+        assertEquals(2L, archived.get(1).getEventId());
+        assertEquals(3L, archived.get(0).getGameDay(), "归档行按游戏日可回捞");
+        verify(eventRepository).deleteAll(any());
+    }
+
+    /**
+     * 归档行按「事件自己发生的游戏日」打标（不是归档时刻的统一日）。
+     */
+    @Test
+    void retentionArchivesWithEventOwnGameDay() throws Exception {
+        com.holzyn.actor.domain.world.repository.ActorEventArchiveRepository archiveRepo =
+                Mockito.mock(com.holzyn.actor.domain.world.repository.ActorEventArchiveRepository.class);
+        setField(bus, "eventArchiveRepository", archiveRepo);
+        setField(bus, "eventsMaxPerProject", 3);
+        when(eventRepository.countByProjectId(100L)).thenReturn(5L);
+        // 当前引擎位置 = 第 3 游戏日
+        when(worldClockService.currentEngineGameSecond(100L)).thenReturn(86400L * 3 + 100);
+        ActorEvent day5 = event(1L);
+        day5.setGameHour(120L); // 120 游戏小时 = 第 5 游戏日
+        ActorEvent noHour = event(2L); // 无时刻 → 回退当前游戏日 3
+        when(eventRepository.findByProjectIdOrderByIdAsc(100L))
+                .thenReturn(List.of(day5, noHour, event(3L), event(4L), event(5L)));
+
+        bus.publish(1L, 100L, EventSpec.builder().kind("world").source("ai").build());
+
+        ArgumentCaptor<List<com.holzyn.actor.domain.world.entity.ActorEventArchive>> captor =
+                ArgumentCaptor.forClass(List.class);
+        verify(archiveRepo).saveAll(captor.capture());
+        List<com.holzyn.actor.domain.world.entity.ActorEventArchive> archived = captor.getValue();
+        assertEquals(2, archived.size());
+        assertEquals(5L, archived.get(0).getGameDay(), "有 game_hour 的按事件自己的日子打标");
+        assertEquals(3L, archived.get(1).getGameDay(), "无时刻才回退归档时的当前游戏日");
+    }
+
+    /**
+     * 归档失败时本轮不删除（宁可热表胀一轮，也不让「存档失败」变成「数据消失」）。
+     */
+    @Test
+    void retentionKeepsRowsWhenArchiveFails() throws Exception {
+        com.holzyn.actor.domain.world.repository.ActorEventArchiveRepository archiveRepo =
+                Mockito.mock(com.holzyn.actor.domain.world.repository.ActorEventArchiveRepository.class);
+        when(archiveRepo.saveAll(any())).thenThrow(new IllegalStateException("disk full"));
+        setField(bus, "eventArchiveRepository", archiveRepo);
+        setField(bus, "eventsMaxPerProject", 3);
+        when(eventRepository.countByProjectId(100L)).thenReturn(5L);
+        when(eventRepository.findByProjectIdOrderByIdAsc(100L))
+                .thenReturn(List.of(event(1L), event(2L), event(3L), event(4L), event(5L)));
+
+        bus.publish(1L, 100L, EventSpec.builder().kind("world").source("ai").build());
+
+        verify(eventRepository, never()).deleteAll(any());
+    }
+
+    /**
      * 发布后广播：SSE Hub 收到项目载荷 + 订阅者收到事件（调试事件流同源）。
      */
     @Test
@@ -222,6 +298,114 @@ class WorldEventBusTest {
         verify(sseHub).broadcast(anyLong(), any(Map.class));
         assertNotNull(received.get(), "订阅者应收到事件");
         assertEquals("world", received.get().getKind());
+    }
+
+    // ==================== 因果链 ====================
+
+    /**
+     * 根事件：depth=0、无 causeEventId；correlation 在落库拿到 IDENTITY 主键后用自身 id 回填。
+     */
+    @Test
+    void publishRootEventBackfillsCorrelationWithOwnId() {
+        when(eventRepository.save(any(ActorEvent.class))).thenAnswer(inv -> {
+            ActorEvent e = inv.getArgument(0);
+            if (e.getId() == null) {
+                e.setId(42L);
+            }
+            return e;
+        });
+
+        ActorEvent saved = bus.publish(1L, 100L,
+                EventSpec.builder().kind("world").source("ai").title("灵脉异动").build());
+
+        assertNull(saved.getCauseEventId(), "根事件无直接原因");
+        assertEquals("42", saved.getCorrelationId(), "根事件链标识=自身事件 id");
+        assertEquals(Integer.valueOf(0), saved.getDepth(), "根事件深度为 0");
+    }
+
+    /**
+     * 子事件：继承父事件的 correlation_id，depth=父 depth+1（因果链）。
+     */
+    @Test
+    void publishChildEventInheritsParentCorrelationAndDepth() {
+        ActorEvent parent = new ActorEvent();
+        parent.setId(10L);
+        parent.setProjectId(100L);
+        parent.setDepth(2);
+        parent.setCorrelationId("7");
+        when(eventRepository.findById(10L)).thenReturn(Optional.of(parent));
+
+        ActorEvent saved = bus.publish(1L, 100L, EventSpec.builder()
+                .kind("dialog").source("dialog").title("因为听说灵脉异动，所以去打听")
+                .causeEventId(10L).build());
+
+        assertEquals(Long.valueOf(10L), saved.getCauseEventId());
+        assertEquals("7", saved.getCorrelationId(), "子事件继承父链标识");
+        assertEquals(Integer.valueOf(3), saved.getDepth(), "子事件深度=父深度+1");
+    }
+
+    /**
+     * 父事件不存在（写错/已被滚动清理）：降级为根事件，不保留悬空 cause_event_id。
+     */
+    @Test
+    void publishMissingParentDowngradesToRoot() {
+        when(eventRepository.findById(99L)).thenReturn(Optional.empty());
+
+        ActorEvent saved = bus.publish(1L, 100L, EventSpec.builder()
+                .kind("world").source("ai").causeEventId(99L).build());
+
+        assertNull(saved.getCauseEventId(), "父事件缺失时不得留悬空引用");
+        assertEquals(Integer.valueOf(0), saved.getDepth(), "降级为根事件");
+    }
+
+    /**
+     * 链深钳制：超过配置上限（缺省 6）时钳到上限，事件仍可发布（不阻断世界）。
+     */
+    @Test
+    void publishClampsCausalDepthToConfiguredMax() throws Exception {
+        ActorEvent parent = new ActorEvent();
+        parent.setId(10L);
+        parent.setProjectId(100L);
+        parent.setDepth(6);
+        parent.setCorrelationId("1");
+        when(eventRepository.findById(10L)).thenReturn(Optional.of(parent));
+
+        ActorEvent saved = bus.publish(1L, 100L, EventSpec.builder()
+                .kind("world").source("ai").causeEventId(10L).build());
+
+        assertEquals(Integer.valueOf(6), saved.getDepth(), "缺省上限 6，父 6 + 子 1 钳为 6");
+    }
+
+    /**
+     * 因果上限读配置项 holzyn.actor.world-loop.causal.max-depth：配 3 时父 2 → 子 3。
+     */
+    @Test
+    void publishReadsCausalMaxDepthFromProperties() throws Exception {
+        com.holzyn.actor.domain.world.config.WorldLoopProperties props =
+                new com.holzyn.actor.domain.world.config.WorldLoopProperties();
+        props.getCausal().setMaxDepth(3);
+        setField(bus, "worldLoopProperties", props);
+
+        ActorEvent parent = new ActorEvent();
+        parent.setId(10L);
+        parent.setProjectId(100L);
+        parent.setDepth(2);
+        parent.setCorrelationId("1");
+        when(eventRepository.findById(10L)).thenReturn(Optional.of(parent));
+
+        ActorEvent allowed = bus.publish(1L, 100L, EventSpec.builder()
+                .kind("world").source("ai").causeEventId(10L).build());
+        assertEquals(Integer.valueOf(3), allowed.getDepth(), "父 2 + 子 1 = 3，恰在上限内");
+
+        ActorEvent deeperParent = new ActorEvent();
+        deeperParent.setId(11L);
+        deeperParent.setProjectId(100L);
+        deeperParent.setDepth(3);
+        deeperParent.setCorrelationId("1");
+        when(eventRepository.findById(11L)).thenReturn(Optional.of(deeperParent));
+        ActorEvent clamped = bus.publish(1L, 100L, EventSpec.builder()
+                .kind("world").source("ai").causeEventId(11L).build());
+        assertEquals(Integer.valueOf(3), clamped.getDepth(), "超过配置上限 3 应钳制");
     }
 
     // ==================== 查询（静态纯逻辑 + 端到端） ====================
@@ -310,12 +494,19 @@ class WorldEventBusTest {
         assertEquals("relation", WorldEventBusImpl.normalizeKind("relation"), "D1 F6 新增 relation kind");
         assertEquals("world_frame", WorldEventBusImpl.normalizeKind("world_frame"), "M4 新增 world_frame kind（每日世界帧宏观事件）");
         assertEquals("macro", WorldEventBusImpl.normalizeKind("macro"), "宏观社会演化系统 M2 新增 macro kind（宏观事件）");
+        assertEquals("dialog", WorldEventBusImpl.normalizeKind("dialog"), "V1.2 M0 新增 dialog kind（对话成为世界事件）");
+        assertEquals("fact", WorldEventBusImpl.normalizeKind("fact"), "V1.2 M0 新增 fact kind（事实变更）");
+        assertEquals("rumor", WorldEventBusImpl.normalizeKind("rumor"), "V1.2 M0 新增 rumor kind（传闻扩散）");
         assertEquals("manual", WorldEventBusImpl.normalizeSource(null));
         assertEquals("manual", WorldEventBusImpl.normalizeSource("bogus"));
         assertEquals("crowd", WorldEventBusImpl.normalizeSource("crowd"));
         assertEquals("learning", WorldEventBusImpl.normalizeSource("learning"), "D1 F6 新增 learning source");
         assertEquals("engine", WorldEventBusImpl.normalizeSource("engine"), "M4 修复 engine source 归一化（引擎来源不再落 manual）");
         assertEquals("macro", WorldEventBusImpl.normalizeSource("macro"), "宏观社会演化系统 M2 新增 macro source（宏观事件来源）");
+        assertEquals("fact", WorldEventBusImpl.normalizeSource("fact"), "V1.2 M0 新增 fact source");
+        assertEquals("rumor", WorldEventBusImpl.normalizeSource("rumor"), "V1.2 M0 新增 rumor source");
+        assertEquals("adjudication", WorldEventBusImpl.normalizeSource("adjudication"),
+                "V1.2 M2 新增 adjudication source（裁决失败事件）");
         assertEquals("location", WorldEventBusImpl.normalizeVisibility(null));
         assertEquals("location", WorldEventBusImpl.normalizeVisibility("evil"));
         assertEquals("global", WorldEventBusImpl.normalizeVisibility("GLOBAL"));

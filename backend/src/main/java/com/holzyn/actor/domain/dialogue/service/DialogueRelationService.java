@@ -136,6 +136,21 @@ public class DialogueRelationService {
             return "";
         }
         String who = playerName == null || playerName.isBlank() ? "你" : playerName;
+        // 修社交摩擦：好感/信任此前只进提示词、不进行为，实测熟人(0.25)与陌生人(0.24)
+        // 的试探率几乎一样（熟人反而更客气）。这里按关系亲疏给一条可执行的分层指令——
+        // 陌生=试探与客套、话短、不打听私事；熟稔=免寒暄、可沉默、直说事。这段随关系档位稳定，
+        // 只在跨档时变化，不破坏同一角色的前缀缓存。
+        int affinity = r == null || r.getAffinity() == null ? 0 : r.getAffinity();
+        int trust = r == null || r.getTrust() == null ? 0 : r.getTrust();
+        if (affinity < 15) {
+            sb.append("；与").append(who).append("还不熟：保持客套与试探，话不必长，"
+                    + "不主动打听私事，对方问什么先掂量再答。");
+        } else if (affinity > 45 && trust >= 40) {
+            sb.append("；与").append(who).append("熟稔：不必寒暄客套，可以沉默片刻再开口、"
+                    + "可以打断，直接说事、有什么说什么。");
+        } else {
+            sb.append("；与").append(who).append("算相识：仍留几分客气，但可以说些实在话。");
+        }
         return "【与" + who + "的关系】" + sb;
     }
 

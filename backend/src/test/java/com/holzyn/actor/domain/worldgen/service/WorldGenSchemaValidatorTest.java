@@ -146,4 +146,34 @@ class WorldGenSchemaValidatorTest {
         JsonNode root = new ObjectMapper().readTree(validated);
         assertEquals(80, root.get("existence").get("essence").asText().length());
     }
+
+    /**
+     * space_time.era 是「时代背景」单行字段（actor_world_setting.era 为 varchar(50)）：
+     * 模型写成段落时必须被硬截断，否则保存世界设定会 400「时代背景最长 50 字符」，
+     * 用户在向导第 2 步就卡住（实测线上卡点）。
+     */
+    @Test
+    void spaceTimeEraTooLongTruncatedAtSentence() throws Exception {
+        String longEra = "潮汐历纪元，技术处于蒸汽朋克前夜的齿轮与蒸汽时代。交通依赖帆船与运河，"
+                + "铁矿与雾晶是两种核心资源，城镇沿矿脉与航道分布，内陆仍有大片未测绘的雾林。";
+        assertTrue(longEra.length() > WorldGenSchemaValidator.ERA_MAX_CHARS);
+        String raw = """
+                {
+                  "space_time": {
+                    "essence": "雾与铁的时代",
+                    "world_layout": "三大陆块被内海分隔",
+                    "key_locations": [
+                      {"name": "雾港", "terrain": "海岸", "feature": "常年大雾", "risk": "触礁", "controlling_force": "商会"}
+                    ],
+                    "ecology": "雾晶共生苔藓",
+                    "era": "%s",
+                    "environment_texture": "湿冷铁锈味"
+                  }
+                }
+                """.formatted(longEra);
+        String validated = validator.validateAndRepair("space_time", raw);
+        String era = new ObjectMapper().readTree(validated).get("space_time").get("era").asText();
+        assertTrue(era.length() <= WorldGenSchemaValidator.ERA_MAX_CHARS, "era 必须 ≤50 字符，实际 " + era.length());
+        assertTrue(longEra.startsWith(era), "截断结果应是原文前缀");
+    }
 }

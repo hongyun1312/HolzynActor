@@ -17,7 +17,7 @@
  */
 
 // 角色功能域 API：NPC 角色 / 角色档案 / 行动
-import http from './http'
+import http, { AI_TIMEOUT } from './http'
 
 // ==================== 角色/角色档案 ====================
 // 说明：接口路径保留历史命名（card），语义已是"角色档案"——返回 CharacterCardVO
@@ -27,12 +27,13 @@ export const fetchCharacters = (projectId) => http.get(`/api/worlds/${projectId}
 export const createCharacter = (projectId, data) => http.post(`/api/worlds/${projectId}/characters`, data)
 export const updateCharacter = (id, data) => http.put(`/api/characters/${id}`, data)
 export const deleteCharacter = (id) => http.delete(`/api/characters/${id}`)
-export const generateCharacterCard = (characterId) => http.post(`/api/characters/${characterId}/generate-card`, null, { timeout: 60000 })
+// 含 AI：11 维档案长输出，超时统一走 AI_TIMEOUT（300s）——旧的 60s 会把仍在生成的请求掐断
+export const generateCharacterCard = (characterId) => http.post(`/api/characters/${characterId}/generate-card`, null, { timeout: AI_TIMEOUT })
 export const fetchCharacterCard = (characterId) => http.get(`/api/characters/${characterId}/card`)
 export const fetchCharacterCardVersions = (characterId) => http.get(`/api/characters/${characterId}/card/versions`)
 export const editCharacterCard = (characterId, data) => http.put(`/api/characters/${characterId}/card`, data)
 // ：AI 补全缺失维（只填真空维，已覆盖维保留；无缺失零 AI 调用）
-export const completeCharacterCard = (characterId) => http.post(`/api/characters/${characterId}/card/complete`, null, { timeout: 180000 })
+export const completeCharacterCard = (characterId) => http.post(`/api/characters/${characterId}/card/complete`, null, { timeout: AI_TIMEOUT })
 // ：回滚到指定版本（保存为新版本 source=restored；版本号继续自增）
 export const restoreCharacterCard = (characterId, version) => http.post(`/api/characters/${characterId}/card/restore`, { version }, { timeout: 60000 })
 
@@ -42,7 +43,7 @@ export const restoreCharacterCard = (characterId, version) => http.post(`/api/ch
 // 说明：普通人群重构后 crowd 节点 = 每个普通型 NPC 以具体人名独立成节点，crowdName 存其归属。
 export const fetchCharacterRelations = (projectId) => http.get(`/api/worlds/${projectId}/character-relations`)
 // AI 生成关系预览（scope=character|project，不落库）→ [{from,to,relationType,description}]
-export const generateCharacterRelations = (projectId, data) => http.post(`/api/worlds/${projectId}/character-relations/generate`, data, { timeout: 120000 })
+export const generateCharacterRelations = (projectId, data) => http.post(`/api/worlds/${projectId}/character-relations/generate`, data, { timeout: AI_TIMEOUT })
 // 关系批量入库（预览确认后写入）→ {added, total}
 export const batchSaveCharacterRelations = (projectId, data) => http.post(`/api/worlds/${projectId}/character-relations/batch`, data)
 
@@ -55,7 +56,7 @@ export const updateCharacterRelation = (id, data) => http.put(`/api/character-re
 //
 export const deleteCharacterRelation = (id) => http.delete(`/api/character-relations/${id}`)
 // AI 精修 → POST /api/worlds/{projectId}/character-relations/{id}/ai-refine（好感/信任/状态交 AI 综合判断）
-export const aiRefineCharacterRelation = (projectId, id) => http.post(`/api/worlds/${projectId}/character-relations/${id}/ai-refine`, null, { timeout: 60000 })
+export const aiRefineCharacterRelation = (projectId, id) => http.post(`/api/worlds/${projectId}/character-relations/${id}/ai-refine`, null, { timeout: AI_TIMEOUT })
 
 // ==================== 行动 ====================
 export const fetchActions = (characterId) => http.get(`/api/characters/${characterId}/actions`)
@@ -78,7 +79,7 @@ export const fetchGoals = (projectId, characterId) => http.get(`/api/worlds/${pr
 // 手动创建目标 → {title, description?, priority?}
 export const createGoal = (projectId, characterId, data) => http.post(`/api/worlds/${projectId}/characters/${characterId}/goals`, data)
 // AI 生成目标（goal_gen，无 active 目标时生成，失败静默）→ 新建目标数
-export const generateGoals = (projectId, characterId) => http.post(`/api/worlds/${projectId}/characters/${characterId}/goals/generate`, null, { timeout: 60000 })
+export const generateGoals = (projectId, characterId) => http.post(`/api/worlds/${projectId}/characters/${characterId}/goals/generate`, null, { timeout: AI_TIMEOUT })
 // 目标（状态/标题/优先级；空字段保持原值）→ {status?, title?, priority?}
 export const updateGoal = (goalId, data) => http.put(`/api/goals/${goalId}`, data)
 // 删除目标（软删）

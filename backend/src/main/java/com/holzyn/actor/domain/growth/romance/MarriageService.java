@@ -582,7 +582,9 @@ public class MarriageService {
 
     private boolean romanceEligible(ActorCharacter ch) {
         if (ch == null || "DECEASED".equalsIgnoreCase(ch.getStage())
-                || (ch.getDeleted() != null && ch.getDeleted() != 0)) {
+                || (ch.getDeleted() != null && ch.getDeleted() != 0)
+                // （§7.2）：玩家不参与 NPC 自主恋爱/求婚（玩家关系由人驱动）
+                || ch.isPlayer()) {
             return false;
         }
         int age = ch.getAge() == null ? 0 : ch.getAge();
@@ -593,6 +595,10 @@ public class MarriageService {
 
     private boolean fertile(ActorCharacter ch) {
         if (ch == null || "DECEASED".equalsIgnoreCase(ch.getStage())) {
+            return false;
+        }
+        // （§7.2）：玩家不参与 NPC 自主生育链路
+        if (ch.isPlayer()) {
             return false;
         }
         String stage = ch.getStage();

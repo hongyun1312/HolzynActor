@@ -79,6 +79,14 @@ public class AiCallTrace {
     /** 项目 ID（Router 在 resolve 后回填） */
     private Long projectId;
 
+    /**
+     * 写入时刻的世界内游戏秒（0=拿不到时钟）。
+     *
+     * <p>缓存命中率按游戏天聚合（{@code game_second / 86400}）：同一游戏日内日程/天气/日期
+     * 稳定，前缀可复用；跨天整体换档。按真实时间聚合会把两个游戏日混成一份。</p>
+     */
+    private Long gameSecond = 0L;
+
     /** API 配置 ID（结果/用量回填） */
     private Long providerId;
 
@@ -208,6 +216,8 @@ public class AiCallTrace {
     public String getStepType() { return stepType; }
     public String getContent() { return content; }
     public Long getProjectId() { return projectId; }
+    public Long getGameSecond() { return gameSecond; }
+    public void setGameSecond(Long gameSecond) { this.gameSecond = gameSecond == null ? 0L : gameSecond; }
     public Long getProviderId() { return providerId; }
     public String getModel() { return model; }
     public String getSystemPrompt() { return systemPrompt; }
@@ -261,6 +271,9 @@ public class AiCallTrace {
 
     /** 设置非 AI 环节摘要（recordStep 使用） */
     void setContent(String content) { this.content = content; }
+
+    /** 回填决策输入快照（recordStep 使用：让非 AI 的 state_version 行也能核对 prompt 事实）。 */
+    public void setUserPrompt(String userPrompt) { this.userPrompt = userPrompt; }
 
     /** 设置环节耗时（recordStep 使用，非 AI 环节不依赖 startMs 差值） */
     void setDurationMs(int durationMs) { this.fixedDurationMs = Math.max(0, durationMs); }
@@ -455,6 +468,7 @@ public class AiCallTrace {
         e.setCacheHit(cacheHit);
         e.setCacheMiss(cacheMiss);
         e.setDurationMs((int) Math.min(Integer.MAX_VALUE, getDurationMs()));
+        e.setGameSecond(gameSecond == null ? 0L : gameSecond);
         e.setDetailJson(toDetailJson(maxChars));
         return e;
     }

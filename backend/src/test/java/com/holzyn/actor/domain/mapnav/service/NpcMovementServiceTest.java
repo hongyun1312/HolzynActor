@@ -110,6 +110,9 @@ class NpcMovementServiceTest {
             return p;
         });
         when(positionRepository.save(any(ActorNpcPosition.class))).thenAnswer(inv -> inv.getArgument(0));
+        // 后写入口改成 saveAndFlush / saveAllAndFlush（权威坐标必须落盘才算写完），mock 同步跟上
+        when(positionRepository.saveAndFlush(any(ActorNpcPosition.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(positionRepository.saveAllAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
         // 默认：任意两点都给出 100 米的直线路径
         when(navigationService.route(anyLong(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(new NavPath(List.of(new double[]{0, 0}, new double[]{100, 100}), 141.4, 0, false));
@@ -163,7 +166,10 @@ class NpcMovementServiceTest {
         ActorNpcPath path = saved.get(0);
         assertEquals("walking", path.getStatus());
         assertEquals("routine", path.getReason());
-        assertEquals(141.4, path.getLengthM(), 0.01);
+        // （同源归一化）：lengthM 不再是「寻路器在未压精度折线上量出的长度」，
+        // 而是「按落库折线（两位小数）实测的折线长」——这样前端 polylineLength(points) 与它逐位相等，
+        // 同一条轨迹上权威点与渲染点才不会按比例偏开。故这里的期望值是精确值，不是 141.4。
+        assertEquals(Math.hypot(100, 100), path.getLengthM(), 1e-6);
         long span = path.getArriveGameSecond() - path.getDepartGameSecond();
         // 141.4 / 20 ≈ 7.07 游戏分钟 ≈ 424 游戏秒
         assertEquals(424, span, 2);
@@ -211,6 +217,42 @@ class NpcMovementServiceTest {
                 featureRepository, mapRepository, navigationService, positionService, off);
         svc.tick(PROJECT, 600);
         assertNull(positionService.find(PROJECT, "npc:1").orElse(null));
+    }
+
+    @Test
+    @DisplayName("静止角色每个 tick 都刷新权威行秒数（心跳）：不刷会被对账误判成滞后")
+    void staticActorHeartbeatsEveryTick() {
+        service.tick(PROJECT, 600);
+        assertEquals(600L, positionService.find(PROJECT, "npc:1").orElseThrow().getGameSecond().longValue());
+        // 人没动、状态也没变：这一 tick 既不该生成轨迹，也不该让秒数停在 600
+        service.tick(PROJECT, 900);
+        ActorNpcPosition pos = positionService.find(PROJECT, "npc:1").orElseThrow();
+        assertEquals(900L, pos.getGameSecond().longValue(),
+                "静止角色也必须每 tick 心跳，否则权威行会「看起来滞后几十个 tick」");
+        assertEquals(100.0, pos.getX(), 1e-6, "心跳不该挪动位置");
+        assertTrue(saved.isEmpty(), "心跳不该产生轨迹");
+    }
+
+    @Test
+    @DisplayName("无日程角色的权威行滞后：只心跳秒数、不动坐标（自愈不瞎猜目的地）")
+    void staleRowWithoutRoutineOnlyHeartbeats() {
+        ActorNpcPosition stray = new ActorNpcPosition();
+        stray.setProjectId(PROJECT);
+        stray.setMapId(MAP);
+        stray.setNpcRef("npc:99");
+        stray.setX(11.0);
+        stray.setZ(22.0);
+        stray.setStatus("static");
+        stray.setGameSecond(0L);
+        when(positionRepository.findByProjectId(PROJECT)).thenAnswer(inv -> {
+            List<ActorNpcPosition> rows = new ArrayList<>();
+            rows.add(stray);
+            return rows;
+        });
+        service.tick(PROJECT, 100000);
+        assertEquals(100000L, stray.getGameSecond().longValue(), "滞后行必须被心跳推到当前秒");
+        assertEquals(11.0, stray.getX(), 1e-6, "没有日程就不能替他决定去哪");
+        assertEquals(22.0, stray.getZ(), 1e-6);
     }
 
     /** 直接在内存里塞一个「已经在 (x,z)」的坐标。 */

@@ -535,6 +535,14 @@ public class MemoryWorkingService {
         if (w.getContent() == null || w.getContent().isBlank()) {
             return PromoteResult.REJECTED;
         }
+        // 系统模板句不进 L2——「觅食充饥」「…稍候片刻，稍后再去」是生理兜底与占位改写，
+        // 不是角色想过的事。一旦沉淀成长期记忆，每轮检索都会把它捞回来，实测形成自我强化的
+        // 单调循环（21 条记忆含「觅食充饥」、4 条含「我见河神庙正有人使用」）。
+        // 黑名单与行动侧共用一份（com.holzyn.actor.common.ActionTexts），避免两处口径漂移。
+        if (com.holzyn.actor.common.ActionTexts.isRoutineTemplate(w.getContent())) {
+            log.debug("[L1 巩固] 模板句不提升进 L2（直接过期）：id={} type={}", w.getId(), w.getItemType());
+            return PromoteResult.REJECTED;
+        }
         int importance = clampImportance(w.getImportanceHint());
         String type;
         boolean mustPromote;

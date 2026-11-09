@@ -118,10 +118,13 @@ public class DevSystemService {
                 projectId == null ? "当前没有挂载的世界（多数页面会显示空态）" : "世界已挂载，可读实时数据"));
         checks.add(check("aiprovider", "AI 供应商配置", () -> count("select count(*) from actor_model_provider where enabled = 1") > 0,
                 "至少有一个启用中的模型供应商（否则 AI 调用 fail-closed）"));
+        // 仪表盘要把「关闭」说成「零调用」——只说「开关关着」容易被读成「功能可选」，
+        // 实际是判定层整层静默（无 AI 调用、无告警），行为退化为纯规则兜底。
         checks.add(check("decision", "决策模型 判定层", () -> {
             String v = environment.getProperty("holzyn.actor.ai.decision.enabled", "false");
             return Boolean.parseBoolean(v);
-        }, "决策模型 判定开关（关闭时判定层静默，只剩规则兜底）"));
+        }, "判定层总开关（关闭=nanojev 零调用、全部判定走规则兜底，且不报错；"
+                + "开启还需配 base-url，否则同样静默降级）"));
         checks.add(check("datadir", "数据目录可写", () -> {
             Path dir = dataDir();
             return Files.isDirectory(dir) && Files.isWritable(dir);

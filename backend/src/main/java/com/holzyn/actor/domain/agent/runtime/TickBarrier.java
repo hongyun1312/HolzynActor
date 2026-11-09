@@ -101,6 +101,8 @@ public class TickBarrier {
         private final Queue<Runnable> deferred = new ConcurrentLinkedQueue<>();
         /** 连续超时次数（自愈用） */
         private final AtomicInteger consecutiveTimeouts = new AtomicInteger();
+        /** 连续「因 AI 慢而超时」的次数（自适应退避用；只在真正等到排空时清零） */
+        private final AtomicInteger slowStreak = new AtomicInteger();
     }
 
     private final ConcurrentHashMap<Long, ProjectTick> ticks = new ConcurrentHashMap<>();
@@ -110,6 +112,8 @@ public class TickBarrier {
     private final AtomicLong totalWaitedMs = new AtomicLong();
     private final AtomicLong totalTimeouts = new AtomicLong();
     private final AtomicLong totalDeferred = new AtomicLong();
+    /** 自适应退避生效次数（AI 慢时缩短每 tick 等待预算的次数） */
+    private final AtomicLong totalAdaptiveShrinks = new AtomicLong();
 
     private ProjectTick tickOf(Long projectId) {
         return projectId == null ? null : ticks.get(projectId);
@@ -249,7 +253,17 @@ public class TickBarrier {
             return new AwaitResult(0L, 0, false);
         }
         long start = System.currentTimeMillis();
-        long deadline = start + maxWaitMs();
+        // 自适应退避：上一个 tick 因为「AI 慢」超时放行过，这一次就不再白等满预算。
+        // 慢依赖的写回本来就被允许落在本 tick 之后（上面的日志原话），所以每 tick 硬等满 30 秒
+        // 才是真正「AI 拖停世界」的地方：rate=24 时 30 秒 ≈ 720 游戏秒，等于把推进速度压掉两个 tick。
+        // 退避按 1/2、1/4、1/8、1/16 递减，直到某一次真的等到排空为止。
+        long budget = maxWaitMs();
+        int slowStreak = t.slowStreak.get();
+        if (slowStreak > 0) {
+            budget = Math.max(0L, maxWaitMs() >> Math.min(4, slowStreak));
+            totalAdaptiveShrinks.incrementAndGet();
+        }
+        long deadline = start + budget;
         while (t.pending.get() > 0 && System.currentTimeMillis() < deadline) {
             try {
                 Thread.sleep(Math.max(1L, pollMs));
@@ -266,6 +280,7 @@ public class TickBarrier {
         totalWaitedMs.addAndGet(waited);
         if (remaining > 0) {
             totalTimeouts.incrementAndGet();
+            t.slowStreak.incrementAndGet();
             int consecutive = t.consecutiveTimeouts.incrementAndGet();
             if (selfHealAfterTimeouts > 0 && consecutive >= selfHealAfterTimeouts) {
                 t.pending.set(0);
@@ -278,6 +293,7 @@ public class TickBarrier {
             }
         } else {
             t.consecutiveTimeouts.set(0);
+            t.slowStreak.set(0);
             if (waited >= slowWaitLogMs) {
                 log.info("[Tick屏障] 本 tick 在途任务已排空: project={} 等待 {}ms", projectId, waited);
             }
@@ -319,6 +335,7 @@ public class TickBarrier {
         m.put("waits", totalWaits.get());
         m.put("waitedMs", totalWaitedMs.get());
         m.put("timeouts", totalTimeouts.get());
+        m.put("adaptiveShrinks", totalAdaptiveShrinks.get());
         m.put("deferred", totalDeferred.get());
         return m;
     }

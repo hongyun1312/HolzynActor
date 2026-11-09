@@ -17,7 +17,7 @@
  */
 
 // 普通型 NPC 功能域 API（分类体系重构后：单表 CRUD / 标准字段字典 / AI 生成 / 调度 / 环境摘要 / 关系）
-import http from './http'
+import http, { AI_TIMEOUT } from './http'
 // 关系生成/入库复用角色功能域（scope=crowd 单普通 NPC / scope=project 全部；关系写 actor_character_relation）
 import { generateCharacterRelations, batchSaveCharacterRelations } from './character'
 // ：SSE 流统一客户端（fetch + ReadableStream 解析/错误分类统一）
@@ -46,7 +46,7 @@ export const fetchOrdinaryNpcStats = (projectId) => http.get(`/api/worlds/${proj
 // 查询字段字典：{ race: [{field,level1,level2,source}], affiliation: [...], occupation: [...] }
 export const fetchFieldDict = (projectId) => http.get(`/api/worlds/${projectId}/ordinary-npcs/field-dict`)
 // AI 依据世界观一次性拟定全部字段字典 + 选出主/次分类字段（不落库，供预览确认；AI 长耗时接口勿设短超时）
-export const generateFieldDict = (projectId) => http.post(`/api/worlds/${projectId}/ordinary-npcs/field-dict/generate`, null, { timeout: 180000 })
+export const generateFieldDict = (projectId) => http.post(`/api/worlds/${projectId}/ordinary-npcs/field-dict/generate`, null, { timeout: AI_TIMEOUT })
 // 保存字段字典（预览确认后整体替换）+ 保存主/次分类字段（body: { primaryField, secondaryField, fields }）
 export const saveFieldDict = (projectId, preview) => http.post(`/api/worlds/${projectId}/ordinary-npcs/field-dict`, preview, { timeout: 60000 })
 // 手动新增一条字段字典（body: { field, level1, level2, source }）

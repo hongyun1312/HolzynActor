@@ -116,6 +116,10 @@ public class InterruptRecoveryService {
     @Autowired(required = false)
     private WorldClockService worldClockService;
 
+    /** 行动裁决入口（null/关闭时透传旧执行） */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.adjudicate.service.ActionAdjudicationService actionAdjudicationService;
+
     /** L3 核心记忆（轻量性格注入：renderCoreSegment；null=未装配跳过，不阻断恢复决策） */
     @Autowired(required = false)
     private CoreMemoryService coreMemoryService;
@@ -177,7 +181,7 @@ public class InterruptRecoveryService {
             return null; // 非法引用（保持原有 null → 不创建 的处理）
         }
         ActorCharacter ch = characterRepository.findById(characterId).orElse(null);
-        if (ch == null || ch.getProjectId() == null) {
+        if (ch == null || ch.getProjectId() == null || Integer.valueOf(1).equals(ch.getDeleted())) {
             return null;
         }
         String activity = ch.getCurrentActivity();
@@ -363,7 +367,11 @@ public class InterruptRecoveryService {
             plan.setActionJson(toJson(decision));
             plan.setStatus("planned");
             planRepository.save(plan);
-            agentActionService.execute(plan);
+            if (actionAdjudicationService != null) {
+                actionAdjudicationService.executeGated(plan);
+            } else {
+                agentActionService.execute(plan);
+            }
             AiCallContext.recordStep(projectId, "agent_decision", "resume",
                     "打断恢复执行（plan=" + plan.getId() + " " + abbreviate(action, 60) + "）", 0);
         } catch (Exception e) {

@@ -121,6 +121,14 @@ public class GrowthSpaceService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.agent.context.AiContextInjector aiContextInjector;
 
+    /**
+     * 角色当前地点读口（权威坐标 → 要素 → 归属住户；null=未装配按未知地点处理）。
+     * <p>：空间一次生成、TTL 6~12 游戏小时，角色走动后候选动作仍属于旧地点——
+     * 「环境」于是只活在 prompt 叙述里。用这个读口判断「空间是否已经离开了生成它的那个地方」。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcPlaceView npcPlaceView;
+
     //
     // 消费入口
     //
@@ -143,6 +151,18 @@ public class GrowthSpaceService {
         }
         GrowthSpace existing = spaceRepository.findByProjectIdAndNpcRef(projectId, npcRef).orElse(null);
         if (isValid(existing, gameSecond)) {
+            // 位置变化：空间是「上一个地点」里生成的 → 按新地点零 AI 重算，候选集跟着身体走。
+            // 只在已到达（arrived）之后重算：还在路上时他既不在旧地也不在新地，
+            // 每走一步就重算既无意义也浪费（步行途中每几秒就换一次坐标）。
+            if (npcPlaceView != null && npcPlaceView.arrivedAfter(projectId, npcRef, existing.getGameSecond())) {
+                GrowthSpace moved = programmaticSpace(projectId, npcRef, gameSecond,
+                        GrowthSpaceTrigger.LOCATION_CHANGED, true);
+                if (moved != null) {
+                    log.info("[可发生空间] 位置变化，按新地点重算（零 AI）：{} 空间生成于 {} → 现在 {}",
+                            npcRef, existing.getGameSecond(), gameSecond);
+                    return moved;
+                }
+            }
             return existing;
         }
         return generate(projectId, npcRef, gameSecond, GrowthSpaceTrigger.PERIODIC);
@@ -171,7 +191,16 @@ public class GrowthSpaceService {
             // 空间块
             GrowthSpace space = spaceRepository.findByProjectIdAndNpcRef(projectId, npcRef).orElse(null);
             String block;
-            if (isValid(space, gameSecond)) {
+            // 库里那行可能是「上一个地点」的空间（位置刚变、还没到下一次决策）。
+            // 感知是决策的输入，滞后一个 tick 就会让模型拿旧地点的选项做判断——这里读时按
+            // 当前位置现算（只读，不写库），库里的重算仍由 ensureSpace 负责。
+            if (space != null && npcPlaceView != null
+                    && npcPlaceView.arrivedAfter(projectId, npcRef, space.getGameSecond())) {
+                block = livePlaceBlock(npcPlaceView.at(projectId, npcRef));
+                if (block == null || block.isBlank()) {
+                    block = renderBlock(space);
+                }
+            } else if (isValid(space, gameSecond)) {
                 block = renderBlock(space);
             } else {
                 GrowthSpace programmatic = programmaticSpace(projectId, npcRef, gameSecond,
@@ -362,8 +391,18 @@ public class GrowthSpaceService {
         }
         HardGateResult gate = growthGateService.gate(projectId, npcRef);
         ActorNpcState state = stateRepository.findByProjectIdAndNpcRef(projectId, npcRef).orElse(null);
-        GrowthSpaceParse.GrowthSpaceDoc doc = ProgrammaticSpaceFactory.build(
-                ch.getName(), GrowthStage.of(ch.getStage()), gate, state, ch.getCurrentActivity());
+        // 地点快照（未知地点 → buildAt 退回阶段池，与既有行为一致）
+        com.holzyn.actor.domain.mapnav.service.NpcPlaceView.Place place =
+                npcPlaceView == null ? null : npcPlaceView.at(projectId, npcRef);
+        GrowthSpaceParse.GrowthSpaceDoc doc = ProgrammaticSpaceFactory.buildAt(
+                place, ch.getName(), GrowthStage.of(ch.getStage()), gate, state, ch.getCurrentActivity());
+        if (place != null && place.known()) {
+            log.info("[可发生空间] 程序化空间按地点生成：{} 在 {}（{}，{}）候选 {} 项",
+                    npcRef, place.name(), place.category() == null || place.category().isBlank()
+                            ? "未分类" : place.category(),
+                    place.atOwnHome() ? "自家" : (place.atOthersHome() ? "别人家" : "公共场所/经营场所"),
+                    doc.possibleActions() == null ? 0 : doc.possibleActions().size());
+        }
         GrowthSpace space = new GrowthSpace();
         space.setProjectId(projectId);
         space.setNpcRef(npcRef);
@@ -418,7 +457,26 @@ public class GrowthSpaceService {
             GrowthStage st = GrowthStage.of(ch.getStage());
             skeleton.append("｜阶段：").append(st == null ? ch.getStage() : st.label());
         }
-        if (ch.getLocation() != null && !ch.getLocation().isBlank()) {
+        // 所在（权威口径优先）：ch.getLocation() 是语义位置，可能是「正走在去某地的路上」这类旧叙述。
+        // 实测：人站在镇中心广场，AI 生成的候选却是「进米行柜台讨碗水喝」「看米行门口堆的粮袋」——
+        // 空间生成跟着语义叙述走，而不是跟着身体走。这里以权威坐标为准，语义位置只在坐标缺失时兜底。
+        com.holzyn.actor.domain.mapnav.service.NpcPlaceView.Place place =
+                npcPlaceView == null ? null : npcPlaceView.at(projectId, ch.npcRef());
+        if (place != null && place.known()) {
+            skeleton.append("｜所在：").append(place.name());
+            StringBuilder tags = new StringBuilder();
+            if (place.category() != null && !place.category().isBlank()) {
+                tags.append(place.category());
+            }
+            if (place.atOwnHome()) {
+                tags.append(tags.length() > 0 ? "·" : "").append("自家");
+            } else if (place.atOthersHome()) {
+                tags.append(tags.length() > 0 ? "·" : "").append("别人家");
+            }
+            if (tags.length() > 0) {
+                skeleton.append("（").append(tags).append("）");
+            }
+        } else if (ch.getLocation() != null && !ch.getLocation().isBlank()) {
             skeleton.append("｜位置：").append(ch.getLocation());
         }
         if (ch.getCurrentActivity() != null && !ch.getCurrentActivity().isBlank()) {
@@ -444,8 +502,24 @@ public class GrowthSpaceService {
                 log.debug("[可发生空间] 状态段组装失败（跳过）: {}", e.getMessage());
             }
         }
-        ph.put("current_state", state == null || state.isBlank() ? "（状态未知）" : state);
-        // 相关记忆 ≤3
+        // 实测：状态段里的「当前所在：河神庙」来自角色语义位置（NPC 运行态），
+        // 人已经被摆到阿珍家门口，模型仍按河神庙写候选（「在河神庙附近走走」）。所以在状态段前面
+        // 压一句权威所在，并明确「以此为准」——否则同一份 prompt 里两个地点，模型挑错的那个。
+        if (place != null && place.known()) {
+            StringBuilder anchor = new StringBuilder("【所在】").append(place.name());
+            if (place.category() != null && !place.category().isBlank()) {
+                anchor.append("（").append(place.category());
+                if (place.atOwnHome()) {
+                    anchor.append("，自家");
+                } else if (place.atOthersHome()) {
+                    anchor.append("，别人家");
+                }
+                anchor.append("）");
+            }
+            anchor.append("——此刻就在这里，以此为准；下面的旧叙述或记忆里若有别的地点，以本行为准。\n");
+            state = anchor + (state == null ? "" : state);
+        }
+        ph.put("current_state", state == null || state.isBlank() ? "（状态未知）" : state);        // 相关记忆 ≤3
         String memories = renderMemories(projectId, ch.npcRef());
         ph.put("memories", memories);
         // 游戏时刻
@@ -648,8 +722,46 @@ public class GrowthSpaceService {
     //
 
     /** 渲染空间注入块（Prompt 消费；上限 {@code space.inject-max-chars} 截断）。 */
-    public String renderBlock(GrowthSpace space) {
-        if (space == null || space.getSpaceJson() == null) {
+    /**
+     * 按当前位置现算的「此刻可发生空间」块（只读，不写库）。
+     *
+     * <p>用于「库里的空间属于上一个地点」这一刻：感知是决策输入，宁可现算一份地点池，
+     * 也不让模型拿旧地点的选项做判断。地点未知时返回空串，由调用方回退旧块。</p>
+     */
+    private String livePlaceBlock(com.holzyn.actor.domain.mapnav.service.NpcPlaceView.Place place) {
+        if (place == null || !place.known()) {
+            return "";
+        }
+        List<String> pool = ProgrammaticSpaceFactory.poolAt(place);
+        if (pool.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("【此刻可发生空间】（按当前位置现算：")
+                .append(place.name() == null ? "此处" : place.name()).append("）");
+        sb.append("\n此刻可发生的行动：");
+        int n = 0;
+        for (String a : pool) {
+            if (n >= 6) {
+                break;
+            }
+            sb.append("\n").append(++n).append(". ").append(a);
+        }
+        List<GrowthSpaceParse.ForbiddenItem> forbid = ProgrammaticSpaceFactory.forbiddenAt(place);
+        if (forbid != null && !forbid.isEmpty()) {
+            sb.append("\n此处不宜：");
+            int m = 0;
+            for (GrowthSpaceParse.ForbiddenItem f : forbid) {
+                if (m >= 3) {
+                    break;
+                }
+                sb.append(m == 0 ? "" : "；").append(f.what());
+                m++;
+            }
+        }
+        return sb.toString();
+    }
+
+    public String renderBlock(GrowthSpace space) {        if (space == null || space.getSpaceJson() == null) {
             return "";
         }
         GrowthSpaceParse.GrowthSpaceDoc doc = GrowthSpaceParse.parse(space.getSpaceJson());

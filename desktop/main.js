@@ -23,7 +23,7 @@
  *   数据：%LOCALAPPDATA%\HolzynActor\{data,uploads,logs,backups,updater}
  */
 
-const { app, BrowserWindow, dialog, shell, ipcMain, clipboard, Tray, Menu, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, dialog, shell, ipcMain, clipboard, Tray, Menu, nativeImage, screen, session } = require('electron');
 const { spawn } = require('child_process');
 const net = require('net');
 const path = require('path');
@@ -123,6 +123,37 @@ function main() {
   function log(line) {
     const t = new Date().toISOString();
     consoleLog.write(`[${t}] ${line}\n`);
+  }
+
+  /**
+   * 版本变更时清一次渲染进程（Chromium）的 HTTP 缓存。
+   *
+   * <p><b>为什么非清不可</b>：1.1.3 之前后端对 index.html 与 /assets/* 都不写 Cache-Control，
+   * Chromium 走「启发式缓存」，会把旧壳页和旧分片留在磁盘里按分钟级新鲜度继续复用——实测装了
+   * 含新功能的包之后，客户端仍在跑上一版的 {@code index-B3Q7AWoa.js} / {@code NewProjectView-D8gl_L1A.js}，
+   * 表现成「版本号更新了、界面还是旧的、新功能一次都不触发」。后端已改成壳页 no-store，
+   * 但已经落盘的旧条目只能在这里清掉。</p>
+   *
+   * @returns {Promise<void>} 清理失败只记日志，不阻塞启动
+   */
+  async function purgeStaleHttpCache() {
+    const marker = path.join(app.getPath('userData'), 'cache-version.json');
+    let last = '';
+    try {
+      last = JSON.parse(fs.readFileSync(marker, 'utf8')).version || '';
+    } catch (_) { /* 首次运行：没有标记文件 */ }
+    const current = app.getVersion();
+    if (last === current) return;
+    try {
+      await session.defaultSession.clearCache();
+      await session.defaultSession.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] });
+      log(`[缓存] 版本 ${last || '（无）'} → ${current}，已清空渲染进程 HTTP 缓存`);
+    } catch (e) {
+      log(`[缓存] 清理失败（不影响启动）：${(e && e.message) || e}`);
+    }
+    try {
+      fs.writeFileSync(marker, JSON.stringify({ version: current, at: new Date().toISOString() }));
+    } catch (_) { /* 标记写不进去就下个版本再清一次 */ }
   }
 
   // ==================== 更新器状态与事件（→ 渲染进程） ====================
@@ -616,10 +647,33 @@ function main() {
 
   // ==================== 后端 sidecar 生命周期 ====================
 
+  /**
+   * 开发模式下解析后端 fat jar：取 backend/target 里最新的 holzyn-actor-*.jar。
+   *
+   * @returns {string} jar 绝对路径（找不到时回退到旧版固定名，交给后面「未找到后端 jar」的提示兜底）
+   */
+  function resolveLatestDevJar() {
+    const targetDir = path.resolve(__dirname, '..', 'backend', 'target');
+    try {
+      const jars = fs.readdirSync(targetDir)
+        .filter((f) => /^holzyn-actor-.*\.jar$/.test(f))
+        .map((f) => ({ file: path.join(targetDir, f), mtime: fs.statSync(path.join(targetDir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      if (jars.length > 0) return jars[0].file;
+    } catch (_) {
+      // target 不存在（还没构建过）：走下面的回退路径，由启动检查给出明确提示
+    }
+    return path.join(targetDir, 'holzyn-actor.jar');
+  }
+
   function resolveBackend() {
     if (isDev) {
       // 开发模式：直接用仓库构建产物 + 本机 JDK（免打包快速联调）
-      const jar = path.resolve(__dirname, '..', 'backend', 'target', 'holzyn-actor-1.1.2-beta.1.jar');
+      //
+      // 为什么按 mtime 取最新 jar 而不是写死版本号：这里曾经硬编码 holzyn-actor-1.1.2-beta.1.jar，
+      // 版本号一升，dev 模式直接「未找到后端 jar」，坑的是联调而不是发布。
+      // 打包模式（extraResources）仍由 desktop/package.json 的 from 路径决定，与这里无关。
+      const jar = resolveLatestDevJar();
       const java = process.env.JAVA_HOME
         ? path.join(process.env.JAVA_HOME, 'bin', 'java.exe')
         : 'java';
@@ -1434,6 +1488,7 @@ function main() {
     const result = await startBackend({ onStage, onError });
     startupRunning = false;
     if (!result.ok) return; // 失败由闪屏内展示（打开日志/重试/退出）；更新回滚路径已在内部退出
+    await purgeStaleHttpCache(); // 版本变了先清旧壳页缓存，否则用户看到的还是上一版界面
     createWindow(`http://127.0.0.1:${result.port}`);
     createTray();
     scheduleStartupCheck();

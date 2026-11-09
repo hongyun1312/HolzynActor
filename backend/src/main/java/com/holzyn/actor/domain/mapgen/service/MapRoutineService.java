@@ -128,6 +128,7 @@ public class MapRoutineService {
         if (pier == null) {
             pier = facilities.get("boathouse");
         }
+        List<Spot> publics = publicSpots(facilities, fields, plaza, pier);
 
         List<ActorNpcHome> homeRows;
         List<ActorHomeMember> members;
@@ -165,7 +166,7 @@ public class MapRoutineService {
                 }
                 Spot work = workplace(ch, m, facilities, fields, pier, plaza, homeSpot);
                 out.addAll(dayOf(mapId, projectId, ref, name, homeSpot, work, plaza, pier, m,
-                        fields, homeSpot, hashOf(ref)));
+                        fields, homeSpot, hashOf(ref), publics));
                 built++;
             }
         }
@@ -183,7 +184,7 @@ public class MapRoutineService {
     private List<ActorNpcRoutine> dayOf(Long mapId, Long projectId, String ref, String name,
                                         Spot home, Spot work, Spot plaza, Spot pier,
                                         ActorHomeMember member, List<Spot> fields,
-                                        Spot homeSpot, int seed) {
+                                        Spot homeSpot, int seed, List<Spot> publics) {
         int jitter = (seed % 41) - 20;
         int wake = clampMinute(330 + jitter);
         int workStart = clampMinute(450 + jitter);
@@ -194,21 +195,39 @@ public class MapRoutineService {
         int social = clampMinute(1170 + (seed % 29) - 14);
         int sleep = clampMinute(1290 + (seed % 37) - 18);
 
+        // 一天里真正去过的地方不能只有「家 + 干活地 + 广场」三处。
+        // 实测 3.38 个游戏日里，NPC 只在 2~3 个地点之间往复——不是日程段数不够，
+        // 是每个段的落点都取自同一小撮固定对象。这里给三个公共时段各派一个
+        // 按 seed 轮转的独立落点：上午打水/买东西去 A、下午办事去 B、傍晚串门去 C，
+        // 不同角色 A/B/C 不同，于是同一个村子里的人在不同时间出现在不同地方。
+        Spot midday = pick(publics, seed, 1);
+        Spot afternoon = pick(publics, seed, 5);
+        Spot evening = pick(publics, seed, 9);
+
         List<ActorNpcRoutine> out = new ArrayList<>();
         add(out, mapId, projectId, ref, name, 0, wake, home, "sleep", "睡觉", true);
         add(out, mapId, projectId, ref, name, wake, workStart, home, "chores", "起床、挑水、喂鸡", false);
         add(out, mapId, projectId, ref, name, workStart, noon, work, activity(work),
                 label(work, name), false);
-        add(out, mapId, projectId, ref, name, noon, workAgain, home, "meal", "回家吃午饭", true);
+        // 晌午头上去井台/集市一趟（顺路办事，不是所有人都在同一刻）
+        add(out, mapId, projectId, ref, name, noon, noon + 25, midday == null ? home : midday,
+                "errand", "晌午去井台/集市一趟", false);
+        add(out, mapId, projectId, ref, name, noon + 25, workAgain, home, "meal", "回家吃午饭", true);
+        add(out, mapId, projectId, ref, name, workAgain, errand, work, activity(work),
+                label(work, name), false);
         if (sleep - social > 120) {
-            add(out, mapId, projectId, ref, name, workAgain, errand, work, activity(work),
-                    label(work, name), false);
             Spot market = plaza == null ? home : plaza;
-            add(out, mapId, projectId, ref, name, errand, dinner, market, "errand",
+            // 下午的「办事」与傍晚的「串门」刻意用两个不同落点：同一天里走过的地方更多，
+            // 重访判据（坐标 + 地点 + 可达候选清单）也才有真正的往返可测。
+            add(out, mapId, projectId, ref, name, errand, errand + 45,
+                    afternoon == null ? market : afternoon, "errand", "去磨坊/铺子办点事", false);
+            add(out, mapId, projectId, ref, name, errand + 45, dinner, market, "errand",
                     "去集市/井台办点事", false);
             add(out, mapId, projectId, ref, name, dinner, social, home, "meal", "吃晚饭", true);
-            add(out, mapId, projectId, ref, name, social, sleep, socialSpot(plaza, home), "chat",
-                    "和邻里说说话", false);
+            add(out, mapId, projectId, ref, name, social, social + 40,
+                    evening == null ? socialSpot(plaza, home) : evening, "chat", "串门说说话", false);
+            add(out, mapId, projectId, ref, name, social + 40, sleep, socialSpot(plaza, home),
+                    "chat", "和邻里说说话", false);
         } else {
             add(out, mapId, projectId, ref, name, workAgain, social, work, activity(work),
                     label(work, name), false);
@@ -225,6 +244,49 @@ public class MapRoutineService {
 
     private Spot socialSpot(Spot plaza, Spot home) {
         return plaza == null ? home : plaza;
+    }
+
+    /**
+     * 公共落点池：广场、码头、各类设施（井台/磨坊/祠堂/茶棚…）与几块田地。
+     *
+     * <p>按 {@code featureCode} 去重，顺序稳定——同一个人每天的 A/B/C 落点因此可复现，
+     * 「重访同一地点」这类验收才可重复。池子为空时退回 null，调用方自行兜底到 home/plaza。</p>
+     */
+    private List<Spot> publicSpots(Map<String, Spot> facilities, List<Spot> fields,
+                                   Spot plaza, Spot pier) {
+        List<Spot> out = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        if (plaza != null) {
+            out.add(plaza);
+            seen.add(keyOf(plaza));
+        }
+        if (pier != null && seen.add(keyOf(pier))) {
+            out.add(pier);
+        }
+        for (Spot s : facilities.values()) {
+            if (s != null && seen.add(keyOf(s))) {
+                out.add(s);
+            }
+        }
+        for (Spot s : fields) {
+            if (s != null && seen.add(keyOf(s))) {
+                out.add(s);
+            }
+        }
+        return out;
+    }
+
+    private String keyOf(Spot s) {
+        return s.featureCode() == null ? (s.kind() + "@" + s.x() + "," + s.z()) : s.featureCode();
+    }
+
+    /** 从公共落点池里按 seed 轮转取一个（池子为空返回 null）。 */
+    private Spot pick(List<Spot> pool, int seed, int salt) {
+        if (pool == null || pool.isEmpty()) {
+            return null;
+        }
+        int idx = Math.floorMod(seed * 31 + salt * 17, pool.size());
+        return pool.get(idx);
     }
 
     private String activity(Spot work) {

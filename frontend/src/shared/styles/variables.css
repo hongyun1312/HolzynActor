@@ -233,8 +233,8 @@
      此处默认值仅用于「JS 尚未执行」的首帧兜底，保证不闪错位。
      ============================================================ */
   --shell-topbar-h: 52px;              /* 顶部图标抽屉栏高度（与旧顶栏一致） */
-  --shell-side-w: 210px;               /* 域侧栏宽度（JS 写入实测值；默认 210） */
-  --shell-side-margin: 12px;           /* 悬浮岛侧栏留白（左右各一份） */
+  --shell-side-w: 232px;               /* 域侧栏宽度（JS 写入实测值；默认 232 = 容得下「名称 + 副标签」不提前省略） */
+  --shell-side-margin: 12px;           /* 悬浮岛侧栏留白（左右各一份，DomainSidebar 用 margin 简写一次吃满） */
   --shell-side-w-min: 208px;           /* 拖拽下限 */
   --shell-side-w-max: 360px;           /* 拖拽上限 */
   --shell-side-w-collapsed: 56px;      /* 收起后的图标窄栏宽度 */
@@ -243,8 +243,9 @@
   /* ===== 16:9 设计基准（桌面端唯一基准画布：1280×720 逻辑像素）=====
      桌面窗口无边框 + 每次打开都按 16:9（基准 1280×720，最小档 960×540），
      见 docs/设计文档/HolzynActor_桌面端16比9沉浸式窗口与UI基准_设计_V1.0.md。
-     设计/验收一律按这个画布量：内容区盒子宽 = 1280 − 左留白(12) − 侧栏(210) = 1058px，
-     扣掉内容区内边距（左右 24 / 上下 20）后可用排版区约 1010×628；内容区高 = 720 − 顶栏(52) = 668px。 */
+     设计/验收一律按这个画布量：内容区盒子宽 = 1280 − 左留白(12) − 侧栏(232) − 右留白(12) = 1024px，
+     扣掉内容区内边距（左右 24 / 上下 20）后可用排版区约 976×628；内容区高 = 720 − 顶栏(52) = 668px。
+     注：侧栏两侧留白同值（12×2）后，同一视口下内容区比「只有左留白」时再少 12px。 */
   --ui-base-w: 1280px;
   --ui-base-h: 720px;
   --ui-aspect: 16 / 9;
@@ -269,7 +270,7 @@
   /* 兼容别名（V1.0 命名）：值统一指向 --bp-*，避免出现第二个事实来源 */
   --shell-bp-sm: var(--bp-md);
   --shell-bp-md: var(--bp-lg);
-  --sb-inset-left: 222px;              /* 沙盘 3D 向左延伸量（JS 写入实测值 = 左留白 12 + 侧栏宽 210） */
+  --sb-inset-left: 256px;              /* 沙盘 3D 向左延伸量（JS 写入实测值 = 左留白 12 + 侧栏宽 232 + 右留白 12） */
 
   /* ===== 内容区（替换各页 11 处互不相同的 max-width）===== */
   --content-pad-x: 24px;
@@ -335,6 +336,33 @@
   --density-pad-y: 8px;                /* 控件纵向内边距 */
   --density-card-pad: 16px;            /* 卡片内边距 */
 
+  /* ===== 侧栏尺度（SideNav / DomainSidebar 的唯一来源；随三档密度派生）=====
+     为什么单独成组而不直接复用 --density-*：侧栏是「行列表」，与表格/正文共用一个行高，
+     改表格就会顺手改坏导航；但「切密度侧栏要跟着变」的需求仍要满足，所以值按 html[data-density]
+     分档覆盖，不新增第二个密度开关。
+     规约（改数值前先读这条）：
+     ① **间距一律落在 4pt 栅格上**（4/8/12/16/20/24…，与 --space-* 同一刻度）；
+        紧凑档允许 2px 半格用于「组内极紧」；字号与图标不属于间距，不在此约束内；
+     ② 行内只有一条图文间距 --side-gap，图标与文字、行内元素都用它，不得再写第二种内间距；
+     ③ 组内 --side-item-gap < 组间 --side-group-gap，且两者不得相等（否则分组边界消失）；
+     ④ 图标 = 同行文字 - 1px（「图标略小于文字」）；组头图标 = 组头文字 - 1px；
+     ⑤ --side-inset / --side-radius / --side-indent / --side-head-h 三档恒定：
+        侧栏外圆角 16 − 内留白 8 = 行圆角 8，保持同心，不随密度漂移。 */
+  --side-row-h: 40px;                  /* 行高（= 点击热区高度，≥40 才够「好点」） */
+  --side-font: 14px;                   /* 行字号（名称） */
+  --side-font-head: 12px;              /* 分组头字号（比行名小一档，层级靠字号而非居中） */
+  --side-font-sub: 11px;               /* 副标签字号（如「世界运行中」） */
+  --side-icon: 13px;                   /* 行图标（= 行字号 − 1） */
+  --side-icon-rail: 18px;              /* 收起为图标栏时的图标（无文字可参照，放大到 18 才点得准） */
+  --side-pad-x: 12px;                  /* 行内左右内边距（图标左缘 = 侧栏内留白 + 它） */
+  --side-gap: 12px;                    /* 行内图文间距（唯一值，禁止行内再写第二种子间距） */
+  --side-item-gap: 4px;                /* 组内行间距 */
+  --side-group-gap: 16px;              /* 组间间距（= 组内 ×4，分组才成立） */
+  --side-inset: 8px;                   /* 侧栏内容左右留白（头部/导航/底部共用，两侧必须相等） */
+  --side-radius: 8px;                  /* 行与组头圆角（= 16 − 8，同心） */
+  --side-indent: 16px;                 /* 子项相对组头的缩进（一级即可，不做二级缩进） */
+  --side-head-h: 44px;                 /* 侧栏头部（「导航」+ 折叠按钮）高度 */
+
   /* ===== 层级（唯一权威，禁止各页自定 z-index）=====
      顺序语义：内容 < 域侧栏 < 非固定抽屉 < 顶栏 < 点空白遮罩 < 导览 < 命令面板/右键菜单 < 浮层提示。
      导览刻意低于命令面板与右键菜单：首次导览进行中按 Ctrl+K 时，命令面板必须完全可见，
@@ -366,6 +394,17 @@ html[data-density="compact"] {
   --density-card-pad: 12px;
   --content-pad-x: 18px;
   --content-pad-y: 14px;
+  /* 侧栏紧凑档：行高 36（仍高于 WCAG 2.5.8 的 24 下限，也比旧 30 更稳） */
+  --side-row-h: 36px;
+  --side-font: 13px;
+  --side-font-head: 11px;
+  --side-font-sub: 10px;
+  --side-icon: 12px;
+  --side-icon-rail: 17px;
+  --side-pad-x: 8px;
+  --side-gap: 8px;
+  --side-item-gap: 2px;
+  --side-group-gap: 12px;
 }
 html[data-density="comfortable"] {
   --density-row-h: 40px;
@@ -376,6 +415,17 @@ html[data-density="comfortable"] {
   --density-card-pad: 20px;
   --content-pad-x: 28px;
   --content-pad-y: 24px;
+  /* 侧栏宽松档 */
+  --side-row-h: 44px;
+  --side-font: 15px;
+  --side-font-head: 13px;
+  --side-font-sub: 12px;
+  --side-icon: 14px;
+  --side-icon-rail: 19px;
+  --side-pad-x: 12px;
+  --side-gap: 12px;
+  --side-item-gap: 4px;
+  --side-group-gap: 20px;
 }
 
 /* ===== 内容宽度模式 =====

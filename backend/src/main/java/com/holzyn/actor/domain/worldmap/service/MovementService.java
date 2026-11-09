@@ -107,6 +107,17 @@ public class MovementService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.project.repository.ActorProjectRepository projectRepository;
 
+    /**
+     * 权威移动引擎（单一移动引擎）：装配时 {@link #startMove} 直接转发给它，
+     * 不再写第二套 0..500 沙盘轨迹。null=未装配（旧沙盘世界）时行为不变。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcMovementService npcMovementService;
+
+    /** 目的地解析（口语名 → 要素/坐标）：转发权威推进时用它把「周家米行」变成坐标。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.TargetResolver authorityTargetResolver;
+
     /** 当前用户提供器（事件归属 userId 兜底；null=未装配回退 1L） */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.account.CurrentUserProvider currentUserProvider;
@@ -167,16 +178,31 @@ public class MovementService {
 
     /**
      * 地图坐标（[0, scene_size)）→ 沙盘中心化坐标（−size/2 偏移）。
+     *
+     * <p>：换算实现已收口到
+     * {@link com.holzyn.actor.domain.mapnav.service.MapCoordinateSystem}，这里只保留包级调用点，
+     * 避免第三份「减半个边长」的副本再次出现。本方法里地图域与沙盘域同边（都取 sceneSize），
+     * 与旧行为逐位等价；跨域换算（1024 米地图 ↔ 500 沙盘）请走 {@code MapCoordinateSystem} 的比例式重载。</p>
+     *
+     * @param mapCoord  地图域坐标
+     * @param sceneSize 场景边长
+     * @return 沙盘域坐标
      */
     static double mapToSandbox(double mapCoord, int sceneSize) {
-        return mapCoord - (sceneSize > 0 ? sceneSize : DEFAULT_SCENE_SIZE) / 2.0;
+        double s = sceneSize > 0 ? sceneSize : DEFAULT_SCENE_SIZE;
+        return com.holzyn.actor.domain.mapnav.service.MapCoordinateSystem.mapToSandbox(mapCoord, s, s);
     }
 
     /**
      * 沙盘中心化坐标 → 地图坐标（[0, scene_size)）。
+     *
+     * @param sandboxCoord 沙盘域坐标
+     * @param sceneSize    场景边长
+     * @return 地图域坐标
      */
     static double sandboxToMap(double sandboxCoord, int sceneSize) {
-        return sandboxCoord + (sceneSize > 0 ? sceneSize : DEFAULT_SCENE_SIZE) / 2.0;
+        double s = sceneSize > 0 ? sceneSize : DEFAULT_SCENE_SIZE;
+        return com.holzyn.actor.domain.mapnav.service.MapCoordinateSystem.sandboxToMap(sandboxCoord, s, s);
     }
 
     // ==================== 移动发起（统一入口） ====================
@@ -209,6 +235,27 @@ public class MovementService {
                                    Long targetLocationId, String targetLocationName, Long gameSecond) {
         if (projectId == null || npcRef == null || npcRef.isBlank() || reason == null || reason.isBlank()) {
             return null;
+        }
+        // （单一移动引擎）：权威世界里位置由 NpcMovementService（米制 actor_npc_path）
+        // 统一推进；沙盘这条 0..500 的旧轨迹只作为「权威建不起来」时的兼容通道。
+        // 放在入口处而不是逐个调用方改：人群移动（NpcStateService）、回家（goHome）、
+        // AI 行动（AgentActionService）都从这里出发，一处收口才不会有第三条路漏写。
+        if (npcMovementService != null && authorityTargetResolver != null) {
+            try {
+                com.holzyn.actor.domain.mapnav.service.TargetResolver.Resolved r =
+                        authorityTargetResolver.resolve(projectId, targetLocationName).orElse(null);
+                if (r != null) {
+                    npcMovementService.startMove(projectId, npcRef, r.getX(), r.getZ(),
+                            r.getFeatureCode() == null || r.getFeatureCode().isBlank()
+                                    ? r.getTargetRef() : r.getFeatureCode(),
+                            reason, gameSecond == null ? currentGameSecond(projectId) : gameSecond);
+                    log.info("[移动] 权威世界改由 mapnav 推进，跳过沙盘轨迹：ref={} 目标={}（{}）",
+                            npcRef, targetLocationName, reason);
+                    return null;
+                }
+            } catch (Exception e) {
+                log.warn("[移动] 权威推进失败（回退沙盘轨迹）: ref={} : {}", npcRef, e.getMessage());
+            }
         }
         int sceneSize = sceneSizeOf(projectId);
         ActorSandboxState st = ensureSandboxState(projectId, npcType, npcRef);
@@ -492,6 +539,20 @@ public class MovementService {
                 return;
             }
             int sceneSize = sceneSizeOf(projectId);
+            // （单一移动引擎）：回家也走权威——沙盘 0..500 与米制坐标的换算
+            // 只在旧世界保留；权威世界若在这里继续写第二条轨迹，位置就又变成两份真相。
+            if (npcMovementService != null) {
+                try {
+                    npcMovementService.startMove(projectId, npcRef, home.getPosX(), home.getPosZ(),
+                            home.getLocationId() == null ? null : String.valueOf(home.getLocationId()),
+                            ActorMovement.REASON_HOME, gameSecond == null ? 0L : gameSecond);
+                    log.info("[移动] 就寝回家改由 mapnav 推进（权威坐标），跳过沙盘轨迹：ref={} 家={}",
+                            npcRef, home.getName());
+                    return;
+                } catch (Exception e) {
+                    log.warn("[移动] 就寝回家权威推进失败（回退沙盘）: ref={} : {}", npcRef, e.getMessage());
+                }
+            }
             double[] to = new double[]{mapToSandbox(home.getPosX(), sceneSize), mapToSandbox(home.getPosZ(), sceneSize)};
             ActorSandboxState st = sandboxStateRepository.findByProjectIdAndNpcRef(projectId, npcRef).orElse(null);
             double[] from = st == null || st.getPosX() == null

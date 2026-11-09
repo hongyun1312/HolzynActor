@@ -376,7 +376,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchWorldSetting, fetchMemories, deleteMemory, fetchWorldgenPreview,
-  createWorldgenTask, fetchWorldgenTask, fetchStoryPlans, fetchWorldInitStatus
+  createWorldgenTask, fetchWorldgenTask, fetchStoryPlans, fetchWorldInitStatus, fetchWorldgenWorkflows
 } from '@/shared/api'
 import WorldLocationTable from '@/shared/components/WorldLocationTable.vue'
 // V2.0 批次二：空态统一走 EmptyState
@@ -511,15 +511,68 @@ const charGenStarting = ref(false)
 const charGenTask = ref(null)
 let charPollTimer = null
 
-/** 节点列表（含未开始占位） */
-const charGenNodes = computed(() => {
-  const list = (charGenTask.value?.nodes || []).slice()
-  const total = charGenTask.value?.workflowNodeCount || list.length
-  for (let i = list.length; i < total; i++) {
-    list.push({ nodeId: '', label: '', status: 'pending' })
+/**
+ * 工作流节点定义缓存（code → nodes[]，顺序=执行顺序）。
+ *
+ * <p>用途：任务只记录「已执行的节点」，尚未执行到的节点没有数据——只有 nodeCount 时
+ * 前端只能显示一排「等待执行」。拿到定义后，占位节点也能显示自己的真实阶段名。</p>
+ */
+const workflowDefNodes = ref({})
+
+/** 加载工作流定义（失败不报错：退回旧的空占位行为） */
+async function loadWorkflowDefs() {
+  try {
+    const list = await fetchWorldgenWorkflows()
+    const map = {}
+    for (const w of list || []) {
+      if (w && w.code && Array.isArray(w.nodes) && w.nodes.length) {
+        map[w.code] = w.nodes
+      }
+    }
+    workflowDefNodes.value = map
+  } catch (_) {
+    workflowDefNodes.value = {}
+  }
+}
+
+/**
+ * 合并任务节点与工作流定义：已执行节点取任务产物，未执行节点取定义里的阶段名。
+ *
+ * <p>定义缺失（老库/解析失败）时退回旧行为：按 workflowNodeCount 补空占位。</p>
+ *
+ * @param {object|null} task 任务 VO
+ * @param {string} code 工作流编码
+ * @returns {Array} 展示用节点列表
+ */
+function mergeNodes(task, code) {
+  const nodes = (task && task.nodes) || []
+  const defs = workflowDefNodes.value[code] || []
+  if (!defs.length) {
+    const list = nodes.slice()
+    const total = (task && task.workflowNodeCount) || list.length
+    for (let i = list.length; i < total; i++) {
+      list.push({ nodeId: '', label: '', status: 'pending' })
+    }
+    return list
+  }
+  const list = []
+  for (const def of defs) {
+    const hit = nodes.find((n) => n.nodeId && n.nodeId === def.nodeId)
+    if (hit) {
+      list.push({ ...hit, label: hit.label || def.label })
+    } else {
+      list.push({ nodeId: def.nodeId, label: def.label, stepType: def.stepType, status: 'pending' })
+    }
+  }
+  // 定义里没有、任务里却有的节点：追加在末尾，绝不丢执行记录
+  for (const n of nodes) {
+    if (!defs.some((d) => d.nodeId === n.nodeId)) list.push(n)
   }
   return list
-})
+}
+
+/** 节点列表（含未开始占位） */
+const charGenNodes = computed(() => mergeNodes(charGenTask.value, 'worldgen_character_v1'))
 
 const charGenStatusText = computed(() => {
   const s = charGenTask.value?.status
@@ -625,14 +678,7 @@ const storyOpen = ref(['engine', 'style'])
 const currentStoryPlan = computed(() => storyPlans.value[storyVersionIdx.value] || null)
 
 /** 故事规划节点列表（含未开始占位） */
-const storyGenNodes = computed(() => {
-  const list = (storyGenTask.value?.nodes || []).slice()
-  const total = storyGenTask.value?.workflowNodeCount || list.length
-  for (let i = list.length; i < total; i++) {
-    list.push({ nodeId: '', label: '', status: 'pending' })
-  }
-  return list
-})
+const storyGenNodes = computed(() => mergeNodes(storyGenTask.value, 'worldgen_story_plan_v1'))
 
 const storyGenStatusText = computed(() => {
   const s = storyGenTask.value?.status
@@ -770,7 +816,11 @@ function mdToHtml(md) {
   return html
 }
 
-onMounted(loadAll)
+onMounted(() => {
+  // 节点定义与页面数据并行加载：定义只影响「等待中节点的显示名」，不阻塞任何数据
+  loadWorkflowDefs()
+  loadAll()
+})
 onBeforeUnmount(() => { stopCharPolling(); stopStoryPolling() })
 </script>
 

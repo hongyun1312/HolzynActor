@@ -36,6 +36,8 @@ const routes = [
   // O2.5 行为质量评估（2026-09-19，P2-1 决策样本评分报告 + 专门测试接口五能力）：
   // ① 阶段控制 ② 状态聚合 ③ 干预驱动 ④ 评估批跑（LLM-as-Judge） ⑤ test_run_log 完整回放
   { path: '/eval-test', name: 'eval-test', component: () => import('../views/EvaluationTestView.vue'), meta: { title: '行为评估 O2.5' } },
+  // 时间性验证：否定状态探针因果断言 / 7 日行为分布记忆时距衰减数据页
+  { path: '/temporal-audit', name: 'temporal-audit', component: () => import('../views/TemporalAuditView.vue'), meta: { title: '时间性验证 V1.1.4' } },
   // O3 评估与工程（2026-09-21，P2-4 统一护栏 + P2-5 场景-模型路由）：路由生效表+运行时覆盖 /
   // 护栏状态（开关/每场景统计/最近告警）+ 运行时覆盖
   { path: '/ai-policy', name: 'ai-policy', component: () => import('../views/AiPolicyView.vue'), meta: { title: '护栏与路由 O3' } },

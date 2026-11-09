@@ -79,6 +79,23 @@ public class PersonaService {
     /** 档案版本历史服务 */
     private final PersonaRevisionService revisionService;
 
+    /**
+     * 人物知识卡同步线程（每任务一条虚拟线程）。
+     *
+     * <p>为什么不能在 {@code afterCommit} 里直接同步调用：回调仍发生在原事务线程上，Repository 写入会被
+     * 已提交的事务与已关闭的 EntityManager 拦住，实测每次档案保存都报
+     * {@code [人物知识卡] 提交后同步失败 … No active transaction} —— 档案存下了，知识卡却静默丢失
+     * （与 {@code ProjectService} 世界设定同步同一类缺陷）。换独立线程后既绕开该绑定，也不拖慢保存响应。</p>
+     */
+    private final java.util.concurrent.ExecutorService knowledgeCardExecutor =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+
+    /** 停机时收掉同步线程，避免虚拟线程泄漏 */
+    @jakarta.annotation.PreDestroy
+    void shutdownKnowledgeCardExecutor() {
+        knowledgeCardExecutor.shutdown();
+    }
+
     //
     // 读
     //
@@ -275,12 +292,14 @@ public class PersonaService {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    try {
-                        knowledgeCardSyncService.syncCharacterKnowledgeCard(userId, pid, profileId);
-                    } catch (Exception e) {
-                        log.warn("[人物知识卡] 提交后同步失败（不阻断档案保存）: profileId={} : {}",
-                                profileId, e.getMessage());
-                    }
+                    knowledgeCardExecutor.submit(() -> {
+                        try {
+                            knowledgeCardSyncService.syncCharacterKnowledgeCard(userId, pid, profileId);
+                        } catch (Exception e) {
+                            log.warn("[人物知识卡] 提交后同步失败（不阻断档案保存）: profileId={} : {}",
+                                    profileId, e.getMessage());
+                        }
+                    });
                 }
             });
         } catch (Exception e) {

@@ -39,6 +39,17 @@ import java.time.LocalDateTime;
  * 包裹）、attempt、
  * step_type（环节类型：ai_call 缺省 / perception 感知组装 / action 行动执行 / event 事件发布等非 AI 环节
  * 也记一行，content 存环节摘要，token=0，让一次决策链路含非 AI 步骤）。</p>
+ * <p><b>取证口径（复验踩坑，勿误读）</b>：本表的 {@code (scene, step_type)} 不是唯一键，
+ * 同一 scene 下会有多类行：</p>
+ * <ul>
+ * <li>{@code scene=action} + {@code step_type=ai_call} → <b>真实决策请求</b>（user_prompt=完整 prompt）；</li>
+ * <li>{@code scene=action} + {@code step_type=action} → <b>行动执行环节</b>（非 AI 步骤：
+ * 「改状态/写日志/广播」，有 content、<b>没有 prompt</b>，token=0）；</li>
+ * <li>{@code scene=agent_decision} + {@code step_type=state_version} → 决策输入的版本快照行
+ * （user_prompt=情境快照，character_id=决策角色）。</li>
+ * </ul>
+ * <p>因此「{@code scene=action} 的行里 user_prompt 是空的」并不等于 prompt 丢了——
+ * 那是执行环节的 step 行。查 prompt 请加 {@code step_type='ai_call'} 条件。</p>
  * <p><b>AI 调用详情 JSON</b>：新增 detail_json 列
  * （LONGTEXT，存整条 AI 调用详情 JSON——时间轴/业务上下文/供应商/请求参数/输入 raw+messages+摘要/
  * 输出 raw+text+摘要/token 用量/状态与错误/retry/context/remark），由 {@code AiCallTrace.toDetailJson()}
@@ -151,6 +162,15 @@ public class ActorAiCallLog {
     @Column(name = "duration_ms")
     private Integer durationMs = 0;
 
+    /**
+     * 写入时刻的世界内游戏秒（0=当时拿不到时钟）。
+     *
+     * <p>缓存命中率按「游戏天」聚合用：游戏天 = {@code game_second / 86400}。同一游戏日内
+     * 日程/天气/日期稳定，跨游戏日则整体换档，用真实时间聚合会把两天混在一起。</p>
+     */
+    @Column(name = "game_second")
+    private Long gameSecond = 0L;
+
     /** AI 调用详情 JSON（整条调用详情结构化落库，与 data/ai-call-logs/ 文件同内容；LONGTEXT 存 JSON 字符串） */
     @Column(name = "detail_json", columnDefinition = "LONGTEXT")
     private String detailJson;
@@ -174,5 +194,6 @@ public class ActorAiCallLog {
         if (cacheHit == null) cacheHit = 0;
         if (cacheMiss == null) cacheMiss = 0;
         if (durationMs == null) durationMs = 0;
+        if (gameSecond == null) gameSecond = 0L;
     }
 }

@@ -37,6 +37,13 @@ public enum GrowthSpaceTrigger {
     MAJOR_EVENT("major_event", "重大事件"),
     /** 在场者变化（同地点参与者进入/离开） */
     PARTICIPANT_CHANGE("participant_change", "在场者变化"),
+    /**
+     * 位置变化（角色走到/被移动到新地点，旧空间里的候选动作属于上一个地点）。
+     *
+     * <p>实跑：空间一次生成、TTL 6~12 游戏小时，角色走动后仍按旧地点出候选，
+     * 「环境」于是只活在 prompt 叙述里。此码用于按新地点零 AI 重算（地点池 + 地点禁止项）。</p>
+     */
+    LOCATION_CHANGED("location_changed", "位置变化"),
     /** 计划失效（计划失败/被打断/目标失效） */
     GOAL_INVALID("goal_invalid", "计划失效"),
     /** 关系跨档（好感/信任跨档，如 acquaintance→friend） */

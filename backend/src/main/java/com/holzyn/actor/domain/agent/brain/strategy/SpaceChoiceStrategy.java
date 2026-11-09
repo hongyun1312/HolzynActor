@@ -45,6 +45,14 @@ public class SpaceChoiceStrategy implements BrainStrategy {
     @Lazy
     private DecisionService decisionService;
 
+    /**
+     * 世界事实“待处理”信号：到期契约必须走 AI 深思，不能被空间候选快判
+     * （就近三项）吞掉；null=未装配/异常=false，保持原行为。
+     */
+    @Autowired(required = false)
+    @Lazy
+    private com.holzyn.actor.domain.world.fact.service.WorldFactDecisionSignal worldFactDecisionSignal;
+
     @Override
     public String name() {
         return "space_choice";
@@ -65,6 +73,16 @@ public class SpaceChoiceStrategy implements BrainStrategy {
     @Override
     public Optional<Map<String, Object>> decide(DecisionContext ctx) {
         if (decisionService == null) {
+            return Optional.empty();
+        }
+        if (worldFactDecisionSignal != null
+                && worldFactDecisionSignal.hasActionableFact(ctx.projectId(),
+                ctx.character().npcRef(), ctx.gameSecond())) {
+            com.holzyn.actor.domain.debug.service.AiCallContext.recordStep(ctx.projectId(),
+                    "agent_decision", "brain_strategy",
+                    "space_choice 让路：存在待处理世界事实（6 游戏小时内到期），交给 AI 深思", 0);
+            log.info("[BrainStrategy] space_choice 让路：待处理世界事实 ref={}",
+                    ctx.character().npcRef());
             return Optional.empty();
         }
         try {

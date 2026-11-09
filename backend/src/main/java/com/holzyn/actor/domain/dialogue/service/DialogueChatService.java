@@ -109,6 +109,26 @@ public class DialogueChatService {
     @Autowired(required = false)
     private com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository characterRepository;
 
+    /** 沉淀服务（修：回合末自动落 NPC 记忆/关系 delta） */
+    @Lazy
+    @Autowired(required = false)
+    private DialogueConsolidationService consolidationService;
+
+    /** 世界回写（dialog 事件/位置/时间/批量抽取；开关关时 no-op） */
+    @Lazy
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.dialog.service.DialogWorldService dialogWorldService;
+
+    /** 自动沉淀线程池（虚拟线程，不阻塞 SSE 收尾） */
+    private final java.util.concurrent.ExecutorService consolidateExecutor =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+
+    /** 会话轮次计数（自动沉淀节流用；重启后从 0 起算，只影响触发时机不影响正确性） */
+    private final java.util.Map<Long, Integer> consolidateTicks = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 每 N 轮触发一次自动沉淀（N=2 轮=4 条消息，够 AI 抽出一条完整事实） */
+    static final int CONSOLIDATE_EVERY_ROUNDS = 2;
+
     /**
      * 一轮对谈（SSE 流式）。
      *
@@ -199,8 +219,12 @@ public class DialogueChatService {
         // ④ 流式回复
         PromptSpecRegistry.PromptSpec spec = PromptSpecRegistry.spec(SCENE_REPLY);
         List<AiChatRequest.ChatMessage> messages = new ArrayList<>();
-        messages.add(new AiChatRequest.ChatMessage("system", ctx.system()));
-        messages.add(new AiChatRequest.ChatMessage("user", ctx.user()));
+        // 实测：ctx.system() 是「角色锚定+护栏+世界观+身份处境+与玩家关系」这类每角色恒定的
+        // 内容；按 system 交给网关会被整体后置到最后一条 user 末尾（网关只保留统一 system 打头），
+        // 可缓存前缀于是只剩「统一 system + 契约/名册」。改为与动态段合并成单条 user：静态在前、
+        // 动态在后，角色卡进入「static 前缀 + 卡段」这条每角色一条的长前缀。
+        String cardPart = ctx.system() == null || ctx.system().isBlank() ? "" : ctx.system() + "\n\n";
+        messages.add(new AiChatRequest.ChatMessage("user", cardPart + (ctx.user() == null ? "" : ctx.user())));
         AiChatRequest request = new AiChatRequest(null, messages, spec.temperature(), spec.maxOutputTokens(), false);
         StringBuilder answer = new StringBuilder();
         // 断连标记：连接已断开（用户点击停止/页面离开）→ 停止累积，不落库
@@ -236,9 +260,11 @@ public class DialogueChatService {
         // M4 用量记账（scene=dialogue_chat；失败仅告警不阻断）
         recordChatUsage(userId, projectId, session, request, answer.toString(), usage[0]);
         // ⑤ 回复落库 + done
+        Long savedMessageId = null;
         try {
             ActorDialogueMessage saved = messageService.appendAssistant(projectId, session.getId(),
                     session.getCharacterRef(), answer.toString(), metaJson);
+            savedMessageId = saved.getId();
             Map<String, Object> done = new LinkedHashMap<>();
             done.put("messageId", saved.getId());
             done.put("content", answer.toString());
@@ -258,6 +284,75 @@ public class DialogueChatService {
                 log.warn("[对谈] 自动摘要触发失败（fail-open，不影响本轮回复）: {}", e.getMessage());
             }
         }
+        // 对话回写世界（开关开）/沉淀（开关关，保持旧行为）
+        if (dialogWorldService != null && dialogWorldService.enabled()) {
+            onWorldRound(projectId, userId, session, content, answer.toString(), savedMessageId);
+        } else {
+            maybeConsolidateAsync(projectId, userId, session);
+        }
+    }
+
+    /**
+     * 把本轮交给世界回写（事件/位置/时间/批量抽取）。
+     * <p>摘要只保留玩家与本轮回复，避免把整段历史塞进事件内容。</p>
+     */
+    private void onWorldRound(Long projectId, Long userId, ActorDialogueSession session,
+                              String userText, String reply, Long lastMessageId) {
+        if (session == null || session.getId() == null) {
+            return;
+        }
+        try {
+            String summary = "玩家：" + userText + "\n" + characterNameOf(session) + "：" + reply;
+            if (summary.length() > 300) {
+                summary = summary.substring(0, 300);
+            }
+            com.holzyn.actor.domain.world.dialog.model.DialogRound round =
+                    com.holzyn.actor.domain.world.dialog.model.DialogRound.builder()
+                            .channel("dialogue")
+                            .projectId(projectId)
+                            .userId(userId)
+                            .sessionId(session.getId())
+                            .sessionKey("dialogue:" + session.getId())
+                            .locationId(session.getLocationId())
+                            .locationName(session.getLocationName())
+                            .participantRefs(java.util.List.of(session.getCharacterRef()))
+                            .summary(summary)
+                            .lastMessageId(lastMessageId)
+                            .gameSecond(session.getFrozenGameSecond())
+                            .frozen(session.getFrozenGameSecond() != null)
+                            .build();
+            dialogWorldService.onPlayerRound(round);
+        } catch (Exception e) {
+            log.warn("[对谈] 世界回写失败（fail-open，不影响回复）: session={} : {}",
+                    session.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 节流触发自动沉淀（异步，失败即降级）。
+     * <p>为什么必须有：{@code actor_dialogue_session} 链路此前只在用户手点「沉淀」时才写记忆，
+     * 玩家说过的关键事实出 24 条历史窗口即丢（反事实实测：即时反应 100%、跨轮保持 0%）。</p>
+     *
+     * @param projectId 项目 ID
+     * @param userId    用户 ID
+     * @param session   会话
+     */
+    private void maybeConsolidateAsync(Long projectId, Long userId, ActorDialogueSession session) {
+        if (consolidationService == null || session == null || session.getId() == null) {
+            return;
+        }
+        Long sessionId = session.getId();
+        int tick = consolidateTicks.merge(sessionId, 1, Integer::sum);
+        if (tick % CONSOLIDATE_EVERY_ROUNDS != 0) {
+            return;
+        }
+        consolidateExecutor.execute(() -> {
+            try {
+                consolidationService.autoConsolidate(projectId, userId, sessionId);
+            } catch (Exception e) {
+                log.warn("[对谈] 自动沉淀失败（fail-open，不影响对话）: session={} : {}", sessionId, e.getMessage());
+            }
+        });
     }
 
     /**

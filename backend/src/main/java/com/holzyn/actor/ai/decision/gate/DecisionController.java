@@ -170,6 +170,9 @@ public class DecisionController {
             out.put("message", "场景未启用（三重门控）——判定 fail-closed 回退，无 决策模型 调用");
             return out;
         }
+        // 反事实调制实验：可选自定义候选集（键=动作 ID、值=自包含描述）。
+        // 不传时行为与既有冒烟完全一致（通用三项），传了则用它做「同一动作集、只换环境段」的对照。
+        Map<String, String> customCandidates = parseCandidates(body);
         String stateId = "probe" + (characterId == null ? 0 : characterId);
         Map<String, com.holzyn.actor.ai.decision.DecisionQuestion> questions =
                 com.holzyn.actor.ai.decision.DecisionState.newQuestions();
@@ -187,12 +190,17 @@ public class DecisionController {
                 out.put("latencyMs", r.latencyMs());
             }
             case DecisionScenes.CROWD_DECISION -> {
-                questions.put(qid, DecisionTemplates.crowdQuestion(
-                        DecisionTemplates.commonCrowdCandidates()));
+                // 自定义候选集优先：反事实实验要求「三次调用之间只有环境段不同」，
+                // 候选集的键与描述必须逐字节一致，否则分布差异分不清是环境还是候选导致的。
+                Map<String, String> cands = customCandidates != null
+                        ? customCandidates : DecisionTemplates.commonCrowdCandidates();
+                questions.put(qid, DecisionTemplates.crowdQuestion(cands));
                 var r = gate.choiceDecision(projectId, characterId, scene,
                         com.holzyn.actor.ai.decision.DecisionState.text(stateId, stateText, questions), qid);
                 out.put("status", r.adopted() ? "adopted" : r.disposition());
                 out.put("chosen", r.chosen());
+                out.put("candidates", cands);
+                out.put("distribution", r.distribution());
                 out.put("top1Prob", r.top1Prob());
                 out.put("entropy", r.entropy());
                 out.put("latencyMs", r.latencyMs());
@@ -384,5 +392,30 @@ public class DecisionController {
             default -> throw new com.holzyn.actor.common.BizException(400, "未支持探测场景：" + scene);
         }
         return out;
+    }
+
+    /**
+     * 解析 body.candidates（{@code {"动作ID": "自包含描述"}}）为候选集；缺省/空返回 {@code null}。
+     *
+     * <p>只接受对象形态：反事实实验要求候选集的键与描述在三次调用间逐字节相同，
+     * 用数组会引入顺序与去重的歧义，不如直接拒绝。</p>
+     *
+     * @param body 请求体（可空）
+     *
+     * @return 候选集或 null
+     */
+    private static Map<String, String> parseCandidates(Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("candidates");
+        if (!(raw instanceof Map<?, ?> m) || m.isEmpty()) {
+            return null;
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : m.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            out.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+        }
+        return out.isEmpty() ? null : out;
     }
 }

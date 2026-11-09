@@ -20,6 +20,8 @@ package com.holzyn.actor.domain.npc.dialogue.repository;
 
 import com.holzyn.actor.domain.npc.dialogue.entity.ActorConversationMember;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import java.util.List;
 
 /**
@@ -36,6 +38,27 @@ public interface ActorConversationMemberRepository extends JpaRepository<ActorCo
      * @return 成员列表
      */
     List<ActorConversationMember> findByConversationId(Long conversationId);
+
+    /**
+     * 查询某会话中仍然有效的成员（排除已软删除角色）。
+     * <p>会话成员行不会随角色软删除自动消失（历史成员保留是产品语义），
+     * 但任何「让成员发言/参与生成」的读取路径都必须走本查询，否则已删角色会以幽灵身份继续说话。</p>
+     *
+     * @param conversationId 会话 ID
+     *
+     * @return 有效成员列表
+     */
+    @Query("select m from ActorConversationMember m where m.conversationId = :conversationId "
+            + "and exists (select 1 from ActorCharacter c where c.id = m.characterId "
+            + "and (c.deleted is null or c.deleted = 0))")
+    List<ActorConversationMember> findActiveByConversationId(@Param("conversationId") Long conversationId);
+
+    /**
+     * 删除某角色参与的全部会话成员关系（角色软删除级联清理）。
+     *
+     * @param characterId 角色 ID
+     */
+    void deleteByCharacterId(Long characterId);
 
     /**
      * 查询某角色参与的全部会话成员关系（记忆抽取/手动补抽定位会话用）。

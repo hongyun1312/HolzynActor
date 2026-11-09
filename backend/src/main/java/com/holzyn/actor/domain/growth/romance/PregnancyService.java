@@ -110,6 +110,12 @@ public class PregnancyService {
                 if (state.getPregnancyDueGameSecond() > gameSecond) {
                     continue;
                 }
+                // （§7.2）：玩家不参与 NPC 自主生育链路（玩家死亡/重伤走 Q2 方案，不在此处）
+                ActorCharacter mother = characterRepository
+                        .findById(com.holzyn.actor.common.NpcRefs.idOf(state.getNpcRef())).orElse(null);
+                if (mother != null && mother.isPlayer()) {
+                    continue;
+                }
                 ActorCharacter child = offspringGenerator.createOffspring(projectId, state.getNpcRef(),
                         state.getPregnancyFromRef(), gameSecond);
                 if (child != null) {

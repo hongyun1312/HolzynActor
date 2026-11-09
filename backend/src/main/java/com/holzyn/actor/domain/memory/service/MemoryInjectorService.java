@@ -113,6 +113,10 @@ public class MemoryInjectorService {
     @Value("${holzyn.actor.memory.recency-decay-hours:24}")
     private int recencyDecayHours;
 
+    /** recency 时间基准（与 AgentMemoryService 同口径）：event=事件发生时间（默认）/ access=最近检索命中时间 */
+    @Value("${holzyn.actor.memory.recency-basis:event}")
+    private String recencyBasis;
+
     /** 注入去重阈值（默认 0.6） */
     @Value("${holzyn.actor.memory.dedup-threshold:0.6}")
     private double dedupThreshold;
@@ -570,7 +574,8 @@ public class MemoryInjectorService {
             if (!eligible) {
                 continue; // plan 不参与评分（决策按最近计划直取，见 appendPlan）
             }
-            LocalDateTime base = m.getLastAccessAt() != null ? m.getLastAccessAt() : m.getCreatedAt();
+            LocalDateTime base = com.holzyn.actor.domain.agent.memory.AgentMemoryService.recencyBase(
+                    recencyBasis, m.getCreatedAt(), m.getLastAccessAt());
             double recency = recencyScore(base, LocalDateTime.now(), recencyDecayHours);
             double relevance = (query == null || query.isBlank()) ? 0 : relevanceScore(query, m.getContent());
             double score = weightedScore(type, m.getImportance() == null ? 1 : m.getImportance(), recency, relevance);

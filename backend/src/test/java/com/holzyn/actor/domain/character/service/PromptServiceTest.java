@@ -247,4 +247,46 @@ class PromptServiceTest {
         assertEquals("rendered", service.buildWorldEventPrompt(1L, 1L, "世界观", "情境"));
         assertEquals("rendered", service.buildGroupOrchestratorPrompt(1L, 1L, "成员摘要", "最近消息"));
     }
+
+    // ====================段装配去重 ====================
+
+    /**
+     * action_gen 出口按段头去重：人设段与感知段各注一次【当前环境】、事实段与感知段各带一行
+     * [世界状态版本] 时，最终 prompt 只允许各出现一次（实跑 18/1215 命中双份）。
+     */
+    @Test
+    void actionGenPromptDedupesRepeatedSegments() {
+        when(templateService.render(anyLong(), any(), eq(PromptTemplateService.CODE_ACTION), any()))
+                .thenReturn("【人设】老王\n\n"
+                        + "【当前环境】冬日傍晚，天已经全黑了（体感 −3℃）\n\n"
+                        + "【当前环境】冬日傍晚，天已经全黑了（体感 −3℃）\n\n"
+                        + "[世界状态版本 gs62287774161/v7]\n\n"
+                        + "[世界状态版本 gs62287774161/v7]\n\n"
+                        + "【要求】按人设行动");
+
+        String prompt = service.buildActionGenPrompt(1L, 1L, "人设", "情境", "tom", "记忆", "策略", "走向");
+
+        assertEquals(1, countOccurrences(prompt, "【当前环境】"), "环境段只允许一份：" + prompt);
+        assertEquals(1, countOccurrences(prompt, "[世界状态版本"), "版本行只允许一份：" + prompt);
+        assertTrue(prompt.contains("【要求】按人设行动"), "后续段必须保留：" + prompt);
+    }
+
+    /** 无重复时 prompt 不被改动（去重不得误伤正常行文）。 */
+    @Test
+    void actionGenPromptUnchangedWhenNoDuplicates() {
+        String rendered = "【当前环境】晴\n【要求】按人设行动";
+        when(templateService.render(anyLong(), any(), eq(PromptTemplateService.CODE_ACTION), any()))
+                .thenReturn(rendered);
+        assertEquals(rendered, service.buildActionGenPrompt(1L, 1L, "人设", "情境", "tom"));
+    }
+
+    private static int countOccurrences(String text, String needle) {
+        int n = 0;
+        int idx = 0;
+        while ((idx = text.indexOf(needle, idx)) >= 0) {
+            n++;
+            idx += needle.length();
+        }
+        return n;
+    }
 }

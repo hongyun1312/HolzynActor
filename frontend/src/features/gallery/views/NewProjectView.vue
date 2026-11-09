@@ -148,12 +148,16 @@
         </div>
 
         <!-- 两个出口都**先落库**（用户要求）：想马上进去玩就进世界，否则继续走初始化向导 -->
+        <!-- AI 起名未回来时不给继续：否则会用空名/兜底名把世界名定死（AI 起名还要十几秒） -->
+        <div v-if="metaLoading" class="meta-wait-tip">
+          AI 正在读世界观设定，重新起世界名并写简介（完成前无法继续，约十几秒）
+        </div>
         <div class="wiz-foot">
-          <el-button :disabled="saving" @click="prevStep">上一步</el-button>
-          <el-button :loading="saving" :disabled="saving" @click="saveAndNext(true)">
+          <el-button :disabled="saving || metaLoading" @click="prevStep">上一步</el-button>
+          <el-button :loading="saving" :disabled="saving || metaLoading" @click="saveAndNext(true)">
             <el-icon><HIcon name="VideoPlay" /></el-icon>&nbsp;保存并直接进入世界
           </el-button>
-          <el-button type="primary" :loading="saving" @click="saveAndNext(false)">
+          <el-button type="primary" :loading="saving" :disabled="saving || metaLoading" @click="saveAndNext(false)">
             <el-icon><HIcon name="Check" /></el-icon>&nbsp;保存并继续（去初始化）
           </el-button>
         </div>
@@ -222,7 +226,7 @@ import { ensureWorldOpen } from '@/shared/worldSession'
 import {
   createProject, fetchProject, fetchWorldSetting, saveWorldSetting,
   confirmWorldgenTask, fetchWorldInitStatus,
-  suggestWorldMeta, saveWorldMeta, WORLD_NAME_MAX, WORLD_SUMMARY_MAX
+  suggestWorldMeta, suggestWorldMetaFromDraft, saveWorldMeta, WORLD_NAME_MAX, WORLD_SUMMARY_MAX
 } from '@/shared/api'
 
 const route = useRoute()
@@ -320,20 +324,93 @@ async function startManual() {
   }
 }
 
-/** 创意发散完成：把 6 维产物按同名键回填表单，等待用户二次修改 */
-function onGenerated(payload) {
+/**
+ * 世界观分节的字符上限：与 WorldSettingForm 的 maxlength、后端 WorldSettingDTO 的校验、
+ * 以及世界库列宽（era varchar(50) / 其余 TEXT-LONGTEXT）保持一致。
+ *
+ * <p><b>为什么必须在回填时按上限截断</b>：AI 生成的「时代」经常写成半句话（远超 50 字），
+ * 直接塞进表单再点保存会被后端 400「时代背景最长 50 字符」，界面只弹一句「保存失败」，
+ * 用户就卡在第 2 步——和这次「进不去第三步」的症状完全一样（实测 world-setting 400）。</p>
+ */
+const WORLD_FIELD_MAX = {
+  name: 100,
+  era: 50,
+  geography: 5000,
+  factions: 5000,
+  magicSystem: 5000,
+  culture: 5000,
+  history: 5000,
+  freeText: 5000
+}
+
+/** 按上限截断（超长时尽量断在句读处，避免把句子砍成半截） */
+function clampText(raw, max) {
+  const s = String(raw ?? '').trim()
+  if (!max || s.length <= max) return s
+  const cut = s.slice(0, max)
+  const lastBreak = Math.max(cut.lastIndexOf('。'), cut.lastIndexOf('；'), cut.lastIndexOf('，'), cut.lastIndexOf('、'))
+  return lastBreak >= max * 0.6 ? cut.slice(0, lastBreak) : cut
+}
+
+/**
+ * 创意发散完成：把 6 维产物按同名键回填表单，并让 AI 读设定重新起名+写简介。
+ *
+ * <p><b>为什么不能直接拿 {@code sections.name}</b>：worldgen 落库时 {@code sections.name}
+ * 就是项目的初始名，而初始名是 {@code 「题材·创意前 20 字」} 拼出来的（WorldgenPanel.deriveProjectName），
+ * 既不像世界名，也几乎必然超过 14 字上限被截断。这里改成把设定草稿交给 AI 重新起名。</p>
+ */
+async function onGenerated(payload) {
   if (!payload || !payload.projectId) return
   projectId.value = payload.projectId
   pendingTaskId.value = payload.taskId || null
   const secs = payload.sections || {}
-  Object.keys(worldForm).forEach((k) => { if (secs[k] != null) worldForm[k] = String(secs[k]) })
-  const suggested = (secs.name || payload.projectName || '').slice(0, WORLD_NAME_MAX)
-  metaForm.name = suggested
-  worldTitle.value = suggested || payload.projectName || '未命名世界'
-  // 简介留给「AI 生成建议」，用户也可以直接手写
+  // name 不回填：世界观名称 ≡ 世界名（保存时 applyWorldMeta 会用世界名覆盖），等 AI 起好名再同步，避免先闪一下拼接名
+  Object.keys(worldForm).forEach((k) => {
+    if (k === 'name' || secs[k] == null) return
+    worldForm[k] = clampText(secs[k], WORLD_FIELD_MAX[k])
+  })
+  worldTitle.value = payload.projectName || '未命名世界'
+  metaForm.name = ''
   metaForm.summary = ''
   step.value = 1
-  ElMessage.success('世界观已生成，已回填到表单，可逐节修改后保存')
+  ElMessage.success('世界观已生成，已回填到表单；AI 正在根据设定起世界名')
+  await fillMetaFromDraft(secs)
+}
+
+/** 把当前表单（可能还没落库）整理成「让 AI 起名」用的草稿；不带 name——名字必须由 AI 从设定里推 */
+function draftOf(secs = {}) {
+  const pick = (k) => secs[k] || worldForm[k] || ''
+  return {
+    genre: pick('genre'),
+    tone: worldForm.tone || '',
+    era: pick('era'),
+    geography: pick('geography'),
+    factions: pick('factions'),
+    magicSystem: pick('magicSystem'),
+    culture: pick('culture'),
+    history: pick('history'),
+    freeText: pick('freeText')
+  }
+}
+
+/** 让 AI 读「刚生成、还没落库」的世界观重新起名并写简介（失败则留空让用户手填） */
+async function fillMetaFromDraft(secs) {
+  metaLoading.value = true
+  try {
+    const out = await suggestWorldMetaFromDraft(draftOf(secs))
+    if (out?.name) {
+      metaForm.name = String(out.name).slice(0, WORLD_NAME_MAX)
+      worldForm.name = metaForm.name
+      worldTitle.value = metaForm.name
+    }
+    if (out?.summary) metaForm.summary = String(out.summary).slice(0, WORLD_SUMMARY_MAX)
+    ElMessage.success('AI 已根据世界观起好世界名与简介，可直接改写')
+  } catch (e) {
+    // AI 未配置 / 超时 / 输出不可解析：不塞拼接名，交给用户手填或点「AI 生成建议」重试
+    ElMessage.warning(e.message || 'AI 起名失败，请手动填写世界名与简介')
+  } finally {
+    metaLoading.value = false
+  }
 }
 
 /** 文件解析完成：读回已落库的世界观继续改 */
@@ -367,8 +444,21 @@ async function suggestMeta() {
   if (!projectId.value) return
   metaLoading.value = true
   try {
-    const out = await suggestWorldMeta(projectId.value)
-    if (out?.name) metaForm.name = String(out.name).slice(0, WORLD_NAME_MAX)
+    let out = null
+    try {
+      out = await suggestWorldMeta(projectId.value)
+    } catch (e) {
+      // 世界观还没落库（创意发散路径：进第 2 步后点这颗按钮时 setting 尚未保存，
+      // 后端会回 400「该项目还没有世界观设定」）→ 退到「草稿起名」，用表单里已有的设定去问 AI
+      const draft = draftOf()
+      const hasContent = Object.values(draft).some((v) => String(v || '').trim())
+      if (!hasContent) throw e
+      out = await suggestWorldMetaFromDraft(draft)
+    }
+    if (out?.name) {
+      metaForm.name = String(out.name).slice(0, WORLD_NAME_MAX)
+      worldForm.name = metaForm.name
+    }
     if (out?.summary) metaForm.summary = String(out.summary).slice(0, WORLD_SUMMARY_MAX)
     ElMessage.success('已根据当前世界观生成建议，可直接修改')
   } catch (e) {
@@ -393,6 +483,10 @@ async function saveAndNext(enterWorld = false) {
     await ensureWorldOpen(projectId.value)
     const finalName = metaForm.name.trim().slice(0, WORLD_NAME_MAX)
     const payload = { ...worldForm, name: worldForm.name?.trim() || finalName }
+    // 兜底再按上限截一次：任何来源（AI 回填 / 粘贴 / 旧草稿）都不许把保存打成 400
+    Object.keys(payload).forEach((k) => {
+      if (WORLD_FIELD_MAX[k]) payload[k] = clampText(payload[k], WORLD_FIELD_MAX[k])
+    })
     await saveWorldSetting(projectId.value, payload)
     await saveWorldMeta(projectId.value, { name: finalName, summary: metaForm.summary || '' })
     if (!worldForm.name) worldForm.name = finalName
@@ -485,7 +579,8 @@ function goSandbox() {
   width: 24px; height: 24px; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%;
-  background: var(--bg-muted, rgba(0, 0, 0, 0.06));
+  /* --bg-muted 从未定义，旧写法在深色主题下退化成 rgba(0,0,0,.06)——黑底黑圈几乎看不见 */
+  background: var(--bg-layer-3);
   color: var(--text-regular);
   font-size: 0.78rem; font-weight: 700;
 }
@@ -545,23 +640,37 @@ function goSandbox() {
 .ini-note { font-size: 0.84rem; color: var(--text-regular); line-height: 1.7; }
 
 /* ===== 底部操作条 ===== */
+/* AI 起名等待提示：与底部操作条同区，解释「为什么不能继续」 */
+.meta-wait-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text-regular);
+  background: rgba(64, 158, 255, 0.08);
+  border: 1px solid rgba(64, 158, 255, 0.22);
+}
 .wiz-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 4px 2px 8px; }
 /*
- * 主题里的默认按钮是浅底浅字（实测 #eef1f3 底 + 近白字），压在半透明内容层的深色区域上
- * 几乎看不见。次级操作统一给深字 + 白底，保证可读。
+ * 次级操作按钮：默认主题在深色下是深底浅字、在浅色下是浅底深字，压在半透明内容层上
+ * 对比度都不够稳。这里统一钉成「页面卡片底 + 主文本色 + 描边」，两套主题都走令牌，
+ * 不再硬编码浅色（硬编码曾导致深色主题下白底白字）。
  */
 .wiz-foot :deep(.el-button:not(.el-button--primary)) {
-  color: #2f3841 !important;
-  background: #fdfefe !important;
-  border-color: #c6ccd2 !important;
+  color: var(--text-primary) !important;
+  background: var(--bg-layer-1) !important;
+  border-color: var(--border-l2) !important;
 }
 /*
  * 这条提示直接坐在页面底纹上，而这一层是液态玻璃画布、越往下越暗，
- * 深色小字裸放会糊成一片（实测底部 rgb ≈74,80,88 时几乎不可见）→ 给近白药丸底。
+ * 裸放小字会糊成一片 → 用卡片底 + 常规文本色的药丸底，随主题切换。
  */
 .foot-tip {
-  font-size: 0.82rem; color: #3f4a56; margin-right: auto; line-height: 1.6;
-  background: #fdfefe; border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 8px; padding: 7px 12px;
+  font-size: 0.82rem; color: var(--text-regular); margin-right: auto; line-height: 1.6;
+  background: var(--bg-layer-1); border: 1px solid var(--border-l1); border-radius: 8px; padding: 7px 12px;
 }
 
 @media (max-width: 900px) {
@@ -570,11 +679,12 @@ function goSandbox() {
   .wiz-steps { flex-direction: column; }
 }
 
-/* 用白实底覆盖上面的半透明面板背景：必须放在样式块末尾，否则被前面的 .method-card 规则盖掉 */
+/* 用卡片实底覆盖上面的半透明面板背景：必须放在样式块末尾，否则被前面的 .method-card 规则盖掉 */
 /*
  * 可读性兜底（实测截图）：液态玻璃主题的面板是"半透明白 + 动画背景画布"，
- * 卡片内容透出下方灰底后，13px 正文的对比度会掉到 3:1 以下，截图里几乎看不清。
- * 本页文字密度高，统一给近白实底，保证正文对比度 ≥ 7:1；不改全局令牌，避免影响其它页面。
+ * 卡片内容透出下方背景后，13px 正文的对比度会掉到 3:1 以下，截图里几乎看不清。
+ * 本页文字密度高，统一给「卡片底层 + 常规文本色」，保证正文对比度；
+ * 用 --bg-layer-1 而不是写死 #fdfefe —— 写死浅色会在深色主题下变成白底白字（用户报障）。
  */
 .wiz-steps,
 .method-card,
@@ -582,12 +692,13 @@ function goSandbox() {
 .meta-card,
 .form-card,
 .ini-card {
-  background: #fdfefe;
+  background: var(--bg-layer-1);
+  color: var(--text-regular);
 }
 
 /*
  * 嵌入面板（创意发散 / 文件解析）同理：它们的卡片用的是全局 .tech-card 半透明底，
- * 在向导里同样会透出灰色背景画布，标题与说明文字发灰。这里只在本页兜底成近白实底。
+ * 在向导里同样会透出背景画布，标题与说明文字发灰。这里只在本页兜底成卡片底。
  */
 .np-wizard :deep(.tech-card),
 .np-wizard :deep(.block-card),
@@ -597,7 +708,7 @@ function goSandbox() {
 .np-wizard :deep(.preview-block),
 .np-wizard :deep(.file-info-card),
 .np-wizard :deep(.expand-bar) {
-  background: #fdfefe;
+  background: var(--bg-layer-1);
 }
 
 /* 嵌入时表单不必再压到 720，跟着卡片走，减少右侧空白 */
@@ -607,12 +718,12 @@ function goSandbox() {
 
 /* 日志控制台：头部/正文都是半透明底，嵌在向导里会整块发灰，空态提示几乎看不见 */
 .np-wizard :deep(.wf-console) {
-  background: #fdfefe;
+  background: var(--bg-layer-1);
 }
 .np-wizard :deep(.wf-console-head) {
-  background: #f4f7f7;
+  background: var(--bg-layer-2);
 }
 .np-wizard :deep(.wf-console-empty) {
-  color: #5b6672;
+  color: var(--text-secondary);
 }
 </style>

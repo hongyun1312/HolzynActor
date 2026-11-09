@@ -140,7 +140,9 @@ public class CharacterRelationService {
                 AiChatRequest req = new AiChatRequest(null, List.of(
                         new AiChatRequest.ChatMessage("system", promptTemplateService.systemMessage(userId, projectId,
                                 PromptTemplateService.CODE_RELATION_GEN, null)),
-                        new AiChatRequest.ChatMessage("user", prompt)), 0.3, RELATION_MAX_TOKENS, true);
+                        new AiChatRequest.ChatMessage("user", prompt)), 0.3, RELATION_MAX_TOKENS, false);
+                // jsonMode=false：本场景顶层即 JSON 数组。deepseek-v4-flash 在 response_format=json_object
+                // 约束下会把关系数组折叠成单个对象（只回 1 条），故关闭结构化约束、仅靠提示词约束。
                 AiChatResult result = AiCallContext.run("relation_gen", target == null ? null : target.getId(),
                         () -> aiChatGateway.chatCompletion(userId, projectId, null, req));
                 List<RelationDraftVO> drafts = parseDrafts(result.content());
@@ -233,7 +235,7 @@ public class CharacterRelationService {
             String type = item == null || item.relationType() == null || item.relationType().isBlank()
                     ? "未知关系" : item.relationType().trim();
             if (from.isEmpty() || to.isEmpty() || from.equals(to)) continue;
-            // ：按名称解析端点（命中 actor_profile → npc:{id}；都不命中 → 幽灵名称）；：npc:{id} 不再编码类型，此处按意图 A 处理
+            // 按名称解析端点（命中 actor_profile → npc:{id}；都不命中 → 幽灵名称）；npc:{id} 不再编码类型，此处按意图 A 处理
             RelationRefs.Endpoint fromEp = RelationRefs.resolve(projectId, from, characterRepository);
             RelationRefs.Endpoint toEp = RelationRefs.resolve(projectId, to, characterRepository);
             if (fromEp == null || toEp == null) continue;

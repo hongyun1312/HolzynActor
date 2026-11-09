@@ -173,7 +173,7 @@ holzyn:
       # 向量库文件根目录（默认空=数据目录下 <data-dir>/vector-store/<projectId>/embeddings.json）
       vector-store-dir: ${HOLOZYN_ACTOR_VECTOR_STORE_DIR:}
       # HTTP 调用超时（防网络悬挂的 AI 调用永久阻塞引擎线程）。
-      # ⚠️ 2026-10-02 实测：自托管网关（llm.mbfsr.com）重活（story-engine/persona_bootstrap/worldgen 大 prompt）
+      # ⚠️ 自托管网关的重活（story-engine/persona_bootstrap/worldgen 大 prompt）
       # 生成可达 200s+，原 120s/130s 读超时把慢请求掐断→story-plan 失败、建档反复重试。调大默认值：
       # read=300s（socket 读）、request=320s（整次硬上限，须 > read）。
       timeout-read-seconds: ${HOLOZYN_ACTOR_AI_TIMEOUT_READ_SECONDS:300}
@@ -358,12 +358,19 @@ holzyn:
         api-key: ${HOLOZYN_ACTOR_AI_DECISION_API_KEY:}
         # 建连超时（秒）
         timeout-connect-seconds: ${HOLOZYN_ACTOR_AI_DECISION_TIMEOUT_CONNECT_SECONDS:10}
-        # 读超时（秒；单次前向数十 ms 级，30s 足够宽松）
-        timeout-read-seconds: ${HOLOZYN_ACTOR_AI_DECISION_TIMEOUT_READ_SECONDS:30}
+        # 读超时（秒；单次前向数十 ms 级；10s 已足够宽松，超时即视为服务端饱和）
+        timeout-read-seconds: ${HOLOZYN_ACTOR_AI_DECISION_TIMEOUT_READ_SECONDS:10}
         # 单次请求总时长上限（秒；硬性兜底防悬挂）
         timeout-request-seconds: ${HOLOZYN_ACTOR_AI_DECISION_TIMEOUT_REQUEST_SECONDS:60}
-        # 失败重试次数（总计最多尝试 N+1 次；仍失败 fail-closed 返回 null）
+        # 失败重试次数（总计最多尝试 N+1 次；仍失败 fail-closed 返回 null；超时一律不重试）
         max-retries: ${HOLOZYN_ACTOR_AI_DECISION_MAX_RETRIES:1}
+        # 并发闸门：全局最多 N 个在途请求（单进程 0.6B 服务并发能力有限，超出排队而非灌入）
+        max-concurrent: ${HOLOZYN_ACTOR_AI_DECISION_MAX_CONCURRENT:2}
+        # 闸门排队上限（毫秒；排不到立即 fail-closed 降级，不把请求堆进服务端队列）
+        queue-wait-ms: ${HOLOZYN_ACTOR_AI_DECISION_QUEUE_WAIT_MS:12000}
+        # 熔断：连续传输失败 N 次 → 开路 M 毫秒（期间直接降级，给服务端恢复窗口）
+        breaker-failure-threshold: ${HOLOZYN_ACTOR_AI_DECISION_BREAKER_FAILURES:5}
+        breaker-open-ms: ${HOLOZYN_ACTOR_AI_DECISION_BREAKER_OPEN_MS:15000}
         # 官方契约批上限（states≤32 / questions≤96 / 候选路径≤256 / 请求体≤2MB）
         max-states-per-request: ${HOLOZYN_ACTOR_AI_DECISION_MAX_STATES:32}
         max-questions-per-request: ${HOLOZYN_ACTOR_AI_DECISION_MAX_QUESTIONS:96}

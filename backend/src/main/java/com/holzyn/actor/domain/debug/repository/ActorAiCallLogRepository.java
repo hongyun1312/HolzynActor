@@ -126,6 +126,23 @@ public interface ActorAiCallLogRepository extends JpaRepository<ActorAiCallLog, 
     List<ActorAiCallLog> findByTraceIdOrderByIdAsc(String traceId);
 
     /**
+     * 按「游戏天」聚合缓存命中（成本主指标：一天之内前缀复用稳不稳）。
+     *
+     * <p>口径：只统计真实调用（{@code token_in > 0}，排除 agent_decision/action 这类 0 token 的
+     * 链路级标记行），按 {@code game_second / 86400} 分组；0 秒（拿不到时钟的历史行）不参与。
+     * 返回列：游戏天序号、调用数、输入 token、命中 token、未命中 token。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 按游戏天升序的聚合行
+     */
+    @Query("select r.gameSecond / 86400, count(r), sum(r.tokenIn), sum(r.cacheHit), sum(r.cacheMiss) "
+            + "from ActorAiCallLog r "
+            + "where r.projectId = :projectId and r.gameSecond > 0 and r.tokenIn > 0 "
+            + "group by r.gameSecond / 86400 order by r.gameSecond / 86400 asc")
+    List<Object[]> aggregateCacheByGameDay(@Param("projectId") Long projectId);
+
+    /**
      * 查询某项目下最近 N 条指定环节类型的记录（反思闭环·自省漂移摘要用：
      * stepType=self_check 的「自省漂移」行，按 id 倒序取最近；content 含
      * ref=npc:{id} 前缀由调用方过滤——recordStep 无 characterId 形参）。

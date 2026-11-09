@@ -316,6 +316,20 @@ public class RoleplayService {
     @Autowired(required = false)
     private com.holzyn.actor.domain.growth.attention.AttentionLevelProvider attentionLevelProvider;
 
+    /**
+     * 玩家同构（§4.4.3）：单聊入口兜底创建 {@code controller='player'} 行。
+     *
+     * <p>为什么在这里兜底：旧世界没有经过初始化，玩家行不存在；第一次对谈是最自然的
+     * 补建时机（§8.2「RoleplayService.generateSingleReply 入口兜底」）。
+     * 服务内部受 {@code world-loop.enabled} 门控，默认关闭时零行为变化。</p>
+     */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.npc.player.PlayerCharacterService playerCharacterService;
+
+    /** 对话回写世界（dialog 事件/位置/时间/批量抽取；开关关时 no-op） */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.dialog.service.DialogWorldService dialogWorldService;
+
     // ==================== 长跑 修复配置（无玩家群聊失控循环防护） ====================
 
     /**
@@ -421,15 +435,20 @@ public class RoleplayService {
         // ① 稳定前缀（L1/L2 缓存层）：V2.0 段 1A 世界观简报 + 角色 system prompt（SYSTEM+ROLE_PROFILE）+ 本地账户档案
         // 批 2 对话链：世界观简报（common_knowledge 精炼常识）拼入 system 前缀——跨版本稳定、缓存友好
         // （normalizeForLlm 会把多条 system 合并为唯一前置 system 段，段 1A+1B+1C 全在前缀）
+        // 实跑复核：网关会把调用方 system 内容整体后置到最后一条 user 末尾，
+        // 角色卡因此落在 prompt 最末端、吃不到前缀缓存。卡段（世界观简报+角色卡+本地账户档案）
+        // 改挂第一条 user、置于历史之前，走「static 前缀 + 卡段」这条每角色一条的长前缀。
+        StringBuilder card = new StringBuilder();
         String brief = aiContextInjector == null ? "" : aiContextInjector.worldBrief(conv.getProjectId());
         if (brief != null && !brief.isBlank()) {
-            messages.add(new AiChatRequest.ChatMessage("system", "【世界观】\n" + brief));
+            card.append("【世界观】\n").append(brief);
         }
-        messages.add(new AiChatRequest.ChatMessage("system", resolveSystemPrompt(conv)));
+        card.append(card.length() > 0 ? "\n\n" : "").append(resolveSystemPrompt(conv));
         String npcProfile = localAccountService.renderNpcProfile();
         if (!npcProfile.isBlank()) {
-            messages.add(new AiChatRequest.ChatMessage("system", npcProfile));
+            card.append("\n\n").append(npcProfile);
         }
+        messages.add(new AiChatRequest.ChatMessage("user", card.toString()));
         // ② 历史（user/assistant 交错；世界事件→user 角色，避免事件 system 被合并进前置污染前缀）
         List<ActorMessage> history = messageRepository.findByConversationIdOrderByIdAsc(conv.getId());
         // 记忆检索 query=最近一条实质消息（玩家消息优先语义：最后一条非空实质消息通常即玩家/事件情境；
@@ -690,6 +709,14 @@ public class RoleplayService {
      * @param userId 归属用户 ID（已捕获）
      */
     public void generateSingleReply(SseEmitter emitter, ActorConversation conv, ActorMessage pending, Long userId) {
+        // 旧世界首次对谈时兜底创建玩家角色（幂等；开关关闭时 no-op）
+        if (playerCharacterService != null && conv != null) {
+            try {
+                playerCharacterService.ensurePlayerCharacter(conv.getProjectId(), userId);
+            } catch (Exception e) {
+                log.debug("[对话] 玩家角色兜底创建失败（不影响本轮回复）: conv={} : {}", conv.getId(), e.getMessage());
+            }
+        }
         StringBuilder full = new StringBuilder();
         long startMs = System.currentTimeMillis();
         String charName = pending.getCharacterId() == null ? null
@@ -837,6 +864,31 @@ public class RoleplayService {
             pending.setContent(full.toString());
             pending.setStatus("done");
             messageRepository.save(pending);
+            // 单聊一轮回写世界（事件/位置/时间；开关关时 no-op）
+            boolean worldLoop = dialogWorldService != null && dialogWorldService.enabled();
+            if (worldLoop) {
+                try {
+                    String summary = (charName == null ? "角色" : charName) + "：" + full;
+                    if (summary.length() > 300) {
+                        summary = summary.substring(0, 300);
+                    }
+                    dialogWorldService.onPlayerRound(
+                            com.holzyn.actor.domain.world.dialog.model.DialogRound.builder()
+                                    .channel("conversation")
+                                    .projectId(conv.getProjectId())
+                                    .userId(userId)
+                                    .sessionId(conv.getId())
+                                    .sessionKey("conversation:" + conv.getId())
+                                    .locationId(conv.getLocationId())
+                                    .locationName(conv.getLocation())
+                                    .participantRefs(java.util.List.of(com.holzyn.actor.common.NpcRefs.of(pending.getCharacterId())))
+                                    .summary(summary)
+                                    .lastMessageId(pending.getId())
+                                    .build());
+                } catch (Exception e) {
+                    log.warn("[对话] 世界回写失败（fail-open，不影响回复）: conv={} : {}", conv.getId(), e.getMessage());
+                }
+            }
             // mask_compliance 软修正：单聊回复违背当前面具情境禁止表达 →
             // 指标计数 + 记日志 + 破绽演化（真实的人违背表达规则本身就是失态/破绽，不替换 AI 文本——
             // 替换程序化文本比偶尔失态更假）；失败零阻断
@@ -898,8 +950,10 @@ public class RoleplayService {
                     pending.getTokenIn(), pending.getTokenOut());
             // 对话完成后自动评估高重要度角色的行动（after_dialog， 统一经 AgentRuntime 门面）
             agentRuntime.evaluateAfterDialogAsync(conv.getId(), userId);
-            // 对话完成后异步抽取长期记忆（记忆组件）
-            agentMemoryService.extractAfterRoundAsync(conv.getId(), userId);
+            // 对话完成后异步抽取长期记忆（记忆组件）；开关开时改由 dialog_digest 批量抽取
+            if (!worldLoop) {
+                agentMemoryService.extractAfterRoundAsync(conv.getId(), userId);
+            }
             // 状态；冷却/人群门控/失败回退在服务内）
             maybeEmotionEvalFromDialog(conv, pending.getCharacterId(), userId);
             emitter.complete();
@@ -1025,7 +1079,7 @@ public class RoleplayService {
         assistant.setType("text");
         assistant.setContent("");
         assistant.setStatus("streaming");
-        memberRepository.findByConversationId(conversationId).stream()
+        memberRepository.findActiveByConversationId(conversationId).stream()
                 .findFirst()
                 .ifPresent(m -> assistant.setCharacterId(m.getCharacterId()));
         messageRepository.save(assistant);
@@ -1080,7 +1134,7 @@ public class RoleplayService {
                 .findFirst().orElse(null);
         if (pending == null) {
             // 世界事件注入等无占位场景：自动为会话首个成员建回应占位
-            List<ActorConversationMember> members = memberRepository.findByConversationId(conversationId);
+            List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conversationId);
             if (!members.isEmpty()) {
                 pending = new ActorMessage();
                 pending.setConversationId(conversationId);
@@ -1183,7 +1237,7 @@ public class RoleplayService {
                                   String chatBackground) {
         try {
             long roundStart = System.currentTimeMillis();
-            List<ActorConversationMember> members = memberRepository.findByConversationId(conv.getId());
+            List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conv.getId());
             if (members.isEmpty()) {
                 throw new BizException(400, "群聊没有成员，请先添加角色");
             }
@@ -1328,12 +1382,49 @@ public class RoleplayService {
             // （对话→关系好感）：群聊轮内 NPC 两两互动，一轮后每对双向 +dialogDelta
             //
             applyGroupChatRelationDeltas(conv, members);
+            // 玩家群聊一轮回写世界（自主群聊由 AutonomousChatService 按节拍另发）
+            boolean worldLoop = dialogWorldService != null && dialogWorldService.enabled();
+            if (worldLoop && evaluateAfterDialog) {
+                try {
+                    java.util.List<String> refs = new java.util.ArrayList<>();
+                    for (ActorConversationMember m : members) {
+                        String ref = memberRefOf(m);
+                        if (ref != null && !ref.isBlank()) {
+                            refs.add(ref);
+                        }
+                    }
+                    java.util.List<ActorMessage> tail = messageRepository
+                            .findByConversationIdOrderByIdAsc(conv.getId());
+                    ActorMessage lastMsg = tail.isEmpty() ? null : tail.get(tail.size() - 1);
+                    String text = lastMsg == null || lastMsg.getContent() == null ? "" : lastMsg.getContent();
+                    if (text.length() > 160) {
+                        text = text.substring(0, 160);
+                    }
+                    dialogWorldService.onPlayerRound(
+                            com.holzyn.actor.domain.world.dialog.model.DialogRound.builder()
+                                    .channel("conversation")
+                                    .projectId(conv.getProjectId())
+                                    .userId(userId)
+                                    .sessionId(conv.getId())
+                                    .sessionKey("conversation:" + conv.getId())
+                                    .locationId(conv.getLocationId())
+                                    .locationName(conv.getLocation())
+                                    .participantRefs(refs)
+                                    .summary("群聊（" + members.size() + " 人在场）：" + text)
+                                    .lastMessageId(lastMsg == null ? null : lastMsg.getId())
+                                    .build());
+                } catch (Exception e) {
+                    log.warn("[群聊] 世界回写失败（fail-open，不影响回复）: conv={} : {}", conv.getId(), e.getMessage());
+                }
+            }
             // 玩家路径：对话后自动评估在场角色行动（after_dialog 触发源）
             if (evaluateAfterDialog) {
                 agentRuntime.evaluateAfterDialogAsync(conv.getId(), userId);
             }
-            // 记忆抽取（无玩家轮对齐群聊：每轮后照常抽取各参与者记忆）
-            agentMemoryService.extractAfterRoundAsync(conv.getId(), userId);
+            // 记忆抽取（无玩家轮对齐群聊：每轮后照常抽取各参与者记忆）；开关开时改由 digest 批量抽取
+            if (!worldLoop) {
+                agentMemoryService.extractAfterRoundAsync(conv.getId(), userId);
+            }
             // 状态
             maybeEmotionEvalFromGroupRound(conv, members, userId);
             log.info("[群聊] 本轮结束：会话={} 共 {} 条回复，耗时={}ms 无玩家={}", conv.getId(), replies,
@@ -1502,7 +1593,7 @@ public class RoleplayService {
                     ActorCharacter ch = characterRepository.findById(characterId).orElse(null);
                     Long gs = worldClockService == null ? null : worldClockService.currentEngineGameSecond(conv.getProjectId());
                     java.util.List<String> pRefs = new java.util.ArrayList<>();
-                    for (ActorConversationMember m : memberRepository.findByConversationId(conv.getId())) {
+                    for (ActorConversationMember m : memberRepository.findActiveByConversationId(conv.getId())) {
                         if (m == null || m.getId() == null || m.getId().equals(member.getId())) {
                             continue;
                         }
@@ -1949,7 +2040,7 @@ public class RoleplayService {
                         com.holzyn.actor.domain.growth.attention.AttentionLevelProvider.PARTICIPATION_SPOKE,
                         gameSecond);
             }
-            for (ActorConversationMember m : memberRepository.findByConversationId(conv.getId())) {
+            for (ActorConversationMember m : memberRepository.findActiveByConversationId(conv.getId())) {
                 if (m == null || m.getId() == null
                         || (speaker != null && m.getId().equals(speaker.getId()))) {
                     continue;
@@ -2092,15 +2183,23 @@ public class RoleplayService {
         // ① 稳定前缀（L1/L2 缓存层）：V2.0 段 1A 世界观简报 + 角色 system prompt + 本地账户档案
         // 批 2 对话链：世界观简报（common_knowledge 精炼常识）拼入 system 前缀（缓存友好，
         // normalizeForLlm 合并为唯一前置 system 段）
+        // 实跑复核：网关（AiSpringChatGateway.withUnifiedSystem）会把调用方的 system 内容
+        // 整体后置到「最后一条 user」末尾（当初目的是不让场景说明污染跨场景共享前缀）。但角色卡不是
+        // 场景说明，它是每角色恒定的半静态内容——被后置后，群聊 prompt 末尾 2,250 字符全是卡，
+        // 可缓存前缀只剩「统一 system + 契约/名册」，实测 dialog 命中率被压到 44%。
+        // 改法：卡段（世界观简报 + 角色卡 + 本地账户档案）挂成第一条 user 消息、置于历史之前，
+        // 走「static 前缀 + 卡段」这条每角色一条的长前缀（见 data/ai-final-bodies 验证脚本）。
+        StringBuilder card = new StringBuilder();
         String brief = aiContextInjector == null ? "" : aiContextInjector.worldBrief(conv.getProjectId());
         if (brief != null && !brief.isBlank()) {
-            messages.add(new AiChatRequest.ChatMessage("system", "【世界观】\n" + brief));
+            card.append("【世界观】\n").append(brief);
         }
-        messages.add(new AiChatRequest.ChatMessage("system", resolveCharacterSystemPrompt(conv, member)));
+        card.append(card.length() > 0 ? "\n\n" : "").append(resolveCharacterSystemPrompt(conv, member));
         String npcProfile = localAccountService.renderNpcProfile();
         if (!npcProfile.isBlank()) {
-            messages.add(new AiChatRequest.ChatMessage("system", npcProfile));
+            card.append("\n\n").append(npcProfile);
         }
+        messages.add(new AiChatRequest.ChatMessage("user", card.toString()));
         List<ActorMessage> history = messageRepository.findByConversationIdOrderByIdAsc(conv.getId());
         // 记忆检索 query=最近一条实质消息；纯 NPC↔NPC 自治聊天历史只有 assistant/system 角色
         // （无 user 消息）→ 兜底本场背景（事件回应轮=「世界事件后的自发回应——<事件>」/概率轮=
@@ -2124,7 +2223,7 @@ public class RoleplayService {
                 // ：群聊面具对象 = 在场其他成员（本人除外）；玩家在场时含非角色成员——
                 // 由 MaskContextSource 按关系/身份/场合解析情境码
                 java.util.List<String> partnerRefs = new java.util.ArrayList<>();
-                for (ActorConversationMember m : memberRepository.findByConversationId(conv.getId())) {
+                for (ActorConversationMember m : memberRepository.findActiveByConversationId(conv.getId())) {
                     if (m == null || m.getId() == null || m.getId().equals(member.getId())) {
                         continue;
                     }
@@ -3180,7 +3279,7 @@ public class RoleplayService {
         }
         try {
             // ：类型值字面量比较统一走 NpcRefs.isCommonType（member_type 既有值与 common 口径兼容）
-            return memberRepository.findByConversationId(conversationId).stream()
+            return memberRepository.findActiveByConversationId(conversationId).stream()
                     .anyMatch(m -> com.holzyn.actor.common.NpcRefs.isCommonType(m.getMemberType())
                             && npcId.equals(m.getCharacterId()));
         } catch (Exception e) {
@@ -3194,7 +3293,7 @@ public class RoleplayService {
      * 解析单聊角色的 system_prompt（取第一个成员的类型化渲染，B5）。
      */
     private String resolveSystemPrompt(ActorConversation conv) {
-        List<ActorConversationMember> members = memberRepository.findByConversationId(conv.getId());
+        List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conv.getId());
         if (members.isEmpty()) {
             return "你是这个世界中的一位角色，请保持角色身份与世界观一致地进行对话。";
         }
@@ -3208,7 +3307,7 @@ public class RoleplayService {
      * 解析会话成员对应的统一角色引用（B5：统一单前缀 {@code npc:{id}}）。
      */
     private String memberRefOf(ActorConversation conv, Long characterId) {
-        return memberRepository.findByConversationId(conv.getId()).stream()
+        return memberRepository.findActiveByConversationId(conv.getId()).stream()
                 .filter(m -> characterId != null && characterId.equals(m.getCharacterId()))
                 .findFirst()
                 // ：npc:{id} 单前缀拼装统一走 NpcRefs.of（引用不再编码 special/crowd 类型）
@@ -3510,7 +3609,7 @@ public class RoleplayService {
             return null;
         }
         // ：类型值字面量比较统一走 NpcRefs.isCommonType（member_type 既有值以 common 为准）
-        boolean common = memberRepository.findByConversationId(conv.getId()).stream()
+        boolean common = memberRepository.findActiveByConversationId(conv.getId()).stream()
                 .filter(m -> memberId.equals(m.getCharacterId()))
                 .findFirst()
                 .map(m -> com.holzyn.actor.common.NpcRefs.isCommonType(m.getMemberType()))

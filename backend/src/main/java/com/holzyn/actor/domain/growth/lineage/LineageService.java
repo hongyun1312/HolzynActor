@@ -497,23 +497,45 @@ public class LineageService {
         }
         // ① 配偶（存续婚姻边）
         Optional<String> spouse = spouseOf(projectId, ref);
-        if (spouse.isPresent() && alive(projectId, spouse.get())) {
+        if (spouse.isPresent() && canInherit(projectId, spouse.get())) {
             return spouse;
         }
         // ② 长子/长女（子女按出生时刻正序取最先者——谱系边 gameSecond=出生时刻）
         List<String> children = childrenOf(projectId, ref);
         for (String child : children) {
-            if (alive(projectId, child)) {
+            if (canInherit(projectId, child)) {
                 return Optional.of(child);
             }
         }
         // ③ 父母
         for (ActorGrowthLineage pe : parentEdgesOf(projectId, ref)) {
-            if (pe.getFromRef() != null && alive(projectId, pe.getFromRef())) {
+            if (pe.getFromRef() != null && canInherit(projectId, pe.getFromRef())) {
                 return Optional.of(pe.getFromRef());
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * 是否可继承（在世 + 非玩家；§7.2：玩家不被选为继承人）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param ref       候选引用
+     *
+     * @return true=可继承
+     */
+    private boolean canInherit(Long projectId, String ref) {
+        if (!alive(projectId, ref)) {
+            return false;
+        }
+        try {
+            return characterRepository.findById(NpcRefs.idOf(ref))
+                    .map(ch -> !ch.isPlayer())
+                    .orElse(false);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** 角色是否在世（有档案行且非 DECEASED 且未删）。 */

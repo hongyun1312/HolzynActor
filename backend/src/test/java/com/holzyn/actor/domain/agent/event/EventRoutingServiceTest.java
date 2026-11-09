@@ -82,8 +82,8 @@ class EventRoutingServiceTest {
         ActorConversation convB = conv(11L, null, "远程通讯", LocalDateTime.now().plusMinutes(1));
         when(conversationRepository.findByProjectIdAndUserIdOrderByUpdatedAtDesc(1L, 1L))
                 .thenReturn(List.of(convB, convA));
-        when(memberRepository.findByConversationId(10L)).thenReturn(List.of(member(10L, "special", 5L)));
-        when(memberRepository.findByConversationId(11L)).thenReturn(List.of(member(11L, "special", 6L)));
+        when(memberRepository.findActiveByConversationId(10L)).thenReturn(List.of(member(10L, "special", 5L)));
+        when(memberRepository.findActiveByConversationId(11L)).thenReturn(List.of(member(11L, "special", 6L)));
         ActorCharacter ch = new ActorCharacter();
         ch.setId(5L);
         ch.setLocationId(2L); // 成员 5 当前在城西（2）
@@ -101,7 +101,7 @@ class EventRoutingServiceTest {
         ActorConversation convA = conv(10L, null, null, LocalDateTime.now());
         when(conversationRepository.findByProjectIdAndUserIdOrderByUpdatedAtDesc(1L, 1L))
                 .thenReturn(List.of(convA));
-        when(memberRepository.findByConversationId(10L)).thenReturn(List.of(member(10L, "special", 5L)));
+        when(memberRepository.findActiveByConversationId(10L)).thenReturn(List.of(member(10L, "special", 5L)));
 
         ActorConversation target = service.findTarget(1L, 1L, null, null, List.of("npc:5"));
         assertNotNull(target);
@@ -114,7 +114,7 @@ class EventRoutingServiceTest {
         ActorConversation convA = conv(10L, null, null, LocalDateTime.now());
         when(conversationRepository.findByProjectIdAndUserIdOrderByUpdatedAtDesc(1L, 1L))
                 .thenReturn(List.of(convA));
-        when(memberRepository.findByConversationId(10L)).thenReturn(List.of(member(10L, "crowd", 30L)));
+        when(memberRepository.findActiveByConversationId(10L)).thenReturn(List.of(member(10L, "crowd", 30L)));
         ActorCharacter npc = new ActorCharacter();
         npc.setId(30L);
         npc.setLocationId(2L);
@@ -144,7 +144,7 @@ class EventRoutingServiceTest {
         ActorConversation convA = conv(10L, 1L, "妖灵会馆", LocalDateTime.now());
         when(conversationRepository.findByProjectIdAndUserIdOrderByUpdatedAtDesc(1L, 1L))
                 .thenReturn(List.of(convA));
-        when(memberRepository.findByConversationId(10L)).thenReturn(List.of(member(10L, "special", 5L)));
+        when(memberRepository.findActiveByConversationId(10L)).thenReturn(List.of(member(10L, "special", 5L)));
         when(characterRepository.findById(5L)).thenReturn(Optional.of(new ActorCharacter()));
 
         assertNull(service.findTarget(1L, 1L, 99L, "未知地点", null));

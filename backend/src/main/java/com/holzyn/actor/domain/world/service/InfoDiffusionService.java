@@ -127,8 +127,89 @@ public class InfoDiffusionService {
      * 到达秒），快照后异步发布与事务生命周期完全解耦。</p>
      */
     private record PendingArrival(Long userId, Long projectId, Long packetId, String origin, String content,
-                                  String distortionRulesJson, String region, String relayed,
+                                  String distortionRulesJson, String factKey, String region, String relayed,
                                   double distKm, long day, long arrival) {
+    }
+
+    /**
+     * 直接发布一个信息包（{@code info.packet} 效果）。
+     *
+     * <p>与帧生成的 info_packages 共用同一张表和同一套扩散逻辑；帧 ID 为空
+     * （宏观/效果包不挂帧）。{@code sourceEventId} 必填，满足溯源。</p>
+     *
+     * @param projectId   项目 ID
+     * @param sourceEventId 来源事件 ID（必填）
+     * @param content     原始内容
+     * @param subjectRef  主体 ref（可空）
+     * @param visibility  public / location / private（写入条件 JSON）
+     * @param reliability 可信度 0~1
+     * @param locationName 发生地
+     * @param factKey     关联事实键（可空）
+     * @param gameSecond  当前游戏秒
+     * @return 信息包 ID
+     */
+    @Transactional
+    public Long publishPacket(Long projectId, Long sourceEventId, String content, String subjectRef,
+                              String visibility, double reliability, String locationName,
+                              String factKey, long gameSecond) {
+        if (projectId == null || content == null || content.isBlank()) {
+            return null;
+        }
+        if (sourceEventId == null) {
+            throw new IllegalArgumentException("info.packet 缺少 sourceEventId（A20）");
+        }
+        ActorInfoPacket packet = new ActorInfoPacket();
+        packet.setFrameId(null);
+        packet.setProjectId(projectId);
+        String infoId = "effect:" + sourceEventId + ":" + Integer.toHexString(
+                java.util.Objects.hash(projectId, sourceEventId, subjectRef, factKey, content));
+        // 去重：同一个包标识（内容/来源/主体的确定性哈希）已经落过 → 直接返回既有 id，
+        // 不再生成第二个副本。效果层是「同一件事被多次施加」的高发区，副本会让扩散计数虚高。
+        try {
+            java.util.Optional<ActorInfoPacket> sameId =
+                    packetRepository.findTopByProjectIdAndInfoId(projectId, infoId);
+            if (sameId.isPresent() && sameId.get().getId() != null) {
+                log.debug("[信息扩散] 相同信息包已存在，复用: project={} packet={} infoId={}",
+                        projectId, sameId.get().getId(), infoId);
+                return sameId.get().getId();
+            }
+            // 同一事实 + 同一来源事件只允许一个活跃包（正文措辞变了也算同一件事）
+            String key = factKey == null ? null : factKey.trim();
+            if (key != null && !key.isEmpty()) {
+                for (ActorInfoPacket existing : packetRepository
+                        .findByProjectIdAndFactKeyAndStatus(projectId, key, "active")) {
+                    if (sourceEventId.equals(existing.getSourceEventId())) {
+                        log.debug("[信息扩散] 同源事实已有活跃包，复用: project={} packet={} factKey={}",
+                                projectId, existing.getId(), key);
+                        return existing.getId();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[信息扩散] 信息包去重查询失败（按新包落库）: project={} : {}", projectId, e.getMessage());
+        }
+        packet.setInfoId(infoId);
+        packet.setOrigin(locationName);
+        packet.setContent(content);
+        packet.setReliability(Math.max(0d, Math.min(1d, reliability)));
+        packet.setSpreadChannelsJson("[\"商队\",\"信使\"]");
+        packet.setSpreadSpeedDaysPerKm(DEFAULT_SPEED);
+        long day = Math.floorDiv(gameSecond, 86400L);
+        packet.setValidUntilDay(day + 7);
+        // 可见性只接受闭集，避免把自由文本拼进条件 JSON（效果层可能透传外部 claim）
+        String vis = visibility == null ? "location" : visibility;
+        if (!"public".equals(vis) && !"location".equals(vis) && !"private".equals(vis)) {
+            vis = "location";
+        }
+        packet.setVisibilityConditionJson("{\"visibility\":\"" + vis + "\"}");
+        packet.setSourceEventId(sourceEventId);
+        packet.setSubjectRef(subjectRef);
+        packet.setFactKey(factKey);
+        packet.setStatus("active");
+        ActorInfoPacket saved = packetRepository.save(packet);
+        log.info("[信息扩散] 效果发布信息包: project={} event={} packet={} subject={}",
+                projectId, sourceEventId, saved == null ? null : saved.getId(), subjectRef);
+        return saved == null ? null : saved.getId();
     }
 
     // ==================== 入口：每游戏小时扩散（WorldEngine 小时级钩子） ====================
@@ -224,8 +305,8 @@ public class InfoDiffusionService {
                 // 首达登记「区域传闻版」到达事件（不在此处发布：事务提交后异步，见 scheduleArrivalPublishes）
                 if (props.isArrivalEventEnabled()) {
                     pending.add(new PendingArrival(userId, projectId, packet.getId(), packet.getOrigin(),
-                            packet.getContent(), packet.getDistortionRulesJson(), region, relayed,
-                            distKm, day, arrival));
+                            packet.getContent(), packet.getDistortionRulesJson(), packet.getFactKey(),
+                            region, relayed, distKm, day, arrival));
                 }
             }
         }
@@ -343,6 +424,14 @@ public class InfoDiffusionService {
             String title = "消息传到了" + item.region();
             String content = rumor == null || rumor.isBlank()
                     ? (item.content() == null ? title : item.content()) : rumor;
+            int distortionLevel = 1 + Math.min(3, (int) (Math.max(0d, item.distKm()) / 5));
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("packetId", item.packetId());
+            payload.put("region", item.region());
+            payload.put("factKey", item.factKey());
+            payload.put("relayedBy", item.relayed());
+            payload.put("distanceKm", item.distKm());
+            payload.put("distortionLevel", distortionLevel);
             worldEventBus.publish(item.userId(), item.projectId(), EventSpec.builder()
                     .kind(KIND_WORLD_FRAME)
                     .source("engine")
@@ -350,6 +439,7 @@ public class InfoDiffusionService {
                     .locationName(item.region())
                     .title(abbreviate(title, 200))
                     .content(abbreviate(content, 300))
+                    .payloadJson(toJson(payload))
                     .importance(1)
                     .gameHour(Math.floorDiv(item.arrival(), 3600L))
                     .sourceKey("diffusion:" + item.projectId() + ":" + item.day() + ":"

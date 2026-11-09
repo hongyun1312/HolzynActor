@@ -197,11 +197,11 @@ class DialogueChatServiceTest {
         ArgumentCaptor<AiChatRequest> reqCaptor = ArgumentCaptor.forClass(AiChatRequest.class);
         verify(aiChatGateway).chatCompletionStream(eq(1L), eq(1L), eq(null), reqCaptor.capture(), any(), any());
         AiChatRequest req = reqCaptor.getValue();
-        assertEquals(2, req.messages().size());
-        assertEquals("system", req.messages().get(0).role());
-        assertEquals("【世界观】L0", req.messages().get(0).content());
-        assertEquals("user", req.messages().get(1).role());
-        assertEquals("【本轮】L1", req.messages().get(1).content());
+        // 卡段（ctx.system）与动态段（ctx.user）合并为单条 user——网关会把调用方 system
+        // 后置到最后一条 user 末尾，卡段因此吃不到前缀缓存；合并后静态在前、动态在后。
+        assertEquals(1, req.messages().size());
+        assertEquals("user", req.messages().get(0).role());
+        assertEquals("【世界观】L0\n\n【本轮】L1", req.messages().get(0).content());
     }
 
     // ==================== 重写（regenerate） ====================

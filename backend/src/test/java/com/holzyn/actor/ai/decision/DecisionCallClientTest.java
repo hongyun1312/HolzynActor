@@ -118,7 +118,7 @@ class DecisionCallClientTest {
         client = new DecisionCallClient();
         properties = new DecisionProperties();
         properties.setEnabled(true);
-        properties.setBaseUrl("https://llm.mbfsr.com:14443/v1");
+        properties.setBaseUrl("https://api.example.com/v1");
         properties.setMaxRetries(1);
         properties.setTimeoutConnectSeconds(10);
         properties.setTimeoutReadSeconds(30);
@@ -137,7 +137,7 @@ class DecisionCallClientTest {
         when(currentUserProvider.currentUserId()).thenReturn(1L);
         when(aiCallTraceService.begin(1L)).thenReturn(trace);
         when(modelApiService.resolveProviderConfig(1L, 1L, null)).thenReturn(
-                new ProviderConfig(67L, "https://llm.mbfsr.com:14443/v1", "test-key", "qwen3.6-35b-q4-un", false));
+                new ProviderConfig(67L, "https://api.example.com/v1", "test-key", "local-model", false));
 
         ReflectionTestUtils.setField(client, "properties", properties);
         ReflectionTestUtils.setField(client, "adapters", adapters);
@@ -178,12 +178,12 @@ class DecisionCallClientTest {
 
         // 请求 URL 与 Key 复用（N1 用户决策 A：Key 来自 chat provider）
         assertEquals(1, executor.calls.size());
-        assertTrue(executor.calls.get(0).startsWith("POST https://llm.mbfsr.com:14443/v1/nanojev/evaluate key=test-key"),
+        assertTrue(executor.calls.get(0).startsWith("POST https://api.example.com/v1/nanojev/evaluate key=test-key"),
                 "实际请求：" + executor.calls.get(0));
 
         // trace 记账：model/baseUrl/paramsSnapshot/raw/0 token
         verify(trace).setModel("nanojev");
-        verify(trace).setBaseUrl("https://llm.mbfsr.com:14443/v1");
+        verify(trace).setBaseUrl("https://api.example.com/v1");
         verify(trace).setStream(false);
         verify(trace).setProviderId(67L);
         verify(trace).setDecisionParams("states=1, questions=3, paths=7");
@@ -358,7 +358,7 @@ class DecisionCallClientTest {
         Map<String, Object> noBase = client.healthCheck(1L, 1L);
         assertEquals(Boolean.FALSE, noBase.get("ready"), "未配置 base-url → ready=false");
 
-        properties.setBaseUrl("https://llm.mbfsr.com:14443/v1");
+        properties.setBaseUrl("https://api.example.com/v1");
         properties.setEnabled(false);
         Map<String, Object> disabled = client.healthCheck(1L, 1L);
         assertEquals(Boolean.FALSE, disabled.get("ready"), "未启用 → ready=false");
@@ -396,12 +396,12 @@ class DecisionCallClientTest {
     @Test
     @DisplayName("远程形态：设置页保存的地址与适配器优先于配置文件（桌面端用户改不了 yml）")
     void remoteModeUsesSelectionBaseUrlAndAdapter() {
-        // 配置文件里的默认地址是 llm.mbfsr.com；设置页选了 laya + 自建服务，调用就必须打到自建服务
+        // 配置文件里的默认地址是内置默认值；设置页选了 laya + 自建服务，调用就必须打到自建服务
         DecisionLocalStore localStore = mock(DecisionLocalStore.class);
         DecisionLocalStore.Selection selection = new DecisionLocalStore.Selection();
         selection.setMode("api");
         selection.setAdapter("laya");
-        selection.setBaseUrl("http://10.0.0.5:9300/v1");
+        selection.setBaseUrl("http://127.0.0.1:9300/v1");
         when(localStore.readSelection()).thenReturn(selection);
         ReflectionTestUtils.setField(client, "localStore", localStore);
         executor.results.add(new DecisionHttpExecutor.HttpResult(200, """
@@ -417,8 +417,8 @@ class DecisionCallClientTest {
         assertNotNull(result, "按选择解析出的端点必须可调用");
         assertEquals("laya", client.adapterId(), "适配器以设置页选择为准");
         assertEquals("api", client.mode());
-        assertEquals("http://10.0.0.5:9300/v1", client.baseUrl(), "端点以设置页保存的地址为准");
-        assertTrue(executor.calls.get(0).startsWith("POST http://10.0.0.5:9300/v1/systemone"),
+        assertEquals("http://127.0.0.1:9300/v1", client.baseUrl(), "端点以设置页保存的地址为准");
+        assertTrue(executor.calls.get(0).startsWith("POST http://127.0.0.1:9300/v1/systemone"),
                 "实际请求：" + executor.calls.get(0));
     }
 

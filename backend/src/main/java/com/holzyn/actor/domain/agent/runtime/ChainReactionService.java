@@ -363,11 +363,11 @@ public class ChainReactionService {
 
     // ==================== 私有辅助 ====================
 
-    /** 项目特殊 NPC 列表（失败返回空列表；长跑抓修 排除已故角色）。 */
+    /** 项目特殊 NPC 列表（失败返回空列表；长跑抓修排除已故角色；排除玩家——玩家行动可触发链式，但不作为被 AI 反应对象）。 */
     private List<ActorCharacter> safeChars(Long projectId) {
         try {
             return characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
-                    .stream().filter(ch -> ch != null && !ch.isDeceased()).toList();
+                    .stream().filter(ch -> ch != null && !ch.isDeceased() && !ch.isPlayer()).toList();
         } catch (Exception e) {
             log.warn("[链式] 特殊 NPC 列表读取失败（跳过链式）: project={} : {}", projectId, e.getMessage());
             return List.of();

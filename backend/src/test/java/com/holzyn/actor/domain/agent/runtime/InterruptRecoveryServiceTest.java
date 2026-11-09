@@ -159,6 +159,16 @@ class InterruptRecoveryServiceTest {
     }
 
     @Test
+    void interrupt_skipsDeletedCharacter() {
+        ActorCharacter ch = newChar(1L, "甲", "在茶馆喝茶", "茶馆");
+        ch.setDeleted(1);
+        when(characterRepository.findById(1L)).thenReturn(Optional.of(ch));
+        Long planId = service.interrupt(1L, "npc:1", 36000L);
+        assertNull(planId, "已删除角色不得再产生打断记录");
+        verify(interruptRepository, never()).save(any(ActorInterruptRecord.class));
+    }
+
+    @Test
     void interrupt_skipsWhenActiveRecordExists() {
         when(characterRepository.findById(1L)).thenReturn(Optional.of(newChar(1L, "甲", "在茶馆喝茶", "茶馆")));
         ActorInterruptRecord existing = newRecord(9L, "在集市采购", "集市", 36000L, 39600L, "active");

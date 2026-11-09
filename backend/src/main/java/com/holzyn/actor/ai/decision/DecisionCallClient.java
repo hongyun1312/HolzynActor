@@ -41,6 +41,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 决策模型统一调用客户端（<b>适配器驱动</b>）。
@@ -73,6 +76,24 @@ public class DecisionCallClient {
 
     /** 用户选择缓存 TTL（毫秒）：设置页改完 2 秒内生效，避免每次判定都读盘 */
     private static final long SELECTION_TTL_MS = 2000L;
+
+    /**
+     * 决策调用并发闸门（懒初始化，许可数取 {@code max-concurrent}）。
+     *
+     * <p><b>为什么必须有</b>：决策模型是单进程小模型服务（0.6B，单次前向数十 ms～数秒），
+     * 并发吃不下会自动排队；一旦客户端无上限地并发打进去，服务端队列越积越长，
+     * 每个请求都拖到超时 → 重试 → 队列更长，形成自激的死亡螺旋（实跑事故：
+     * 12 个刺激同 tick 齐发，5 分钟内 400+ 次超时、6900+ 次防重入重试）。
+     * 闸门把「无界并发」换成「有界并发 + 有界排队」：等不到许可立即 fail-closed 降级，
+     * 由调用方走程序化兜底，绝不把压力转嫁给服务端队列。</p>
+     */
+    private volatile Semaphore concurrencyGate;
+
+    /** 连续传输失败次数（熔断用：超时/连接异常计数，成功即清零） */
+    private final AtomicInteger consecutiveFailures = new AtomicInteger();
+
+    /** 熔断开路截止时刻（毫秒时间戳；0=闭合。开路期间直接 fail-closed，不发 HTTP） */
+    private volatile long breakerOpenUntilMs;
 
     /** 决策模型配置（@Component + @ConfigurationProperties；可空=未装配视为禁用） */
     @Autowired(required = false)
@@ -475,6 +496,10 @@ public class DecisionCallClient {
                 trace.setModel(endpoint.modelId());
                 trace.setProviderId(providerIdOf(keySource));
                 trace.setDecisionParams(protocol.paramsSnapshot(chunk));
+                // 决策模型调用没有 chat 的 user 消息：把本批 state 文本写入 trace.user_prompt，
+                // 否则 actor_ai_call_log 只有 detail_json（结构化请求体），验收无法直接核对
+                // 「本轮世界事实是否进入决策输入」（L6 断链的可观测性根因）。
+                trace.setUserPrompt(stateTextOf(chunk));
                 long t0 = System.currentTimeMillis();
                 List<DecisionResponse> parts = new ArrayList<>();
                 StringBuilder rawJoined = new StringBuilder();
@@ -510,11 +535,11 @@ public class DecisionCallClient {
                 trace.markSuccess(resp.raw(), endpoint.modelId(), 0, 0, 0, 0, providerIdOf(keySource));
                 recordUsage(uid, projectId, characterId, providerIdOf(keySource), scene, durationMs, endpoint.modelId());
                 log.info("[Decision] adapter={} protocol={} local={} scene={} states={} questions={} paths={} "
-                                + "forwardPasses={} cacheHit={} durationMs={}",
+                                + "forwardPasses={} cacheHit={} durationMs={} chars={}",
                         adapter.id(), protocol.id(), endpoint.local(), scene,
                         resp.execution().states(), resp.execution().questions(),
                         resp.execution().candidatePaths(), resp.execution().forwardPasses(),
-                        resp.execution().cacheHit(), durationMs);
+                        resp.execution().cacheHit(), durationMs, rawJoined.length());
                 return resp;
             } catch (Exception e) {
                 trace.markFailure(e);
@@ -538,19 +563,89 @@ public class DecisionCallClient {
         return units;
     }
 
-    /** 带重试的 POST（HTTP 非 200 抛 AiCallException，由上层 fail-closed）。 */
+    /**
+     * 拼接本批 state 的文本上下文（仅取字符串形态的 state），写入 trace.user_prompt。
+     *
+     * <p>决策模型协议没有 chat 的 user 消息；不做这一步，{@code actor_ai_call_log} 的
+     * user_prompt 恒为空，验收只能翻 detail_json 才能判断事实是否进入判定输入。</p>
+     *
+     * @param states 本批 state
+     *
+     * @return 文本上下文；无字符串 state 返回 null
+     */
+    private static String stateTextOf(List<DecisionState> states) {
+        if (states == null || states.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (DecisionState s : states) {
+            if (s == null || !(s.state() instanceof String text) || text.isBlank()) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append("\n\n");
+            }
+            sb.append(text);
+        }
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
+    /**
+     * 带并发闸门 + 熔断 + 超时不重试的 POST（fail-closed 由上层统一处置）。
+     *
+     * <p><b>三条护栏</b>（对应实跑事故的三层放大）：</p>
+     * <ol>
+     *   <li><b>并发闸门</b>：全局最多 {@code max-concurrent} 个在途请求，其余在客户端排队
+     *       {@code queue-wait-ms}；排不到立刻失败降级——不把请求堆进服务端队列；</li>
+     *   <li><b>超时不重试</b>：超时说明服务端已在排队/饱和，再重试等于加倍灌入；
+     *       只有连接类瞬时错误才重试（{@code max-retries}）；</li>
+     *   <li><b>熔断</b>：连续 {@code breaker-failure-threshold} 次传输失败 → 开路
+     *       {@code breaker-open-ms}，期间直接 fail-closed，给服务端恢复窗口。</li>
+     * </ol>
+     */
     private DecisionHttpExecutor.HttpResult postWithRetry(String scene, DecisionEndpoint endpoint,
                                                           ProviderConfig keySource, String body) {
         int attempts = 1 + Math.max(0, properties.getMaxRetries());
+        long queueWaitMs = Math.max(0L, properties.getQueueWaitMs());
         DecisionHttpExecutor.HttpResult result = null;
         Exception lastError = null;
         for (int i = 0; i < attempts && result == null; i++) {
+            ensureBreakerClosed(scene);
+            Semaphore gate = concurrencyGate();
+            boolean acquired = false;
+            try {
+                acquired = gate.tryAcquire(queueWaitMs, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AiCallException("决策模型并发闸门等待被中断（fail-closed）：scene=" + scene);
+            }
+            if (!acquired) {
+                // 闸门排队超时：服务端大概率已饱和，直接降级（不重试、不堆积）
+                throw new AiCallException("决策模型并发闸门排队超时（降级，不重试）：scene=" + scene
+                        + " 在途上限=" + gatePermits());
+            }
             try {
                 result = executor.postJson(endpoint.evaluateUrl(), effectiveApiKey(keySource, endpoint.local()),
-                        body, properties.getTimeoutConnectSeconds(), properties.getTimeoutReadSeconds());
+                        body, properties.getTimeoutConnectSeconds(), effectiveReadSeconds());
+                consecutiveFailures.set(0);
             } catch (Exception e) {
                 lastError = e;
+                int fails = consecutiveFailures.incrementAndGet();
+                int threshold = Math.max(1, properties.getBreakerFailureThreshold());
+                if (fails >= threshold) {
+                    breakerOpenUntilMs = System.currentTimeMillis() + Math.max(0L, properties.getBreakerOpenMs());
+                    log.warn("[Decision] 决策模型熔断打开：连续传输失败 {} 次，{} ms 内直接降级不再发请求",
+                            fails, properties.getBreakerOpenMs());
+                }
+                if (isTimeout(e)) {
+                    // 超时是"服务端排队"的信号，重试只会加深拥塞
+                    log.warn("[Decision] 第 {} 次调用超时（不再重试，直接降级）：scene={} 原因={}",
+                            i + 1, scene, e.getMessage());
+                    break;
+                }
                 log.warn("[Decision] 第 {} 次调用异常（将重试/回退）：scene={} 原因={}", i + 1, scene, e.getMessage());
+            } finally {
+                gate.release();
             }
         }
         if (result == null) {
@@ -563,6 +658,58 @@ public class DecisionCallClient {
         }
         return result;
     }
+
+    /** 并发闸门（首次使用时按配置许可数创建；配置为 0/负数时按 1 兜底）。 */
+    private Semaphore concurrencyGate() {
+        Semaphore gate = concurrencyGate;
+        if (gate == null) {
+            synchronized (this) {
+                if (concurrencyGate == null) {
+                    concurrencyGate = new Semaphore(gatePermits(), true);
+                }
+                gate = concurrencyGate;
+            }
+        }
+        return gate;
+    }
+
+    /** 闸门许可数（配置快照）。 */
+    private int gatePermits() {
+        return properties == null ? 1 : Math.max(1, properties.getMaxConcurrent());
+    }
+
+    /** 每次请求的实际读超时（request 总时长上限优先，防止 read 配置宽松导致单次悬挂过久）。 */
+    private int effectiveReadSeconds() {
+        int read = Math.max(1, properties.getTimeoutReadSeconds());
+        int request = properties.getTimeoutRequestSeconds();
+        return request > 0 ? Math.min(read, request) : read;
+    }
+
+    /** 熔断检查：开路期内直接 fail-closed（不发 HTTP，避免饱和时继续灌入）。 */
+    private void ensureBreakerClosed(String scene) {
+        long openUntil = breakerOpenUntilMs;
+        if (openUntil > 0 && System.currentTimeMillis() < openUntil) {
+            throw new AiCallException("决策模型熔断中（降级，暂不发请求）：scene=" + scene
+                    + " 剩余 " + (openUntil - System.currentTimeMillis()) + " ms");
+        }
+    }
+
+    /** 是否超时类异常（含 cause 链）：超时不重试。 */
+    private static boolean isTimeout(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            String name = t.getClass().getSimpleName().toLowerCase();
+            String msg = t.getMessage() == null ? "" : t.getMessage().toLowerCase();
+            if (name.contains("timeout") || msg.contains("timed out") || msg.contains("time out")
+                    || msg.contains("timeout") || msg.contains("超时")) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
+    }
+
 
     /** 用量入账（0 token；失败仅告警）。 */
     private void recordUsage(Long uid, Long projectId, Long characterId, Long providerId, String scene,

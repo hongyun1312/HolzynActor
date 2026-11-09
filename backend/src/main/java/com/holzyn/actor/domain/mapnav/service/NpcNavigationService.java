@@ -228,10 +228,26 @@ public class NpcNavigationService {
     /** 组装快照。 */
     private Snapshot build(ActorWorldMap map) {
         byte[] bytes = artifacts.readNavGrid(map.getId());
-        NavGrid grid = bytes == null ? null : NavGridCodec.decode(bytes);
+        NavGrid grid = null;
+        try {
+            grid = bytes == null ? null : NavGridCodec.decode(bytes);
+        } catch (Exception e) {
+            // 坏文件与缺文件同处理：数据坏了也不能让整个世界的寻路停摆
+            log.warn("[mapnav] 地图 {} 的 nav.bin 解码失败：{}", map.getId(), e.getMessage());
+        }
+        boolean degraded = false;
         if (grid == null) {
-            log.warn("[mapnav] 地图 {} 没有可用的 nav.bin（运行期降级为直线移动，请重跑 S1）", map.getId());
-            return null;
+            // 降级而不是放弃：用地图行自带的尺寸/格距造一张空白壳栅格，让 A* 只按「道路 + 建筑」
+            // 这两类活数据走。旧行为是返回 null → startRoute 退化成两点直线，人直接穿过房子与河。
+            int size = map.getSize() == null || map.getSize() <= 0 ? 128 : map.getSize();
+            double mpc = map.getMetersPerCell() == null || map.getMetersPerCell() <= 0
+                    ? 1.0 : map.getMetersPerCell();
+            long seed = map.getSeed() == null ? 0L : map.getSeed();
+            grid = NavGrid.flatShell(size, mpc, seed);
+            degraded = true;
+            log.warn("[mapnav] 地图 {} 没有可用的 nav.bin（{}），已降级为「仅按道路与建筑寻路」："
+                            + "水与坡的事实缺失，请重跑 S1 生成 nav.bin 恢复完整导航",
+                    map.getId(), bytes == null ? "文件不存在" : "解码失败");
         }
         boolean[] road = new boolean[grid.size * grid.size];
         boolean[] occupied = new boolean[grid.size * grid.size];
@@ -253,10 +269,24 @@ public class NpcNavigationService {
         }
         CostField field = CostField.build(grid, road, occupied);
         GridAStar astar = new GridAStar(field);
-        log.info("[mapnav] 导航快照：map={} {}² / 路格 {} / 建筑 {} / 提示林 {}",
+        log.info("[mapnav] 导航快照：map={} {}² / 路格 {} / 建筑 {} / 提示林 {} / 降级={}",
                 map.getId(), grid.size, countTrue(road, grid.size * grid.size), buildingCount,
-                countTrue(grid.forest, grid.size * grid.size));
-        return new Snapshot(map.getId(), grid, field, astar);
+                countTrue(grid.forest, grid.size * grid.size), degraded);
+        return new Snapshot(map.getId(), grid, field, astar, degraded);
+    }
+
+    /**
+     * 该项目的导航是否处于降级态（缺 nav.bin，只按道路与建筑寻路）。
+     *
+     * <p>对账接口把它暴露成 {@code summary.navDegraded}：只要它是 true，
+     * 「NPC 在物理空间里的存在是否可信」就还没有完全达标——路径绕得开房子，但绕不开水。</p>
+     *
+     * @param projectId 项目
+     * @return true=降级中
+     */
+    public boolean degraded(Long projectId) {
+        Snapshot snap = snapshot(projectId);
+        return snap != null && snap.degraded();
     }
 
     /** 栅格化一条路，返回标记的格数。 */
@@ -366,11 +396,12 @@ public class NpcNavigationService {
     /**
      * 一张图的导航快照（不可变）。
      *
-     * @param mapId 地图 ID
-     * @param grid  导航栅格
-     * @param field 代价场
-     * @param astar A* 实例（内部带可复用缓冲，{@code find} 是同步的）
+     * @param mapId    地图 ID
+     * @param grid     导航栅格
+     * @param field    代价场
+     * @param astar    A* 实例（内部带可复用缓冲，{@code find} 是同步的）
+     * @param degraded 是否降级（缺 nav.bin，水与坡事实缺失）
      */
-    public record Snapshot(Long mapId, NavGrid grid, CostField field, GridAStar astar) {
+    public record Snapshot(Long mapId, NavGrid grid, CostField field, GridAStar astar, boolean degraded) {
     }
 }

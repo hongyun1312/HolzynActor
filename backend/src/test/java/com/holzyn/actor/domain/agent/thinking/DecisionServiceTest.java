@@ -786,6 +786,96 @@ class DecisionServiceTest {
     }
 
     /**
+     * 情境已含【当前状态】时，段2D/2E 不重复注入，但段2F【所处之地】必须追加——
+     * 引擎周期的感知情境走的就是这条路，世界状态不能因为「状态段已存在」而整段丢掉。
+     */
+    @Test
+    void deliberateAppendsLocalitySegmentEvenWhenStatePresent() throws Exception {
+        com.holzyn.actor.domain.agent.context.AiContextInjector inj =
+                Mockito.mock(com.holzyn.actor.domain.agent.context.AiContextInjector.class);
+        when(inj.localitySegment(eq(100L), eq("npc:3"), any()))
+                .thenReturn("【所处之地】河埠头\n- 刚刚的变化：有人把一只竹篮落在碾盘边");
+        ReflectionTestUtils.setField(service, "aiContextInjector", inj);
+        when(brainProfileService.resolveByRef("npc:3")).thenReturn(profile("full"));
+        when(promptService.buildActionGenPrompt(anyLong(), anyLong(), anyString(), anyString(), anyString()))
+                .thenReturn("行动生成 Prompt");
+        String okJson = "<decision>{\"reasoning\":\"去看看\",\"action_type\":\"start_action\","
+                + "\"action_detail\":\"去碾盘边看看那只竹篮\",\"target\":\"河埠头\",\"priority\":3,"
+                + "\"expected_duration_minutes\":15}</decision>";
+        when(aiChatGateway.chatCompletion(anyLong(), anyLong(), any(), any()))
+                .thenReturn(new AiChatResult(okJson, "test-model", 10, 5, 15, 1L));
+
+        Map<String, Object> d = service.generateDecision(character(), 1L,
+                "【当前所见】现在是青禾村历 0420年05月15日 06时00分，你在河埠头。\n【当前状态】\n- 需求：饥饿 68/100");
+
+        assertNotNull(d);
+        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(promptService).buildActionGenPrompt(anyLong(), anyLong(), anyString(),
+                captor.capture(), anyString());
+        String situation = captor.getValue();
+        assertTrue(situation.contains("【所处之地】"), "应追加段2F: " + situation);
+        assertEquals(1, situation.split("【当前状态】", -1).length - 1,
+                "段2E 不应重复注入: " + situation);
+    }
+
+    /**
+     * 去重：情境已含【所处之地】→ 不再追加第二份（防 prompt 双份）。
+     */
+    @Test
+    void deliberateDoesNotDuplicateLocalitySegment() throws Exception {
+        com.holzyn.actor.domain.agent.context.AiContextInjector inj =
+                Mockito.mock(com.holzyn.actor.domain.agent.context.AiContextInjector.class);
+        ReflectionTestUtils.setField(service, "aiContextInjector", inj);
+        when(brainProfileService.resolveByRef("npc:3")).thenReturn(profile("full"));
+        when(promptService.buildActionGenPrompt(anyLong(), anyLong(), anyString(), anyString(), anyString()))
+                .thenReturn("行动生成 Prompt");
+        String okJson = "<decision>{\"reasoning\":\"继续\",\"action_type\":\"continue\","
+                + "\"action_detail\":\"继续手头的事\",\"target\":\"\",\"priority\":1,"
+                + "\"expected_duration_minutes\":30}</decision>";
+        when(aiChatGateway.chatCompletion(anyLong(), anyLong(), any(), any()))
+                .thenReturn(new AiChatResult(okJson, "test-model", 10, 5, 15, 1L));
+
+        Map<String, Object> d = service.generateDecision(character(), 1L,
+                "【当前状态】\n- 需求：饥饿 68/100\n【所处之地】河埠头\n- 这里眼下：石阶露水");
+
+        assertNotNull(d);
+        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(promptService).buildActionGenPrompt(anyLong(), anyLong(), anyString(),
+                captor.capture(), anyString());
+        assertEquals(1, captor.getValue().split("【所处之地】", -1).length - 1,
+                "段2F 不应重复: " + captor.getValue());
+        verify(inj, org.mockito.Mockito.never()).localitySegment(anyLong(), anyString(), any());
+    }
+
+    /**
+     * 卡住的目标必须进入决策情境（【卡住的目标】段），
+     * 否则 blocked 只是从 active 名单里消失，角色会像什么都没发生一样继续过日子。
+     */
+    @Test
+    void deliberateAppendsStalledGoalSegment() throws Exception {
+        PlanningService planning = Mockito.mock(PlanningService.class);
+        when(planning.stalledGoalsSegment(eq(100L), eq("npc:3"), any()))
+                .thenReturn("【卡住的目标】\n- 「攒钱修屋顶」已经 3 天没动过了。要么换个法子，要么就此认了。");
+        ReflectionTestUtils.setField(service, "planningService", planning);
+        when(brainProfileService.resolveByRef("npc:3")).thenReturn(profile("full"));
+        when(promptService.buildActionGenPrompt(anyLong(), anyLong(), anyString(), anyString(), anyString()))
+                .thenReturn("行动生成 Prompt");
+        String okJson = "<decision>{\"reasoning\":\"改道\",\"action_type\":\"start_action\","
+                + "\"action_detail\":\"先去问问瓦匠的价钱\",\"target\":\"街上\",\"priority\":3,"
+                + "\"expected_duration_minutes\":20}</decision>";
+        when(aiChatGateway.chatCompletion(anyLong(), anyLong(), any(), any()))
+                .thenReturn(new AiChatResult(okJson, "test-model", 10, 5, 15, 1L));
+
+        Map<String, Object> d = service.generateDecision(character(), 1L, "【当前状态】\n- 需求：饥饿 68/100");
+
+        assertNotNull(d);
+        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(promptService).buildActionGenPrompt(anyLong(), anyLong(), anyString(),
+                captor.capture(), anyString());
+        assertTrue(captor.getValue().contains("【卡住的目标】"), "应注入卡住目标段: " + captor.getValue());
+    }
+
+    /**
      * 注入器未装配（null）→ 情境原样透传（行为与批3 前一致，零阻断）。
      */
     @Test

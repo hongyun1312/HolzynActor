@@ -161,7 +161,7 @@ public class EventRoutingService {
 
     /** 会话是否含任一给定角色引用（统一 npc:{id} 成员） */
     private boolean conversationContainsRef(Long conversationId, List<String> refs) {
-        List<ActorConversationMember> members = memberRepository.findByConversationId(conversationId);
+        List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conversationId);
         for (ActorConversationMember m : members) {
             String ref = memberRef(m);
             if (ref != null && refs.contains(ref)) {
@@ -173,7 +173,7 @@ public class EventRoutingService {
 
     /** 会话是否含任一「当前所在地（归一 location_id）= 目标地点」的成员 */
     private boolean conversationHasMemberAtLocation(Long conversationId, Long locationId) {
-        List<ActorConversationMember> members = memberRepository.findByConversationId(conversationId);
+        List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conversationId);
         for (ActorConversationMember m : members) {
             Long locId = memberLocationId(m);
             if (locId != null && Long.valueOf(locationId).equals(locId)) {

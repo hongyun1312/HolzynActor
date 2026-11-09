@@ -87,6 +87,24 @@ public class DecisionProperties {
     /** 失败重试次数（默认 1：总计最多尝试 2 次；仍失败 fail-closed 返回 null） */
     private int maxRetries = 1;
 
+    /**
+     * 决策调用并发上限（默认 2）。
+     *
+     * <p>决策模型是单进程小模型服务，并发吞吐有限；无界并发会把请求堆进服务端队列，
+     * 每个都拖到超时再重试，形成死亡螺旋（实跑事故：12 刺激同 tick 齐发，
+     * 5 分钟 400+ 超时、6900+ 防重入重试）。此上限是全局限流，不是每场景配额。</p>
+     */
+    private int maxConcurrent = 2;
+
+    /** 并发闸门排队等待上限（毫秒，默认 12000；排不到立即 fail-closed 降级，不灌服务端队列） */
+    private long queueWaitMs = 12_000L;
+
+    /** 熔断阈值：连续传输失败次数（默认 5；达到后开路，期间直接降级不发 HTTP） */
+    private int breakerFailureThreshold = 5;
+
+    /** 熔断开路时长（毫秒，默认 15000：给单进程服务恢复窗口） */
+    private long breakerOpenMs = 15_000L;
+
     /** 单次请求 states 上限（批量协议契约，默认 32） */
     private int maxStatesPerRequest = 32;
 

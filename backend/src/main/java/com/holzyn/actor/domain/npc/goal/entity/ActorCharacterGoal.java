@@ -80,6 +80,19 @@ public class ActorCharacterGoal {
     @Column(name = "finished_at")
     private LocalDateTime finishedAt;
 
+    /**
+     * 最近一次「有进展」的游戏日（天序号 = {@code floorDiv(gameSecond, 86400)}）。
+     * <p>目标状态机的时间维度：没有这一列就无法判定「卡住了」——
+     * 澄江镇二日实跑 51 个目标全程 active、零流转，根因就是目标没有时间轴。
+     * NULL=尚未观测（首次生命周期扫描时填当天，从当天起算）。</p>
+     */
+    @Column(name = "progress_game_day")
+    private Long progressGameDay;
+
+    /** 卡住原因（status=blocked 时写入；恢复 active 时清空） */
+    @Column(name = "blocked_reason", length = 200)
+    private String blockedReason;
+
     /** 软删除标记：0正常/1已删 */
     private Integer deleted = 0;
 

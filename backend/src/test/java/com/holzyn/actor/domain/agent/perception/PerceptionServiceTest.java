@@ -14,6 +14,7 @@ import com.holzyn.actor.domain.npc.state.repository.ActorNpcStateRepository;
 import com.holzyn.actor.domain.npc.state.service.NpcActivityStateService;
 import com.holzyn.actor.domain.knowledge.service.KnowledgeRetrievalService;
 import com.holzyn.actor.domain.world.entity.ActorEvent;
+import com.holzyn.actor.domain.world.fact.service.WorldFactQuery;
 import com.holzyn.actor.domain.world.service.WorldClockService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -476,6 +477,34 @@ class PerceptionServiceTest {
         // 顺序：段2E 与段2D 都在段2H（当前所见）前（感知漏斗既有顺序：核心→状态→世界动态→当前所见）
         assertTrue(text.indexOf("【当前状态】") < text.indexOf("【当前所见】"), "段2E 在段2H 前");
         assertTrue(text.indexOf("【世界动态】") < text.indexOf("【当前所见】"), "段2D 在段2H 前");
+    }
+
+    /**
+     * 【我所知道的事】段：有认知时注入固定 digest；零认知时仍输出 stateVersion 行。
+     */
+    @Test
+    void buildPerceptionTextInjectsFactSegmentAndEmptyVersion() throws Exception {
+        ActorCharacter ch = new ActorCharacter();
+        ch.setId(3L);
+        ch.setName("罗小黑");
+        ch.setProjectId(1L);
+        ch.setLocation("妖灵会馆大厅");
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(ch));
+
+        WorldFactQuery facts = Mockito.mock(WorldFactQuery.class);
+        setField(service, "worldFactQuery", facts);
+        when(facts.digestForPrompt(eq(1L), eq("npc:3"), anyLong(), eq(8)))
+                .thenReturn("【我所知道的事】\n- 磨坊：门关着（我今天亲眼看见）\n[世界状态版本 gs1/v1]");
+
+        String text = service.buildPerceptionText(1L, "npc:3", null);
+        assertTrue(text.contains("【我所知道的事】"), text);
+        assertTrue(text.contains("磨坊：门关着"), text);
+        assertTrue(text.contains("[世界状态版本 gs1/v1]"), text);
+
+        when(facts.digestForPrompt(eq(1L), eq("npc:3"), anyLong(), eq(8))).thenReturn("");
+        when(facts.stateVersion(eq(1L), anyLong())).thenReturn("gs1/v0");
+        String empty = service.buildPerceptionText(1L, "npc:3", null);
+        assertTrue(empty.contains("[世界状态版本 gs1/v0]"), "零认知也要有版本行: " + empty);
     }
 
     /**

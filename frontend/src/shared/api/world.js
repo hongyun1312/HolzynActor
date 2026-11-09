@@ -17,7 +17,7 @@
  */
 
 // 世界功能域 API：世界时钟 / 时间线事件 / 场景 / 世界演化
-import http from './http'
+import http, { AI_TIMEOUT } from './http'
 
 // ==================== 世界时钟 + 世界模拟 ====================
 // 世界时钟状态（当前游戏时刻/速率/最近推进摘要）
@@ -58,11 +58,14 @@ export const fetchProjectTimeline = (projectId, params) => http.get(`/api/worlds
 // 手动新增事件（持久化 actor_event，source=manual）
 export const createProjectEvent = (projectId, data) => http.post(`/api/worlds/${projectId}/events`, data)
 // AI 从世界观/项目概况识别生成事件（source=ai）
-export const aiGenerateProjectEvent = (projectId) => http.post(`/api/worlds/${projectId}/events/ai-generate`, null, { timeout: 60000 })
+export const aiGenerateProjectEvent = (projectId) => http.post(`/api/worlds/${projectId}/events/ai-generate`, null, { timeout: AI_TIMEOUT })
 // B1 世界事件总线：项目世界事件查询（params: kind/source/locationId/characterRef/fromGameHour/toGameHour/limit）
 export const fetchWorldEvents = (projectId, params) => http.get(`/api/worlds/${projectId}/world-events`, { params })
 // B1 世界事件总线：项目世界事件流 SSE URL（EventSource 消费；事件名 world-event）
 export const worldEventsStreamUrl = (projectId) => `/api/worlds/${projectId}/world-events/stream`
+// 因果链：当前事件 + 父链（root-first）+ 直接子事件；upDepth≤12，childLimit≤50
+export const fetchEventCausality = (projectId, eventId, params) =>
+  http.get(`/api/worlds/${projectId}/world-events/${eventId}/causality`, { params })
 
 // ==================== 场景（世界演化场景/地点） ====================
 export const fetchScenes = (projectId) => http.get(`/api/worlds/${projectId}/scenes`)
@@ -70,20 +73,20 @@ export const createScene = (projectId, data) => http.post(`/api/worlds/${project
 export const updateScene = (id, data) => http.put(`/api/scenes/${id}`, data)
 export const deleteScene = (id) => http.delete(`/api/scenes/${id}`)
 // 场景 AI 自动填充：基于世界观+角色详情自动生成场景（耗时长，覆盖默认超时）
-export const aiGenerateScenes = (projectId, data) => http.post(`/api/worlds/${projectId}/scenes/ai-generate`, data, { timeout: 120000 })
+export const aiGenerateScenes = (projectId, data) => http.post(`/api/worlds/${projectId}/scenes/ai-generate`, data, { timeout: AI_TIMEOUT })
 
 // ==================== 世界演化（场景化演化） ====================
 export const fetchEvolutions = (projectId) => http.get(`/api/worlds/${projectId}/evolutions`)
 // 开始演化：{mode? manual/ai, sceneId?, background?, characterIds?}（AI 模式含选角，耗时长）
-export const startEvolution = (projectId, data) => http.post(`/api/worlds/${projectId}/evolutions`, data, { timeout: 120000 })
+export const startEvolution = (projectId, data) => http.post(`/api/worlds/${projectId}/evolutions`, data, { timeout: AI_TIMEOUT })
 export const fetchEvolutionDetail = (id) => http.get(`/api/evolutions/${id}`)
 // 推进一轮（AI 编排角色言行/加入退场/收尾；可能触发归档）
-export const advanceEvolution = (id) => http.post(`/api/evolutions/${id}/turn`, null, { timeout: 120000 })
+export const advanceEvolution = (id) => http.post(`/api/evolutions/${id}/turn`, null, { timeout: AI_TIMEOUT })
 // 手动加入/退场角色
 export const joinEvolution = (id, characterId) => http.post(`/api/evolutions/${id}/join`, { characterId })
 export const leaveEvolution = (id, characterId) => http.post(`/api/evolutions/${id}/leave`, { characterId })
 // 结束演化并归档（事件入时间线 + 参与者角色级记忆隔离）
-export const finishEvolution = (id) => http.post(`/api/evolutions/${id}/finish`, null, { timeout: 120000 })
+export const finishEvolution = (id) => http.post(`/api/evolutions/${id}/finish`, null, { timeout: AI_TIMEOUT })
 // 删除演化会话（级联清理参与者与轮次消息；归档事件保留在时间线）
 export const deleteEvolution = (id) => http.delete(`/api/evolutions/${id}`)
 
@@ -130,4 +133,4 @@ export const deleteWorldLocation = (projectId, id) => http.delete(`/api/worlds/$
 // 编辑模式全量保存（增删改查一体，按数组顺序整体替换）
 export const batchSaveWorldLocations = (projectId, items) => http.put(`/api/worlds/${projectId}/world-locations/batch`, items)
 // AI 重新提取地点（基于已存地理设定文本，与现有合并追加；耗时长，覆盖默认超时）
-export const extractWorldLocations = (projectId) => http.post(`/api/worlds/${projectId}/world-locations/extract`, null, { timeout: 120000 })
+export const extractWorldLocations = (projectId) => http.post(`/api/worlds/${projectId}/world-locations/extract`, null, { timeout: AI_TIMEOUT })

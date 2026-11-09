@@ -102,6 +102,34 @@ public final class WorldContext {
     }
 
     /**
+     * 在「当前挂载世界」上下文里求值（临时挂起全局标记，结束后原样恢复）。
+     *
+     * <p><b>为什么需要</b>：打开世界是目录库生命周期请求（{@link WorldRequestContextFilter}
+     * 判成 GLOBAL），但打开成功后的地基自检（失效坐标视图、回填地点中心）读的是<b>世界库</b>
+     * 表。若继续带着 GLOBAL 标记执行，查询会被路由到目录库，出现
+     * 「Table "actor_world_map" not found」并把 `@Transactional` 方法标记成 rollback-only
+     * （实测：每次开世界都刷一条 UnexpectedRollbackException）。</p>
+     *
+     * <p>挂起只影响当前线程；恢复时按原深度还原（可嵌套在已有 GLOBAL 内）。</p>
+     *
+     * @param supplier 求值动作
+     * @param <T>      返回类型
+     *
+     * @return 求值结果
+     */
+    public static <T> T callAsWorld(Supplier<T> supplier) {
+        int saved = GLOBAL_DEPTH.get();
+        GLOBAL_DEPTH.remove();
+        try {
+            return supplier.get();
+        } finally {
+            if (saved > 0) {
+                GLOBAL_DEPTH.set(saved);
+            }
+        }
+    }
+
+    /**
      * 清空当前线程的上下文。
      *
      * <p>只给测试与线程池提交前的防御性清理用：正常路径必须靠 {@link Scope} 自动退出，

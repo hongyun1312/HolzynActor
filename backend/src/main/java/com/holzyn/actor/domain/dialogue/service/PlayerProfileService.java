@@ -78,6 +78,20 @@ public class PlayerProfileService {
     @Autowired(required = false)
     private LocalAccountRepository accountRepository;
 
+    /** 世界挂载态（世界上下文里玩家档案表是只读镜像，禁止惰性建行） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldstore.MountedWorld mountedWorld;
+
+    /**
+     * 当前是否处于「已挂载世界」的上下文（此时全局镜像表只读）。
+     *
+     * @return true=世界上下文
+     */
+    private boolean worldMounted() {
+        return mountedWorld != null && mountedWorld.isMounted()
+                && !com.holzyn.actor.domain.worldstore.WorldContext.isGlobal();
+    }
+
     // ==================== 玩家档案 ====================
 
     /**
@@ -105,7 +119,20 @@ public class PlayerProfileService {
                     log.debug("[玩家档案] 账户昵称读取失败（玩家名留空，解析兜底「你」）: {}", e.getMessage());
                 }
             }
-            return profileRepository.save(p);
+            // 世界上下文里 actor_talk_player_profile 是只读镜像（GlobalMirrorWriteGuard 会 409 并把
+            // 事务标成 rollback-only）→ 直接不建行，返回未持久化的临时档案：调用方只读名字/关系设定，
+            // 读不到就走默认值。为什么必须这样：对谈自动沉淀（NPC 记忆 + 关系 delta）也走这里，
+            // 硬失败会把整轮沉淀打死（实测「Transaction silently rolled back」）。
+            try {
+                if (worldMounted()) {
+                    log.debug("[玩家档案] 世界上下文不建玩家档案（只读镜像），本次用临时档案: userId={}", uid);
+                    return p;
+                }
+                return profileRepository.save(p);
+            } catch (com.holzyn.actor.common.BizException e) {
+                log.debug("[玩家档案] 世界上下文不可写玩家档案，本次使用临时档案: {}", e.getMessage());
+                return p;
+            }
         });
     }
 

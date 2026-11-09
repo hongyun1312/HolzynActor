@@ -79,4 +79,29 @@ public interface ActorInfoPacketRepository extends JpaRepository<ActorInfoPacket
      * @return 宏观信息包条数
      */
     long countByProjectIdAndInfoIdStartingWith(Long projectId, String prefix);
+
+    /**
+     * 按项目 + 包标识查（幂等：效果发布的包标识是对内容/来源的确定性哈希，
+     * 同一个包重复发布只会得到同一个 id）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param infoId    包标识
+     *
+     * @return 已存在的包（可能为空）
+     */
+    java.util.Optional<ActorInfoPacket> findTopByProjectIdAndInfoId(Long projectId, String infoId);
+
+    /**
+     * 按项目 + 事实键 + 状态查（去重：同一事实、同一来源事件只允许一个活跃包）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param factKey   事实键
+     *
+     * @param status    状态（active）
+     *
+     * @return 匹配的包
+     */
+    List<ActorInfoPacket> findByProjectIdAndFactKeyAndStatus(Long projectId, String factKey, String status);
 }

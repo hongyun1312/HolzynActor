@@ -169,7 +169,7 @@ class AutonomousChatServiceTest {
         when(npcRepository.findByProjectIdAndTypeOrderByIdAsc(1L, "common"))
                 .thenReturn(List.of(npc(10, "摊贩甲")));
         // 初始会话无成员 → 刷新后补入特殊×2 + 普通×1（均同地点）；findByConversationId 稳定返回 3 名
-        when(memberRepository.findByConversationId(anyLong())).thenReturn(List.of(
+        when(memberRepository.findActiveByConversationId(anyLong())).thenReturn(List.of(
                 member(1L, "special", 1L), member(2L, "special", 2L), member(3L, "common", 10L)));
         when(conversationRepository.save(any(ActorConversation.class)))
                 .thenAnswer(inv -> {
@@ -203,7 +203,7 @@ class AutonomousChatServiceTest {
         when(characterRepository.findByProjectIdAndTypeAndDeletedOrderByIdAsc(1L, "special", 0))
                 .thenReturn(List.of(character(1, "罗小黑", 4)));
         when(npcRepository.findByProjectIdAndTypeOrderByIdAsc(1L, "common")).thenReturn(List.of());
-        when(memberRepository.findByConversationId(anyLong())).thenReturn(List.of(
+        when(memberRepository.findActiveByConversationId(anyLong())).thenReturn(List.of(
                 member(1L, "special", 1L)));
         when(conversationRepository.save(any(ActorConversation.class))).thenAnswer(inv -> {
             ActorConversation c = inv.getArgument(0);
@@ -331,7 +331,7 @@ class AutonomousChatServiceTest {
         when(characterRepository.findByProjectIdAndTypeAndDeletedOrderByIdAsc(1L, "special", 0))
                 .thenReturn(List.of(character(1, "罗小黑", 4)));
         when(npcRepository.findByProjectIdAndTypeOrderByIdAsc(1L, "common")).thenReturn(List.of());
-        when(memberRepository.findByConversationId(anyLong())).thenReturn(List.of(
+        when(memberRepository.findActiveByConversationId(anyLong())).thenReturn(List.of(
                 member(1L, "special", 1L)));
 
         service.maybeTriggerProbability(project(), 130L);
@@ -637,7 +637,7 @@ class AutonomousChatServiceTest {
         when(characterRepository.findByProjectIdAndTypeAndDeletedOrderByIdAsc(1L, "special", 0))
                 .thenReturn(List.of(character(1, "罗小黑", 4), character(2, "鹿野", 3)));
         when(npcRepository.findByProjectIdAndTypeOrderByIdAsc(1L, "common")).thenReturn(List.of());
-        when(memberRepository.findByConversationId(anyLong())).thenReturn(List.of(
+        when(memberRepository.findActiveByConversationId(anyLong())).thenReturn(List.of(
                 member(1L, "special", 1L), member(2L, "special", 2L)));
         when(memberRepository.save(any(ActorConversationMember.class))).thenAnswer(inv -> inv.getArgument(0));
         when(messageRepository.save(any(com.holzyn.actor.domain.npc.dialogue.entity.ActorMessage.class)))
@@ -724,7 +724,7 @@ class AutonomousChatServiceTest {
         when(characterRepository.findByProjectIdAndTypeAndDeletedOrderByIdAsc(1L, "special", 0))
                 .thenReturn(List.of(a, b));
         when(npcRepository.findByProjectIdAndTypeOrderByIdAsc(1L, "common")).thenReturn(List.of());
-        when(memberRepository.findByConversationId(anyLong())).thenReturn(List.of());
+        when(memberRepository.findActiveByConversationId(anyLong())).thenReturn(List.of());
         when(memberRepository.save(any(ActorConversationMember.class))).thenAnswer(inv -> inv.getArgument(0));
         when(conversationRepository.save(any(ActorConversation.class))).thenAnswer(inv -> {
             ActorConversation c = inv.getArgument(0);

@@ -748,6 +748,11 @@ public class WorldFrameService implements WorldEventSubscriber {
     /**
      * 信息包实体化：删旧（同 frame_id）建新。：删包时级联清理该包的扩散状态行
      * （actor_info_diffusion 孤儿行不再参与感知空间过滤/回放）。
+     *
+     * <p><b>帧内去重</b>：实跑里 29 个信息包只有 23 种内容——「邻镇有人开始收茧…」重复 5 条、
+     * 「催铁料」重复 3 条。重复包各自扩散、各自计数，让「这事传了几个人」直接虚高，也让同一个
+     * 传闻把角色的【世界动态】段占满。这里按<b>归一正文</b>（去空白与标点）+ info_id 双键去重，
+     * 只留第一条：同一帧里同一句话就是同一件事。</p>
      */
     private void replacePackets(Long projectId, Long frameId, List<WorldFrameParse.InfoPackage> packages) {
         if (frameId == null) {
@@ -772,11 +777,18 @@ public class WorldFrameService implements WorldEventSubscriber {
             return;
         }
         int kept = 0;
+        java.util.Set<String> seen = new java.util.HashSet<>();
         for (WorldFrameParse.InfoPackage p : packages) {
             if (kept >= props.getMaxPacketsPerFrame()) {
                 log.debug("[世界帧] 信息包超出每帧上限，丢弃多余包: project={} frame={} 上限={}",
                         projectId, frameId, props.getMaxPacketsPerFrame());
                 break;
+            }
+            String dedupeKey = packetDedupeKey(p.infoId(), p.content());
+            if (dedupeKey != null && !seen.add(dedupeKey)) {
+                log.debug("[世界帧] 帧内重复信息包，丢弃: project={} frame={} infoId={}",
+                        projectId, frameId, abbreviate(p.infoId(), 40));
+                continue;
             }
             ActorInfoPacket e = new ActorInfoPacket();
             e.setFrameId(frameId);
@@ -795,6 +807,26 @@ public class WorldFrameService implements WorldEventSubscriber {
             packetRepository.save(e);
             kept++;
         }
+    }
+
+    /**
+     * 信息包去重键：归一正文优先，正文为空时退回 infoId；两者都空返回 null（不去重）。
+     *
+     * <p>归一化只去掉空白与中英标点，保留文字——同一句话换个标点仍是同一件事。</p>
+     *
+     * @param infoId  包标识（可空）
+     *
+     * @param content 包正文（可空）
+     *
+     * @return 去重键（null=无法判定，按不去重处理）
+     */
+    static String packetDedupeKey(String infoId, String content) {
+        String normalized = content == null ? "" : content.replaceAll("[\\s，。、；：！？,. ;:!?\"'“”‘’]", "");
+        if (!normalized.isEmpty()) {
+            return "c:" + normalized;
+        }
+        String id = infoId == null ? "" : infoId.trim();
+        return id.isEmpty() ? null : "i:" + id;
     }
 
     /** 宏观事件逐条发布 actor_event（kind=world_frame、source=engine、global、幂等键带 eventId）。 */

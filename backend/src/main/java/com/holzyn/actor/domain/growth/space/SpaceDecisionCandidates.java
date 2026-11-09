@@ -128,6 +128,28 @@ public final class SpaceDecisionCandidates {
                                                       com.holzyn.actor.domain.npc.state.entity.ActorNpcState state,
                                                       List<SpaceCandidate> extra,
                                                       boolean suppressLightGeneric) {
+        return candidatesFrom(doc, state, extra, suppressLightGeneric, null, null, null);
+    }
+
+    /**
+     * 带地点口径的候选装配。
+     *
+     * <p><b>为什么需要</b>：「继续当前正在做的事」是恒在的合法低权重项，但它默认角色
+     * 还在做手头的事——人已经被 AI 派到别人家门口，这句话就变成「在这里继续打铁」，
+     * 与空间事实冲突，判定层只能靠先验硬选。带上地点后，这句话会被改写成
+     * 「接着打铁（此处不便，得先回能做这件事的地方）」，把「这里做不了」这件事写进选项本身。</p>
+     *
+     * @param activity      当前活动文本（可空；空=不改写）
+     * @param placeName     当前地点名（可空）
+     * @param placeCategory 当前地点类别（可空；空=不改写，未知地点不乱猜）
+     */
+    public static List<SpaceCandidate> candidatesFrom(GrowthSpaceParse.GrowthSpaceDoc doc,
+                                                      com.holzyn.actor.domain.npc.state.entity.ActorNpcState state,
+                                                      List<SpaceCandidate> extra,
+                                                      boolean suppressLightGeneric,
+                                                      String activity,
+                                                      String placeName,
+                                                      String placeCategory) {
         List<SpaceCandidate> out = new ArrayList<>();
         // 通用三项恒在（与空间候选去重：空间里已含同类项则不重复加；轻行动抑制时 rest/chat 跳过）
         List<GrowthSpaceParse.ActionItem> actions = doc == null || doc.possibleActions() == null
@@ -138,7 +160,8 @@ public final class SpaceDecisionCandidates {
                 && (a.action().contains("说话") || a.action().contains("聊天")
                 || a.action().contains("唠") || a.action().contains("攀谈")));
         if (!hasContinue) {
-            out.add(new SpaceCandidate(KEY_CONTINUE, "继续当前正在做的事", "继续当前正在做的事",
+            String continueText = continueText(activity, placeName, placeCategory);
+            out.add(new SpaceCandidate(KEY_CONTINUE, continueText, continueText,
                     null, null, null, true));
         }
         boolean tired = state != null && state.getEnergy() != null && state.getEnergy() < 80;
@@ -183,6 +206,14 @@ public final class SpaceDecisionCandidates {
                     continue;
                 }
                 String action = a.action().trim();
+                // 空间自己就带「继续当前…」时，同样要按地点改写——否则这条恒在项
+                // 会绕过上面的 continueText（实测 380/381 次 crowd_decision 都从这里来）。
+                if (action.contains("继续当前")) {
+                    String rewritten = continueText(activity, placeName, placeCategory);
+                    if (!rewritten.equals(continueBase())) {
+                        action = rewritten;
+                    }
+                }
                 // 与既有候选去重（精确文本）
                 boolean dup = false;
                 for (SpaceCandidate c : out) {
@@ -203,8 +234,92 @@ public final class SpaceDecisionCandidates {
         return out;
     }
 
-    /** 权重后缀（倾向 x%；weight null 不加）。 */
-    private static String weightSuffix(String action, Double weight) {
+    /** 「继续当前正在做的事」的标准文本（改写判定的基准，避免两处字面量漂移）。 */
+    static String continueBase() {
+        return "继续当前正在做的事";
+    }
+
+    /**
+     * 「继续当前正在做的事」的地点改写。
+     *
+     * <p>活动与地点不匹配时，把「继续」改写成「得先回能做这件事的地方」——
+     * 这不是措辞游戏：它把「此处不便」变成候选本身的语义，判定层选它就意味着先离开，
+     * 而不是在别人家门口继续打铁。</p>
+     *
+     * @return 改写后的候选文本；信息不足时返回原文（未知地点不乱猜）
+     */
+    static String continueText(String activity, String placeName, String placeCategory) {
+        String base = continueBase();
+        if (activity == null || activity.isBlank() || placeCategory == null || placeCategory.isBlank()) {
+            return base;
+        }
+        String act = activity.trim();
+        if (act.length() > 12) {
+            act = act.substring(0, 12);
+        }
+        if (activityFitsHere(act, placeCategory)) {
+            return base;
+        }
+        String where = placeName == null || placeName.isBlank() ? "这里" : placeName;
+        return "接着" + act + "（" + where + "不便，得先回能做这件事的地方）";
+    }
+
+    /**
+     * 活动是否与地点类别相容（关键词表；未命中一律视为相容，宁可不改写也不乱判）。
+     *
+     * <p>类别口径与 {@code NpcPlaceView} 一致（要素 category：民居/商铺/工坊/农田/生产/水工/
+     * 公共/道路/自然/学校/医馆…），只做包含匹配，不引入新枚举。</p>
+     */
+    static boolean activityFitsHere(String activity, String category) {
+        if (activity == null || activity.isBlank() || category == null || category.isBlank()) {
+            return true;
+        }
+        String c = category;
+        boolean home = c.contains("民居");
+        boolean shop = c.contains("商铺") || c.contains("店");
+        boolean workshop = c.contains("工坊") || c.contains("作坊");
+        boolean field = c.contains("农田") || c.contains("生产") || c.contains("水工") || c.contains("自然");
+        boolean school = c.contains("学校") || c.contains("学塾");
+        boolean clinic = c.contains("医") || c.contains("药");
+        boolean publicPlace = c.contains("公共") || c.contains("道路") || c.contains("街");
+
+        // 手艺活：必须在工坊/自家铺面做
+        if (containsAny(activity, "打铁", "打铜", "打铁器", "做活", "干活", "木工", "编筐",
+                "纺", "织", "裁", "磨刀", "修犁", "补锅")) {
+            return workshop || shop;
+        }
+        // 家务：在住处做（别人家也算「有灶有院」，但不改写——判定层另有越界约束）
+        if (containsAny(activity, "做饭", "烧水", "煮", "蒸", "洗衣", "收拾屋子", "缝补", "睡觉", "歇脚")) {
+            return home || workshop || shop;
+        }
+        // 农活：在地里/水边/野外做
+        if (containsAny(activity, "种", "锄", "割", "浇", "灌", "喂", "收庄稼", "挑水", "打水", "放牛", "下地")) {
+            return field;
+        }
+        // 买卖：在铺面做
+        if (containsAny(activity, "卖", "买", "看店", "掌柜", "招呼客", "称货", "进货")) {
+            return shop;
+        }
+        // 教书 / 看病
+        if (containsAny(activity, "教书", "上课", "讲课", "念书")) {
+            return school || publicPlace;
+        }
+        if (containsAny(activity, "看病", "抓药", "诊", "换药")) {
+            return clinic || shop;
+        }
+        return true;
+    }
+
+    private static boolean containsAny(String text, String... keys) {
+        for (String k : keys) {
+            if (text.contains(k)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 权重后缀（倾向 x%；weight null 不加）。 */    private static String weightSuffix(String action, Double weight) {
         if (weight == null) {
             return action;
         }

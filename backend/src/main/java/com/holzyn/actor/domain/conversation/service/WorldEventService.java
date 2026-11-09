@@ -267,7 +267,7 @@ public class WorldEventService {
             gh = worldClockService.currentGameHour(projectId);
         }
         List<com.holzyn.actor.domain.npc.dialogue.entity.ActorConversationMember> members =
-                memberRepository.findByConversationId(conversationId);
+                memberRepository.findActiveByConversationId(conversationId);
         for (com.holzyn.actor.domain.npc.dialogue.entity.ActorConversationMember m : members) {
             try {
                 if (m == null || m.getCharacterId() == null
@@ -343,7 +343,7 @@ public class WorldEventService {
         try {
             if (memberRepository != null) {
                 List<com.holzyn.actor.domain.npc.dialogue.entity.ActorConversationMember> members =
-                        memberRepository.findByConversationId(conv.getId());
+                        memberRepository.findActiveByConversationId(conv.getId());
                 for (com.holzyn.actor.domain.npc.dialogue.entity.ActorConversationMember m : members) {
                     try {
                         if (m == null || m.getCharacterId() == null) {

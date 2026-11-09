@@ -39,7 +39,7 @@ class WorldDataSourceFactoryTest {
     }
 
     @Test
-    @DisplayName("首次打开：自动建目录 + 在空文件上跑 V200，得到 116 张表")
+    @DisplayName("首次打开：自动建目录 + 在空文件上跑 V200，得到 130 张表")
     void createsWorldDatabaseWithFullSchema(@TempDir Path tmp) {
         WorldPaths paths = WorldStoreTestSupport.paths(tmp);
         WorldDataSourceFactory factory = factory(tmp);
@@ -48,8 +48,11 @@ class WorldDataSourceFactoryTest {
 
         assertTrue(Files.isRegularFile(paths.worldDbFile(UID)),
                 "世界库文件应落在 worlds/<uid>/world.mv.db：" + paths.worldDbFile(UID));
-        assertEquals(116, userTables(ds),
-                "世界库应含 116 张表（113 基线 + V207 的布局覆盖/角色坐标/移动轨迹 3 张）");
+        assertEquals(130, userTables(ds),
+                "世界库应含 130 张表（113 基线 + V207 的布局覆盖/角色坐标/移动轨迹 3 张 + V210 的时间性探针表"
+                        + " + V211 事实层/日志/认知/权威状态 4 张 + V212 物品定义/持有栈/账本/配方 4 张"
+                        + " + V213 市场报价/交易流水 2 张 + V214 制作作业 1 张 + V215 装备 1 张"
+                        + " + V218 事件冷存储 1 张）");
         assertEquals(1, WorldStoreTestSupport.count(ds,
                 "information_schema.tables where upper(table_schema)='PUBLIC' and lower(table_name)='actor_world_clock'"),
                 "世界库必须有自己的世界时钟表");

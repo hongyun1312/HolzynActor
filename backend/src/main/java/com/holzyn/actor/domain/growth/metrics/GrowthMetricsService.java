@@ -152,6 +152,7 @@ public class GrowthMetricsService {
     /** 触发码类型（避免与 space 包枚举耦合的轻量枚举镜像）。 */
     public enum GrowthSpaceTriggerCode {
         STAGE_TRANSITION, PHYSIO_BREACH, EMOTION_SHIFT, MAJOR_EVENT, PARTICIPANT_CHANGE,
+        LOCATION_CHANGED,
         GOAL_INVALID, RELATION_JUMP, ENV_SHOCK, LOD_PROMOTE, PERIODIC, MANUAL;
 
         public static GrowthSpaceTriggerCode of(String code) {

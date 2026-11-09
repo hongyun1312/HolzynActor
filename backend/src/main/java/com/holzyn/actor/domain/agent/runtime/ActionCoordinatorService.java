@@ -286,9 +286,9 @@ public class ActionCoordinatorService {
     /** 既有判定：同地点被其他 NPC 进行中计划占用（actor_plan status=planned/executing 目标同地点）。 */
     private PlanOccupant planOccupant(Long projectId, String npcRef, String target) {
         String key = resourceKey(target);
-        // 长跑抓修：排除已故角色（死人无计划、不占用资源）
+        // 长跑抓修：排除已故角色（死人无计划、不占用资源）；排除玩家（玩家无 NPC 计划）
         List<ActorCharacter> chars = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
-                .stream().filter(ch -> ch != null && !ch.isDeceased()).toList();
+                .stream().filter(ch -> ch != null && !ch.isDeceased() && !ch.isPlayer()).toList();
         for (ActorCharacter ch : chars) {
             // ：npc:{id} 单前缀拼装统一走 NpcRefs.of（与调用方 npcRef 同口径比较，不再手写前缀字面量）
             String ref = NpcRefs.of(ch.getId());
@@ -309,9 +309,9 @@ public class ActionCoordinatorService {
 
     /** 既有判定：决策 target 命中项目内特殊 NPC 名且其 current_activity 非空（正忙）。 */
     private CharacterBusy targetCharacterBusy(Long projectId, String npcRef, String target) {
-        // 长跑抓修：排除已故角色（死人不算「正忙」）
+        // 长跑抓修：排除已故角色（死人不算「正忙」）；排除玩家（玩家忙闲不由 NPC 计划表达）
         List<ActorCharacter> chars = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
-                .stream().filter(ch -> ch != null && !ch.isDeceased()).toList();
+                .stream().filter(ch -> ch != null && !ch.isDeceased() && !ch.isPlayer()).toList();
         for (ActorCharacter ch : chars) {
             if (ch.getName() == null || ch.getName().isBlank()) {
                 continue;

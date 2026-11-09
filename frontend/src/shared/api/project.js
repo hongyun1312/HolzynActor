@@ -17,7 +17,7 @@
  */
 
 // 项目功能域 API：项目 CRUD / 世界观设定 / 角色卡生成 / .holzyn 导入导出
-import http from './http'
+import http, { AI_TIMEOUT } from './http'
 // ：SSE 流统一客户端（fetch + ReadableStream 解析/错误分类统一）
 import { streamFetch, SSE_EVENTS } from '@/shared/sse/sseClient'
 
@@ -30,7 +30,7 @@ export const updateProject = (id, data) => http.put(`/api/worlds/${id}`, data)
 export const deleteProject = (id) => http.delete(`/api/worlds/${id}`)
 export const fetchWorldSetting = (projectId) => http.get(`/api/worlds/${projectId}/world-setting`)
 export const saveWorldSetting = (projectId, data) => http.post(`/api/worlds/${projectId}/world-setting`, data)
-export const generateCards = (projectId) => http.post(`/api/worlds/${projectId}/generate-cards`, null, { timeout: 120000 })
+export const generateCards = (projectId) => http.post(`/api/worlds/${projectId}/generate-cards`, null, { timeout: AI_TIMEOUT })
 
 // ==================== 文件导入建项目（上传解析/预览确认/AI补角色） ====================
 // 上传文件解析（multipart，多文件 txt/md；不手动设 Content-Type 让 axios 自动带 boundary）

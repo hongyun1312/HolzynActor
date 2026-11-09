@@ -37,12 +37,40 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class AiCallOutsideTransactionTest {
 
     /**
+     * 对话批量抽取：dialog_digest 是秒级 AI 调用（最近 40 条对话 + 记忆/claims 双输出），
+     * 必须事务外执行；落库由 WorldFactService / AgentMemoryService 等各自短事务承担。
+     */
+    @Test
+    @DisplayName("对话批量抽取 dialog_digest 不得带 @Transactional（AI 在事务外）")
+    void dialogDigestIsNotTransactional() throws Exception {
+        Class<?> digest = Class.forName("com.holzyn.actor.domain.world.dialog.service.DialogDigestService");
+        assertNoTransaction(digest, "digest",
+                Class.forName("com.holzyn.actor.domain.world.dialog.model.DialogDigestRequest"));
+    }
+
+    /**
+     * 行为裁决：规则 UNSURE 时会在事务外调一次 action_adjudicate AI，
+     * 再进入 AgentActionService.executeWithVerdict 的短事务。裁决入口本身不得带 @Transactional。
+     */
+    @Test
+    @DisplayName("行为裁决入口与 AI 裁决不得带 @Transactional（AI 在事务外，执行才进事务）")
+    void actionAdjudicationIsNotTransactional() throws Exception {
+        Class<?> svc = Class.forName("com.holzyn.actor.domain.world.adjudicate.service.ActionAdjudicationService");
+        assertNoTransaction(svc, "executeGated",
+                Class.forName("com.holzyn.actor.domain.npc.goal.entity.ActorActionPlan"));
+        assertNoTransaction(svc, "adjudicateBeforeExecute",
+                Class.forName("com.holzyn.actor.domain.npc.goal.entity.ActorActionPlan"));
+        Class<?> ai = Class.forName("com.holzyn.actor.domain.world.adjudicate.service.AdjudicationAiService");
+        assertNoTransaction(ai, "adjudicate",
+                Class.forName("com.holzyn.actor.domain.world.adjudicate.model.AdjudicationContext"));
+    }
+
+    /**
      * 世界推进编排：自走路径 / 外部时钟路径都含大量 AI（决策/规划/世界事件），必须无事务。
      */
     @Test
     @DisplayName("世界引擎推进编排不得带 @Transactional（AI 调用在事务内会长期持锁）")
-    void worldEngineAdvanceIsNotTransactional() throws Exception {
-        Class<?> engine = Class.forName("com.holzyn.actor.domain.agent.runtime.WorldEngine");
+    void worldEngineAdvanceIsNotTransactional() throws Exception {        Class<?> engine = Class.forName("com.holzyn.actor.domain.agent.runtime.WorldEngine");
         assertNoTransaction(engine, "advanceProject", Long.class, LocalDateTime.class);
         assertNoTransaction(engine, "advanceProject", Long.class, LocalDateTime.class, boolean.class);
         assertNoTransaction(engine, "advanceProjectExternal", Long.class, long.class);
@@ -605,6 +633,22 @@ class AiCallOutsideTransactionTest {
                 Class.forName("com.holzyn.actor.domain.mapgen.model.MapProfile"),
                 Class.forName("com.holzyn.actor.domain.mapgen.model.MapAssetCatalog"),
                 Class.forName("java.util.Map"), long.class, Class.forName("[F"), double.class);
+    }
+
+    /**
+     * 时间性审计：探针逐条调用 AI（temporal_probe），整批与单条都不得带事务；
+     * 唯一写库是 actor_temporal_probe 的短事务 save。
+     */
+    @Test
+    @DisplayName("时间性审计服务不得带 @Transactional（探针内含 AI 调用）")
+    void temporalAuditServiceIsNotTransactional() throws Exception {
+        Class<?> svc = Class.forName("com.holzyn.actor.domain.evaluation.temporal.service.TemporalAuditService");
+        assertNoTransaction(svc, "runProbes", Long.class,
+                Class.forName("com.holzyn.actor.domain.evaluation.temporal.service.TemporalAuditSupport$ProbeRequest"));
+        assertNoTransaction(svc, "causal", Long.class, int.class);
+        assertNoTransaction(svc, "distribution", Long.class, int.class);
+        assertNoTransaction(svc, "decay", Long.class);
+        assertNoTransaction(svc, "report", Long.class);
     }
 
     /** 断言指定公开方法存在且未标注 @Transactional（方法不存在则测试失败，防止签名漂移后静默放过）。 */

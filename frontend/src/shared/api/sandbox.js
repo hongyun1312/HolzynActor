@@ -17,7 +17,7 @@
  */
 
 // 世界沙盘 API（S1：读接口 + 上次项目记录；S2：SSE 实时流 + 干预）
-import http from './http'
+import http, { AI_TIMEOUT } from './http'
 
 /**
  * 沙盘总览：场景（含主场景）+ 全部 NPC 沙盘状态（读取前后端惰性初始化状态行）。
@@ -53,7 +53,7 @@ export const sandboxStreamUrl = (projectId) => `/api/worlds/${projectId}/sandbox
  * @param {{npcRef: string, content: string}} data 插话请求
  */
 export const sandboxInterveneTalk = (projectId, data) =>
-  http.post(`/api/worlds/${projectId}/sandbox/intervene/talk`, data, { timeout: 20000 })
+  http.post(`/api/worlds/${projectId}/sandbox/intervene/talk`, data, { timeout: AI_TIMEOUT })
 
 /**
  * 干预-触发行动：手动触发特殊角色一轮思考决策 + 行动（AI 不可用时程序化兜底；人群不支持）。
@@ -63,7 +63,7 @@ export const sandboxInterveneTalk = (projectId, data) =>
  * @param {{npcRef: string, reason?: string}} data 触发请求（npcRef 统一身份引用，形如 npc:{id}）
  */
 export const sandboxInterveneAction = (projectId, data) =>
-  http.post(`/api/worlds/${projectId}/sandbox/intervene/action`, data, { timeout: 30000 })
+  http.post(`/api/worlds/${projectId}/sandbox/intervene/action`, data, { timeout: AI_TIMEOUT })
 
 /**
  * 干预-手动事件：向世界注入一条事件（持久化 + 事件总线广播，沙盘经 scene:event 实时可视化）。

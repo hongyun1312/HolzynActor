@@ -135,6 +135,28 @@ public interface ActorEventRepository extends JpaRepository<ActorEvent, Long> {
     List<ActorEvent> findByProjectIdAndLocationIdOrderByIdDesc(Long projectId, Long locationId);
 
     /**
+     * 查询某项目内某事件的直接子事件（因果抽屉，按 id 正序）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param causeEventId 父事件 ID
+     *
+     * @return 直接子事件列表（旧→新）
+     */
+    List<ActorEvent> findByProjectIdAndCauseEventIdOrderByIdAsc(Long projectId, Long causeEventId);
+
+    /**
+     * 按项目 + 事件 ID 查单条（因果抽屉，防跨项目越权）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param id 事件 ID
+     *
+     * @return 事件（无则空）
+     */
+    Optional<ActorEvent> findByIdAndProjectId(Long id, Long projectId);
+
+    /**
      * 查询某项目最近 N 条事件（图谱查询层·全局概览「最近事件」用，时间倒序）。
      *
      * @param projectId 项目 ID

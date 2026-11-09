@@ -19,7 +19,7 @@
 // 对谈模式 API（M1 后端 /api/worlds/{id}/dialogue/*，M2 前端单聊闭环接入）
 // 语义：与「浮生」主模式同级的静止世界聊天（世界冻结于 frozen_game_second，零世界推进）。
 // SSE 端点（chat/regenerate）为 POST 流式，走 streamFetch（EventSource 仅支持 GET）。
-import http from './http'
+import http, { AI_TIMEOUT } from './http'
 
 // ==================== 会话 CRUD ====================
 // 新建对谈会话（创建即冻结：运行中自动暂停 + 冻结时刻快照）→ DialogueSessionVO
@@ -53,7 +53,7 @@ export const swipeDialogueMessage = (projectId, sessionId, messageId) =>
 // ==================== 开场白 / 流式对话 ====================
 // AI 动态开场白（新会话首句；成功落库为 assistant 消息）→ { content }
 export const generateDialogueGreeting = (projectId, sessionId) =>
-  http.post(`/api/worlds/${projectId}/dialogue/sessions/${sessionId}/greeting`, null, { timeout: 60000 })
+  http.post(`/api/worlds/${projectId}/dialogue/sessions/${sessionId}/greeting`, null, { timeout: AI_TIMEOUT })
 
 /**
  * 一轮对谈 SSE URL（POST + JSON body，EventSource 不可用 → streamFetch 消费）。
@@ -117,7 +117,7 @@ export const dialogueGroupChatUrl = (projectId, sessionId) => `/api/worlds/${pro
 // ==================== 沉淀（M6：确认卡片 preview + 应用 apply） ====================
 // 沉淀确认卡片：AI 抽取每位对谈角色的关系 delta + NPC 记忆要点（只读不落库，供确认展示）→ DialogueConsolidationVO
 export const fetchDialogueConsolidationPreview = (projectId, sessionId) =>
-  http.post(`/api/worlds/${projectId}/dialogue/sessions/${sessionId}/consolidate/preview`, null, { timeout: 60000 })
+  http.post(`/api/worlds/${projectId}/dialogue/sessions/${sessionId}/consolidate/preview`, null, { timeout: AI_TIMEOUT })
 // 应用沉淀（用户确认后；候选由卡片原样回传）→ DialogueConsolidationResultVO
 export const applyDialogueConsolidation = (projectId, sessionId, characters) =>
   http.post(`/api/worlds/${projectId}/dialogue/sessions/${sessionId}/consolidate/apply`, { characters })

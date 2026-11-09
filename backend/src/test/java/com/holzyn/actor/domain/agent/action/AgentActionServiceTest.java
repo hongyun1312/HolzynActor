@@ -13,6 +13,7 @@ import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
 import com.holzyn.actor.domain.project.entity.ActorProject;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -142,6 +143,25 @@ class AgentActionServiceTest {
         assertEquals("cancelled", p.getStatus(), "非法决策 JSON 行动标记取消");
     }
 
+    /**
+     * 已软删除角色的存量计划：执行入口直接取消，不得发事件/写记忆/改状态。
+     * <p>回归背景（七日跑）：角色删除只置 deleted=1，删除前排下的计划仍会被
+     * 定时执行器扫到并真实执行，出现「已删除的人还在行动」的幽灵行为。</p>
+     */
+    @Test
+    void deletedCharacterPlanIsCancelledWithoutSideEffects() {
+        ActorCharacter ch = character(4);
+        ch.setDeleted(1);
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(ch));
+        ActorActionPlan p = plan(decisionJson(5));
+
+        service.execute(p);
+
+        assertEquals("cancelled", p.getStatus(), "已删除角色的计划必须取消");
+        verify(worldEventBus, never()).publish(any(), any(), any());
+        verify(agentMemoryService, never()).recordObservation(any(), any(), any(), any(), any());
+    }
+
     // ==================== 治理批次 0 · 卡1 回归：特殊 NPC move 行动 locationId 归一 ====================
 
     /**
@@ -232,5 +252,119 @@ class AgentActionServiceTest {
                 + "\"reason\":\"夜深\",\"urgency\":2}"));
 
         verify(activity).setActivity(eq(100L), eq("npc:3"), eq("rest"), eq("回屋就寝歇息"));
+    }
+
+    // ============行为裁决：四列回填 + FAIL 早退 ============
+
+    @Test
+    @DisplayName("executeWithVerdict FAIL：计划取消、写 verdict/reason/effects、发失败事件，不执行原行动")
+    void executeWithVerdictFailCancelsAndPublishesFailure() {
+        stubBase(character(4));
+        ActorActionPlan p = plan(decisionJson(5));
+        com.holzyn.actor.domain.world.adjudicate.model.ActionVerdict verdict =
+                com.holzyn.actor.domain.world.adjudicate.model.ActionVerdict.fail(
+                        "R-TRAVEL-01", "ROUTE_BLOCKED", "路被封住了。");
+
+        service.executeWithVerdict(p, verdict);
+
+        assertEquals("cancelled", p.getStatus());
+        assertEquals("fail", p.getVerdict());
+        assertEquals("ROUTE_BLOCKED", p.getReasonCode());
+        assertEquals("[]", p.getEffectsJson());
+        verify(agentMemoryService, never()).recordObservation(any(), any(), any(), any(Integer.class), any());
+        org.mockito.ArgumentCaptor<com.holzyn.actor.domain.agent.event.EventSpec> captor =
+                org.mockito.ArgumentCaptor.forClass(com.holzyn.actor.domain.agent.event.EventSpec.class);
+        verify(worldEventBus).publish(eq(1L), eq(100L), captor.capture());
+        assertEquals("action", captor.getValue().getKind());
+        assertEquals("adjudication", captor.getValue().getSource());
+        assertEquals("plan:42:verdict", captor.getValue().getSourceKey());
+    }
+
+    @Test
+    @DisplayName("executeWithVerdict PARTIAL：原行动照常执行（plan done + 事件），verdict 落 partial")
+    void executeWithVerdictPartialRunsNormally() {
+        stubBase(character(4));
+        ActorActionPlan p = plan(decisionJson(3));
+        com.holzyn.actor.domain.world.adjudicate.model.ActionVerdict verdict =
+                com.holzyn.actor.domain.world.adjudicate.model.ActionVerdict.of(
+                        com.holzyn.actor.domain.world.adjudicate.model.Verdict.PARTIAL,
+                        "LOW_IMPORTANCE_PASS", "他试了试。", 0, List.of(), "rule");
+
+        service.executeWithVerdict(p, verdict);
+
+        assertEquals("done", p.getStatus());
+        assertEquals("partial", p.getVerdict());
+        assertEquals("LOW_IMPORTANCE_PASS", p.getReasonCode());
+        verify(worldEventBus).publish(eq(1L), eq(100L), any());
+    }
+
+    // ============闭环实测回归：speak_to 的 target 是「人」，不能写成 location ============
+
+    /**
+     * 回归：speak 决策的 target 命中项目内角色名时，位置应落到该角色当前所在地，
+     * 而不是把人物名写进 {@code actor_profile.location}（实测 npc:65 行动后 location=沈伯远，
+     * 后续当前位置/同地点可见性/事实过滤全部失真）。
+     */
+    @Test
+    @DisplayName("speak 行动目标是角色：位置取对方所在地，绝不写成人物名")
+    void execute_speakTargetCharacter_resolvesToTheirLocation() {
+        ActorCharacter ch = character(4);
+        ch.setLocation("菜畦");
+        stubBase(ch);
+        ActorCharacter target = new ActorCharacter();
+        target.setId(9L);
+        target.setProjectId(100L);
+        target.setName("沈伯远");
+        target.setLocation("长明灯塔");
+        when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(100L, 0))
+                .thenReturn(List.of(ch, target));
+
+        service.execute(plan("{\"type\":\"speak\",\"action\":\"向沈伯远拱手问安\",\"target\":\"沈伯远\","
+                + "\"reason\":\"同族长辈\",\"urgency\":2}"));
+
+        assertEquals("长明灯塔", ch.getLocation(), "位置取目标角色所在地，不是人物名");
+    }
+
+    /**
+     * 回归：目标是角色但对方地点未知 → 保持行动者原位置，不做任何猜测。
+     */
+    @Test
+    @DisplayName("speak 行动目标角色无地点：位置保持原值")
+    void execute_speakTargetCharacterWithoutLocation_keepsCurrentLocation() {
+        ActorCharacter ch = character(4);
+        ch.setLocation("菜畦");
+        stubBase(ch);
+        ActorCharacter target = new ActorCharacter();
+        target.setId(9L);
+        target.setProjectId(100L);
+        target.setName("沈伯远");
+        when(characterRepository.findByProjectIdAndDeletedOrderByIdAsc(100L, 0))
+                .thenReturn(List.of(ch, target));
+
+        service.execute(plan("{\"type\":\"speak\",\"action\":\"向沈伯远拱手问安\",\"target\":\"沈伯远\","
+                + "\"reason\":\"同族长辈\",\"urgency\":2}"));
+
+        assertEquals("菜畦", ch.getLocation(), "对方无地点时不得把人物名写成位置");
+    }
+
+    /**
+     * 回归：主动性计划的行动事件 gameHour 取 {@code _initiative.createdGameSecond/3600}，
+     * 而不是执行瞬间的持久化时钟（引擎 tick 结束才拨钟，实测「扫描 16:00、事件 14:00」）。
+     */
+    @Test
+    @DisplayName("initiative 行动事件使用计划扫描时刻作为 gameHour")
+    void execute_initiativeActionEvent_usesPlanScanGameHour() {
+        stubBase(character(4));
+        org.mockito.ArgumentCaptor<com.holzyn.actor.domain.agent.event.EventSpec> captor =
+                org.mockito.ArgumentCaptor.forClass(com.holzyn.actor.domain.agent.event.EventSpec.class);
+
+        service.execute(plan("{\"type\":\"move\",\"action\":\"前往长明灯塔找旅行者\",\"target\":\"长明灯塔\","
+                + "\"reason\":\"契约快到期了\",\"urgency\":4,"
+                + "\"_initiative\":{\"kind\":\"contract\",\"factKey\":\"contract:1\","
+                + "\"causeEventId\":10,\"createdGameSecond\":7200}}"));
+
+        verify(worldEventBus).publish(eq(1L), eq(100L), captor.capture());
+        assertEquals(2L, captor.getValue().getGameHour(), "7200/3600=2 时");
+        assertEquals(10L, captor.getValue().getCauseEventId());
     }
 }

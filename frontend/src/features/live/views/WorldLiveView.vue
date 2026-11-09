@@ -25,6 +25,7 @@
     · 沙盘实时流 GET /api/worlds/:id/sandbox/stream     → 13 类事件（SSE，与沙盘同一契约）
     · 世界时钟  GET /api/worlds/:id/world-clock         → 时间锚点（前端每秒自行推算）
     · 宏观状态  GET /api/worlds/:id/macro/state         → 人口/粮价/民怨/季节收成
+    · 因果链    GET /api/worlds/:id/world-events/:eventId/causality → 父链/直接后果（M6）
 
   设计取舍：
     · 本页**只读观测 + 两个时间控制**（开始推进 / 推进一轮），不做干预注入——干预属于沙盘页的职责，
@@ -63,6 +64,18 @@
       <span class="wl-bar-item wl-muted">本页只读观测；干预与地图定位在「世界地图」页</span>
     </div>
 
+    <!-- ===== 实时因果浮层：仅 importance≥3 且带 cause 的事件 ===== -->
+    <transition name="wl-cause">
+      <div v-if="causeOverlay" class="wl-cause" role="button" tabindex="0"
+        @click="openCauseDrawer" @keyup.enter="openCauseDrawer">
+        <button type="button" class="wl-cause-close" title="收起" @click.stop="causeOverlay = null">×</button>
+        <div class="wl-cause-kicker">因为…所以…</div>
+        <div class="wl-cause-title">{{ causeOverlay.title || '世界上发生了一件事' }}</div>
+        <div class="wl-cause-cause">因为「{{ causeOverlay.causeTitle }}」</div>
+        <div class="wl-cause-action">查看因果链 →</div>
+      </div>
+    </transition>
+
     <!-- ===== 主体两栏：左=实时事件流，右=角色当前行动 + 宏观快照 ===== -->
     <div class="wl-grid">
       <!-- 左：此刻动态流 -->
@@ -83,7 +96,10 @@
           @primary="go('/sandbox')"
         />
         <ol v-else class="wl-feed">
-          <li v-for="(it, i) in feedRows" :key="i" class="wl-feed-item">
+          <li v-for="(it, i) in feedRows" :key="i" class="wl-feed-item"
+            :class="{ 'is-clickable': it.eventId != null }"
+            :title="it.eventId != null ? '点击查看这件事的因果链' : ''"
+            @click="openFeedItem(it)">
             <span v-if="it.showDay" class="wl-feed-day">{{ it.dayLabel }}</span>
             <span class="wl-feed-time">{{ it.time }}</span>
             <el-tag size="small" effect="plain" class="wl-feed-badge">{{ it.badge }}</el-tag>
@@ -149,6 +165,8 @@
         </section>
       </div>
     </div>
+
+    <CausalityDrawer v-model="causalityVisible" :project-id="projectId" :event-id="causalityEventId" />
   </PageShell>
 </template>
 
@@ -171,7 +189,8 @@ import {
   fetchSandboxOverview, sandboxStreamUrl, sandboxInterveneClock,
   fetchWorldClock, fetchMacroState
 } from '@/shared/api/home'
-import { fetchWorldEvents } from '@/shared/api/world'
+import { fetchWorldEvents, fetchEventCausality } from '@/shared/api/world'
+import CausalityDrawer from '@/features/causality/CausalityDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -197,6 +216,13 @@ const liveGameSecond = ref(null)
 const macro = ref(null)
 /** 此刻动态流（最新在前，上限 200 条） */
 const feed = ref([])
+/** 因果抽屉 */
+const causalityVisible = ref(false)
+const causalityEventId = ref(null)
+/** 实时因果浮层（仅 importance≥3 且带 cause；6 秒自动收起） */
+const causeOverlay = ref(null)
+let causeTimer = null
+let causeSeq = 0
 /** 角色状态表（npc:state 事件持续覆盖同一 npcRef） */
 const statesMap = reactive({})
 
@@ -310,7 +336,7 @@ const KIND_BADGE = {
   decision: '决策', action: '行动', event: '事件', clock: '时钟'
 }
 
-function mkItem(time, badge, text) {
+function mkItem(time, badge, text, meta = {}) {
   // 世界时间文本形如「青禾村历 0420年05月15日 06时00分」：拆成「日历 + 日期」与「时刻」两段。
   // 同一世界日内的 30 条事件若每条都重复完整的 20 字日期，读者要花力气才能挑出时刻；
   // 因此日期只在「当天第一条」显示（分组标题），其余行只留时刻。
@@ -319,7 +345,10 @@ function mkItem(time, badge, text) {
     time: m ? m[3] : String(time || ''),
     dayLabel: m ? `${m[1] ? m[1] + ' ' : ''}${m[2]}`.trim() : '',
     badge,
-    text: humanize(String(text).slice(0, 300))
+    text: humanize(String(text).slice(0, 300)),
+    eventId: meta.eventId ?? null,
+    causeEventId: meta.causeEventId ?? null,
+    importance: meta.importance ?? null
   }
 }
 
@@ -350,10 +379,54 @@ function timeOf(v) {
 }
 
 /** 追加一条动态（最新在前；超出上限丢弃最旧的） */
-function pushFeed(badge, text) {
+function pushFeed(badge, text, meta = {}) {
   if (!text) return
-  feed.value.unshift(mkItem(timeOf(new Date()), badge, text))
+  feed.value.unshift(mkItem(timeOf(new Date()), badge, text, meta))
   if (feed.value.length > FEED_LIMIT) feed.value.length = FEED_LIMIT
+  if (Number(meta.importance || 0) >= 3 && meta.causeEventId != null && meta.eventId != null) {
+    showCauseOverlay(meta, text)
+  }
+}
+
+/**
+ * 实时因果浮层：先立即展示（不阻塞事件流），再异步补上父事件标题。
+ * 6 秒自动收起；用户点击则打开因果抽屉。
+ */
+async function showCauseOverlay(meta, text) {
+  const token = ++causeSeq
+  const eventId = Number(meta.eventId)
+  causeOverlay.value = {
+    eventId,
+    title: meta.title || text,
+    causeTitle: '先前发生的事',
+    causeEventId: meta.causeEventId
+  }
+  if (causeTimer) { clearTimeout(causeTimer); causeTimer = null }
+  causeTimer = setTimeout(() => {
+    if (token === causeSeq) causeOverlay.value = null
+  }, 6000)
+  try {
+    const res = await fetchEventCausality(projectId, eventId, { upDepth: 1, childLimit: 1 })
+    if (token !== causeSeq) return
+    const ancestors = res?.ancestors || []
+    const parent = ancestors[ancestors.length - 1]
+    if (parent?.title) {
+      causeOverlay.value = { ...causeOverlay.value, causeTitle: parent.title }
+    }
+  } catch (_) { /* 父事件取不到时保留「先前发生的事」，不阻断浮层 */ }
+}
+
+function openCauseDrawer() {
+  if (!causeOverlay.value?.eventId) return
+  causalityEventId.value = causeOverlay.value.eventId
+  causalityVisible.value = true
+  causeOverlay.value = null
+}
+
+function openFeedItem(it) {
+  if (it?.eventId == null) return
+  causalityEventId.value = Number(it.eventId)
+  causalityVisible.value = true
 }
 
 /**
@@ -371,7 +444,8 @@ async function loadRecentEvents() {
     feed.value = sorted.map(ev => mkItem(
       ev.gameTimeText || timeOf(ev.createdAt),
       KIND_BADGE[ev.kind] || '世界',
-      `${ev.title || ''}${ev.content ? ' — ' + ev.content : ''}`
+      `${ev.title || ''}${ev.content ? ' — ' + ev.content : ''}`,
+      { eventId: ev.id ?? ev.eventId, causeEventId: ev.causeEventId, importance: ev.importance, title: ev.title }
     )).filter(it => it.text).slice(0, FEED_LIMIT)
   } catch (_) { /* 历史事件拿不到不影响实时流 */ }
 }
@@ -415,7 +489,12 @@ function handleSseEvent(name, data) {
       pushFeed('退场', `${data.name || data.npcRef} 离开场景`)
       break
     case 'scene:event':
-      pushFeed('事件', `${data.title || ''}${data.content ? ' — ' + data.content : ''}`)
+      pushFeed('事件', `${data.title || ''}${data.content ? ' — ' + data.content : ''}`, {
+        eventId: data.id ?? data.eventId,
+        causeEventId: data.causeEventId,
+        importance: data.importance,
+        title: data.title
+      })
       break
     case 'clock': {
       const was = clock.paused
@@ -518,6 +597,8 @@ watch(() => route.params.id, async (id) => {
   sub = null
   Object.keys(statesMap).forEach(k => delete statesMap[k])
   feed.value = []
+  causeOverlay.value = null
+  causalityVisible.value = false
   clock.paused = null
   macro.value = null
   liveConnected.value = false
@@ -529,6 +610,7 @@ onBeforeUnmount(() => {
   sub?.close?.()
   sub = null
   stopClockTick()
+  if (causeTimer) { clearTimeout(causeTimer); causeTimer = null }
 })
 </script>
 
@@ -550,6 +632,32 @@ onBeforeUnmount(() => {
 .wl-bar-item { flex-shrink: 0; }
 .wl-bar-spacer { flex: 1; min-width: 8px; }
 .wl-muted { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; }
+
+/* ===== 实时因果浮层：只对 importance≥3 且带 cause 的实时事件出现 ===== */
+.wl-cause {
+  position: fixed; right: 24px; bottom: 96px; z-index: var(--z-toast);
+  width: min(360px, calc(100vw - 48px));
+  padding: 14px 16px 12px;
+  background: var(--bg-layer-1, #fff);
+  border: 1px solid var(--border-l1, #e5e7eb);
+  border-left: 3px solid var(--color-primary, #2563eb);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, .14);
+  cursor: pointer;
+  text-align: left;
+}
+.wl-cause:hover { border-color: var(--color-primary, #2563eb); }
+.wl-cause-close {
+  position: absolute; top: 4px; right: 6px;
+  border: 0; background: transparent; color: var(--text-tertiary, #9ca3af);
+  font-size: 16px; line-height: 1; cursor: pointer; padding: 4px;
+}
+.wl-cause-kicker { font-size: 10px; letter-spacing: .14em; color: var(--color-primary, #2563eb); font-weight: 700; }
+.wl-cause-title { margin-top: 5px; font-size: 13px; line-height: 1.5; font-weight: 650; color: var(--text-primary, #111827); }
+.wl-cause-cause { margin-top: 4px; font-size: 11.5px; line-height: 1.55; color: var(--text-secondary, #6b7280); }
+.wl-cause-action { margin-top: 8px; font-size: 11px; color: var(--color-primary, #2563eb); font-weight: 600; }
+.wl-cause-enter-active, .wl-cause-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.wl-cause-enter-from, .wl-cause-leave-to { opacity: 0; transform: translateY(6px); }
 
 /* ===== 两栏栅格：左宽右窄；1024 档以下由外壳进入 medium，本页随之收成单栏 ===== */
 .wl-grid {
@@ -586,6 +694,8 @@ onBeforeUnmount(() => {
   font-size: 0.8rem; line-height: 1.6;
 }
 .wl-feed-item:last-child { border-bottom: none; }
+.wl-feed-item.is-clickable { cursor: pointer; }
+.wl-feed-item.is-clickable:hover { background: var(--bg-hover); }
 /* 世界日期分组标题：同一世界日只出现一次，避免 30 行重复同一串长日期 */
 .wl-feed-day { flex-shrink: 0; color: var(--text-placeholder); font-size: 0.72rem; font-weight: 600; }
 .wl-feed-time { flex-shrink: 0; color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: 0.72rem; }

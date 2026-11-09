@@ -32,6 +32,10 @@ import com.holzyn.actor.domain.project.entity.ActorProject;
 import com.holzyn.actor.domain.character.vo.CharacterCardVO;
 import com.holzyn.actor.domain.character.vo.CharacterRelationGraphVO;
 import com.holzyn.actor.domain.character.vo.CharacterVO;
+import com.holzyn.actor.domain.dialogue.repository.ActorTalkGroupMemberRepository;
+import com.holzyn.actor.domain.npc.dialogue.repository.ActorConversationMemberRepository;
+import com.holzyn.actor.domain.npc.goal.entity.ActorActionPlan;
+import com.holzyn.actor.domain.npc.goal.repository.ActorActionPlanRepository;
 import com.holzyn.actor.domain.npc.relation.repository.ActorCharacterRelationRepository;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +43,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -74,6 +79,18 @@ public class CharacterService {
     /** 沙盘状态服务（S2 npc:join/leave：角色创建/删除挂钩；字段注入保持构造器不变，存量单测零改动） */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.sandbox.service.WorldSandboxStateService sandboxStateService;
+
+    /** 会话成员仓库（删除角色时级联清理成员行，避免已删角色继续从会话里发言） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorConversationMemberRepository memberRepository;
+
+    /** 玩家侧群聊成员仓库（actor_talk_group_member，按 npc:{id} 引用清理） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorTalkGroupMemberRepository talkGroupMemberRepository;
+
+    /** 行动计划仓库（删除角色时取消未执行计划，避免删除前排下的计划继续落地） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorActionPlanRepository actionPlanRepository;
 
     /**
      * NPC 作息运行态访问器。
@@ -239,6 +256,18 @@ public class CharacterService {
         ActorCharacter c = requireOwned(id);
         c.setDeleted(1);
         characterRepository.save(c);
+        // 级联清理（必须与软删除同事务）：否则删除前排下的计划、会话成员、关系会继续把已删角色
+        // 带回世界——这是幽灵 NPC 反复出现的根因。清理失败即删除失败，允许用户重试，不做静默放行。
+        if (actionPlanRepository != null) {
+            cancelPendingPlans(id);
+        }
+        if (memberRepository != null) {
+            memberRepository.deleteByCharacterId(id);
+        }
+        if (talkGroupMemberRepository != null) {
+            talkGroupMemberRepository.deleteByCharacterRef(NpcRefs.of(id));
+        }
+        purgeRelationsOf(c.getProjectId(), id);
         // S2 沙盘 npc:leave：角色离开场景（并移除状态行；字段注入，失败静默不阻断删除）
         try {
             if (sandboxStateService != null) {
@@ -246,6 +275,44 @@ public class CharacterService {
             }
         } catch (Exception e) {
             log.debug("[角色] 沙盘 leave 广播失败（静默）: char={} : {}", id, e.getMessage());
+        }
+    }
+
+    /**
+     * 取消角色名下所有未执行计划（planned/executing）。
+     * <p>为什么不能只靠执行时判 deleted：计划到点前仍会占用调度、产生事件与等待队列；
+     * 删除时直接取消，世界才会立刻"忘记"这个人。</p>
+     *
+     * @param characterId 角色 ID
+     */
+    private void cancelPendingPlans(Long characterId) {
+        List<ActorActionPlan> pending = actionPlanRepository
+                .findByCharacterIdAndStatusInOrderByIdDesc(characterId, List.of("planned", "executing"));
+        LocalDateTime now = LocalDateTime.now();
+        for (ActorActionPlan p : pending) {
+            p.setStatus("cancelled");
+            p.setExecutedAt(now);
+        }
+        if (!pending.isEmpty()) {
+            actionPlanRepository.saveAll(pending);
+        }
+    }
+
+    /**
+     * 删除与角色相关的全部关系行（任一端命中即删除）。
+     * <p>关系行是关系事件、情绪/态度重算的输入；只过滤读取侧会让存量关系继续产生"某已删角色对某人的态度"事件。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param characterId 角色 ID
+     */
+    private void purgeRelationsOf(Long projectId, Long characterId) {
+        List<ActorCharacterRelation> rels = relationRepository.findByProjectId(projectId);
+        List<ActorCharacterRelation> doomed = rels.stream()
+                .filter(r -> characterId.equals(r.getFromCharacterId()) || characterId.equals(r.getToCharacterId()))
+                .toList();
+        if (!doomed.isEmpty()) {
+            relationRepository.deleteAll(doomed);
         }
     }
 

@@ -103,6 +103,10 @@ public class WaitPlanService {
     @Autowired(required = false)
     private com.holzyn.actor.domain.agent.action.AgentActionService agentActionService;
 
+    /** 行动裁决入口（null/关闭时透传旧执行） */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.adjudicate.service.ActionAdjudicationService actionAdjudicationService;
+
     // ==================== R1 引擎 AI 异步化：到点重决策异步执行器 ====================
     // 到点重新决策 = 一次完整 STIMULUS 决策链（含 AI，10~40s/次）。长时间冻结/回补后可能有大量
     // 计划同时到期，若在引擎线程同步触发（runDueWaitPlans 在小时边界 tick 内调用），会把调度线程
@@ -258,7 +262,11 @@ public class WaitPlanService {
                     log.info("[等待计划] 连续等待超限，直接执行原动作: plan={} ref={} 动作={}",
                             plan.getId(), ref, abbreviate(originalAction, 40));
                     consecutiveWait.remove(key(projectId, ref));
-                    agentActionService.execute(plan);
+                    if (actionAdjudicationService != null) {
+                        actionAdjudicationService.executeGated(plan);
+                    } else {
+                        agentActionService.execute(plan);
+                    }
                     continue;
                 }
                 // ③ 标记原计划完成 + 到点重新 AI 决策
@@ -282,7 +290,11 @@ public class WaitPlanService {
      */
     private void triggerRedeciDecision(Long projectId, String ref, ActorCharacter ch, Long planId,
                                        String originalAction, Long gameSecond) {
-        String stimulus = "你之前决定等到此刻再去做的事：「" + originalAction + "」。现在时候到了，"
+        // 取不到原动作时不留占位引用（模板字符串会被模型当成「确实有这么件事」记住）。
+        String stimulus = originalAction == null || originalAction.isBlank()
+                ? "你先前打算等一等，等到了这个时候再去做某件事。现在时候到了，"
+                + "请决定现在去做什么（按你眼下记得的打算去做即可）。"
+                : "你之前决定等到此刻再去做的事：「" + originalAction + "」。现在时候到了，"
                 + "请决定现在去做什么（可以按原计划去做，也可以根据情况调整）。";
         String segment = "";
         if (personalityInjectionService != null) {
@@ -320,21 +332,45 @@ public class WaitPlanService {
         }
     }
 
-    /** 从计划 action_json 解析原动作描述（失败回退通用文本）。 */
-    private String originalActionOf(ActorActionPlan plan) {
-        try {
-            if (plan.getActionJson() != null && !plan.getActionJson().isBlank()) {
-                tools.jackson.databind.JsonNode node =
-                        new tools.jackson.databind.ObjectMapper().readTree(plan.getActionJson());
-                String action = node.path("action").asText("");
-                if (action != null && !action.isBlank()) {
-                    return action.trim();
-                }
-            }
-        } catch (Exception ignored) {
-            // 解析失败回退通用文本
+    /**
+     * 从计划 action_json 解析原动作描述（多键取值 + JSON 解包；取不到返回 null）。
+     *
+     * <p><b>为什么不是「失败回退通用文本」</b>：原实现在解析不出时返回占位句
+     * 「那件原本打算去做的事」，然后被直接拼进刺激——
+     * {@code 你之前决定等到此刻再去做的事：「那件原本要做的事」}（实跑 35/1215 命中）。
+     * 角色收到的是一句模板字符串本身，等于告诉模型「有个事，但我不告诉你是什么」。
+     * 现在取不到就返回 {@code null}，由调用方改写成不含引用的中性提示。</p>
+     *
+     * <p>键序：{@code action}（行动决策规范键）→ {@code action_detail/actionDetail}
+     * （ReAct 契约键，schedule.plan 效果包常用）→ 其余描述键；最后整体解包兜底。</p>
+     *
+     * @param plan 行动计划（actionJson 可空）
+     *
+     * @return 原动作文本（null=无法得到人话）
+     */
+    String originalActionOf(ActorActionPlan plan) {
+        String raw = plan.getActionJson();
+        if (raw == null || raw.isBlank()) {
+            return null;
         }
-        return "那件原本打算去做的事";
+        String text = raw.trim();
+        if (com.holzyn.actor.common.ActionTexts.looksLikeJson(text)) {
+            try {
+                tools.jackson.databind.JsonNode node =
+                        new tools.jackson.databind.ObjectMapper().readTree(text);
+                for (String key : new String[]{"action", "action_detail", "actionDetail",
+                        "detail", "description", "summary", "text", "content"}) {
+                    String value = com.holzyn.actor.common.ActionTexts.unwrap(node.path(key).asText(""));
+                    if (value != null && !value.isBlank()) {
+                        return value;
+                    }
+                }
+            } catch (Exception ignored) {
+                // 坏 JSON：落到下面的整体解包/原文兜底
+            }
+        }
+        String unwrapped = com.holzyn.actor.common.ActionTexts.unwrap(text);
+        return unwrapped == null || unwrapped.isBlank() ? null : unwrapped;
     }
 
     /** 当前游戏秒（引擎推进位置；失败返回 null）。 */

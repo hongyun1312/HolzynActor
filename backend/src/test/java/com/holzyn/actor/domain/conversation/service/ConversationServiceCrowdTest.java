@@ -70,7 +70,7 @@ class ConversationServiceCrowdTest {
             return m;
         });
         // detailVO 组装：会话成员（含 member_type/name）
-        when(memberRepository.findByConversationId(9L)).thenAnswer(inv ->
+        when(memberRepository.findActiveByConversationId(9L)).thenAnswer(inv ->
                 ((List<ActorConversationMember>) savedMembers).stream().toList());
     }
 

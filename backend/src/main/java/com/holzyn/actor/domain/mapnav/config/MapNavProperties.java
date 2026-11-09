@@ -76,4 +76,16 @@ public class MapNavProperties {
 
     /** 编辑校验：距地图边界的最小边距（米） */
     private double mapMarginMeters = 4.0;
+
+    /**
+     * AI 意图驻留窗口（游戏分钟）：AI 让人去哪、到站后这段时间里日程不抢人。
+     * 实测走到米行 100 游戏秒就被日程叫走，等于意图没落地；0=关闭该行为（退回旧口径）。
+     */
+    private int intentDwellGameMinutes = 30;
+
+    /**
+     * 途中遭遇的权威半径（米）：沙盘口径原为 30 格≈6 米；
+     * 现在途中遭遇改读权威坐标，半径直接按米给。
+     */
+    private double encounterRadiusMeters = 6.0;
 }

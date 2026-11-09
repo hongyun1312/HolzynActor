@@ -72,12 +72,15 @@ public class EngineScheduler {
     /** 世界时钟仓库（查询项目时钟暂停状态） */
     private final ActorWorldClockRepository clockRepository;
 
-    /**
-     * 实时决策激活闸门（用户需求 后端启动不自动运行实时决策——默认关；
+    /** 实时决策激活闸门（用户需求 后端启动不自动运行实时决策——默认关；
      * 到期计划执行同样门控：未激活项目不执行计划行动（世界暂停）；null=未装配[单测]跳过闸门）
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private RealtimeDecisionActivationService realtimeDecisionActivationService;
+
+    /** 行动裁决入口（null/关闭时透传旧执行） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.adjudicate.service.ActionAdjudicationService actionAdjudicationService;
 
     /** 世界推进扫描开关（默认 true） */
     @Value("${holzyn.actor.scheduler.world-scan-enabled:true}")
@@ -165,7 +168,11 @@ public class EngineScheduler {
                         continue;
                     }
                     log.info("定时执行行动决策: plan={} char={}", plan.getId(), plan.getCharacterId());
-                    agentActionService.execute(plan);
+                    if (actionAdjudicationService != null) {
+                        actionAdjudicationService.executeGated(plan);
+                    } else {
+                        agentActionService.execute(plan);
+                    }
                 } catch (Exception e) {
                     // 单计划执行失败不阻断其他计划
                     log.warn("定时执行行动决策失败（隔离继续）：plan={} : {}", plan.getId(), e.getMessage());

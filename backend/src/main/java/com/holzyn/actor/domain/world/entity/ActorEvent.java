@@ -134,6 +134,28 @@ public class ActorEvent {
     /** 事件重要度（1-5，B4 / 记忆沉淀依据：参与者经历记忆/项目级大事记写入阈值来源；缺省 3） */
     private Integer importance = 3;
 
+    /**
+     * 直接原因事件 ID（因果链，新增列）。
+     * <p>根事件为 null；子事件指向「因为发生了那件事，所以有了这件事」的父事件。
+     * 链式反应必须带该列，否则前端无法展开「因为…所以…」。</p>
+     */
+    @Column(name = "cause_event_id")
+    private Long causeEventId;
+
+    /**
+     * 因果链根标识（VARCHAR(40)）。
+     * <p>根事件=自身 id（字符串）；子事件继承父事件的 correlation_id。
+     * 同一 correlation_id 的事件构成一棵树，前端按它聚合。</p>
+     */
+    @Column(name = "correlation_id", length = 40)
+    private String correlationId;
+
+    /**
+     * 因果链深度（根=0，子=父+1；要求 depth ≤ 6）。
+     */
+    @Column(nullable = false)
+    private Integer depth = 0;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

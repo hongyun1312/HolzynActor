@@ -34,6 +34,7 @@ import com.holzyn.actor.domain.worldgen.repository.ActorWorldgenWorkflowReposito
 import com.holzyn.actor.domain.worldgen.vo.WorldGenAttemptVO;
 import com.holzyn.actor.domain.worldgen.vo.WorldGenNodeVO;
 import com.holzyn.actor.domain.worldgen.vo.WorldGenTaskVO;
+import com.holzyn.actor.domain.worldgen.vo.WorldGenWorkflowNodeVO;
 import com.holzyn.actor.domain.worldgen.vo.WorldGenWorkflowVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -89,6 +90,48 @@ public class WorldGenTaskService {
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private WorldGenStoryPlanService storyPlanService;
+
+    /**
+     * 世界观设定仓库（仅用于「生成角色前必须有设定」的前置校验）。
+     *
+     * <p>字段注入 {@code required=false}：本类构造器由 {@code @RequiredArgsConstructor} 生成，
+     * AGENTS §8.1.2 禁止改既有构造器签名；未装配时跳过校验（单测 new 出来的实例照常工作）。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository worldSettingRepository;
+
+    /**
+     * 校验世界观设定是否「够用」（名称非空 + 至少一个分节有内容）。
+     *
+     * <p>为什么必须有这道闸：character 工作流的角色阵容提示词完全由世界观设定拼装，
+     * 设定为空时 AI 只能凭空造人，产出的角色与地点/势力全无关系——用户明确要求「有理有据，
+     * 不凭空产生」。这里提前 400，比让用户等几分钟再看到节点失败要好。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @throws BizException 设定缺失或不完整
+     */
+    private void requireWorldSettingReady(Long projectId) {
+        if (worldSettingRepository == null) {
+            return;
+        }
+        com.holzyn.actor.domain.world.entity.ActorWorldSetting setting =
+                worldSettingRepository.findTopByProjectIdOrderByVersionDesc(projectId).orElse(null);
+        if (setting == null || setting.getName() == null || setting.getName().isBlank()) {
+            throw new BizException(400, "请先保存世界观设定（至少填写世界名与地理/势力等一个分节），再生成角色");
+        }
+        boolean hasSection = false;
+        for (String text : new String[]{setting.getGeography(), setting.getFactions(), setting.getMagicSystem(),
+                setting.getCulture(), setting.getHistory(), setting.getFreeText()}) {
+            if (text != null && !text.isBlank()) {
+                hasSection = true;
+                break;
+            }
+        }
+        if (!hasSection) {
+            throw new BizException(400, "世界观设定还没有任何分节内容，生成的角色会凭空编造；请先补全设定再生成角色");
+        }
+    }
 
     /**
      * 项目故事规划列表：版本链（升序=历史），
@@ -192,6 +235,9 @@ public class WorldGenTaskService {
             vo.setVersion(w.getVersion());
             vo.setEnabled(w.getEnabled());
             vo.setNodeCount(countNodes(w.getNodesJson()));
+            // 节点定义（顺序=执行顺序）：让前端把「尚未执行」的占位节点显示成真实阶段名，
+            // 而不是一排「等待执行」——用户要能看出接下来会发生什么。
+            vo.setNodes(nodeBriefs(w));
             vo.setUpdatedAt(formatTime(w.getUpdatedAt()));
             vos.add(vo);
         }
@@ -215,6 +261,11 @@ public class WorldGenTaskService {
         }
         if (req.projectId() == null || !projectRepository.existsById(req.projectId())) {
             throw new BizException(404, "项目不存在：" + req.projectId());
+        }
+        // 角色必须「活在设定里」：没有世界观就没有锚点，AI 只会在真空里造人（用户明确要求不凭空产生角色）。
+        // 校验放在建任务前：否则用户要等几分钟才在节点失败里看到原因。
+        if (WorldGenCharacterService.CODE_CHARACTER_V1.equals(req.workflowCode())) {
+            requireWorldSettingReady(req.projectId());
         }
         // 预解析定义（提前暴露定义损坏/环等配置错误）
         WorkflowDefinition def = definitionParser.parse(workflow.getCode(), workflow.getName(),
@@ -240,8 +291,7 @@ public class WorldGenTaskService {
         }
         // 适配：character 工作流自动注入世界设定（worldSetting/genre 缺省时从项目最新设定拼装，
         // 供阵容节点锚定「角色须活在设定里」；字段注入缺失时降级为不注入，零阻断）
-        enrichCharacterInputs(req, inputs);
-        // story-plan 适配（_06）：story-plan 工作流自动注入世界设定 + 角色摘要
+        enrichCharacterInputs(req, inputs);        // story-plan 适配（_06）：story-plan 工作流自动注入世界设定 + 角色摘要
         enrichStoryInputs(req, inputs);
         // 生成模式落 input_json（confirm 时读取决定是否串接完整模式）
         inputs.put("_mode", req.mode() == null || req.mode().isBlank()
@@ -601,6 +651,35 @@ public class WorldGenTaskService {
             vo.getAttempts().add(av);
         }
         return vo;
+    }
+
+    /**
+     * 节点定义摘要（按执行顺序；解析失败返回 null，前端回退占位文案）。
+     *
+     * <p>顺序取 {@code executionOrder}（拓扑序），与任务实际执行顺序一致——若直接按
+     * {@code nodesJson} 数组序，等待中的节点名就会与真实执行次序错位。</p>
+     *
+     * @param w 工作流实体
+     *
+     * @return 节点摘要列表（null=定义无法解析）
+     */
+    private List<WorldGenWorkflowNodeVO> nodeBriefs(ActorWorldgenWorkflow w) {
+        try {
+            WorkflowDefinition def = definitionParser.parse(w.getCode(), w.getName(), w.getVersion(),
+                    w.getNodesJson(), w.getEdgesJson(), w.getVariablesJson());
+            List<WorldGenWorkflowNodeVO> briefs = new ArrayList<>();
+            for (String nodeId : def.getExecutionOrder()) {
+                WorkflowNode node = def.getNodeById().get(nodeId);
+                if (node == null) {
+                    continue;
+                }
+                briefs.add(new WorldGenWorkflowNodeVO(node.getId(), node.getLabel(), node.getNodeType()));
+            }
+            return briefs.isEmpty() ? null : briefs;
+        } catch (Exception e) {
+            log.debug("[worldgen] 工作流节点定义解析失败（前端回退占位文案）：{} : {}", w.getCode(), e.getMessage());
+            return null;
+        }
     }
 
     /**

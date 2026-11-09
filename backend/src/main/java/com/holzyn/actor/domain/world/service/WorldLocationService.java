@@ -82,6 +82,103 @@ public class WorldLocationService {
     private final ObjectMapper objectMapper;
 
     /**
+     * 地图行（回填用：地图域边长与最新地图；字段注入保持构造器不变，null=跳过回填）
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapgen.repository.ActorWorldMapRepository mapRepository;
+
+    /**
+     * 地图要素（回填用：地点表缺失的中心坐标从同名要素取；null=跳过回填）
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapgen.repository.ActorMapFeatureRepository mapFeatureRepository;
+
+    /**
+     * 从地图要素回填地点中心坐标。
+     *
+     * <p><b>为什么要回填</b>：地图生成只写 {@code actor_map_feature}，不写这张地点表；
+     * 于是 mapgen 世界的地点 9 行 {@code center_x/center_z} 全是 null，所有「按中心圆反查区域」
+     * 的调用方（区域描述、附近角色、目标落点解析）都只会拿到 null。地图要素本来就有坐标，
+     * 差的只是把两边的同一样东西接起来。</p>
+     *
+     * <p><b>只按名字精确匹配</b>：不做模糊匹配，因为「把 A 地的坐标安给 B 地」比没有坐标更糟——
+     * 前者会让人被派到一个名字对、位置错的地方，后者只是少一句区域描述（区域反查还有要素兜底）。</p>
+     *
+     * <p><b>只填空值</b>：已有中心的地点是人工/AI 编辑过的，绝不覆盖。</p>
+     *
+     * <p><b>为什么不做整方法事务</b>：这是尽力而为的回填——每行独立、只补 null、可重复执行。
+     * 若包在一个事务里，任何一次查询/写入失败都会把事务标记成 rollback-only，即使这里
+     * catch 了异常，方法返回时仍会抛 {@code UnexpectedRollbackException}（实测：
+     * 开世界路径被 actor_world_map 缺失刷成 rollback-only）。逐行提交更符合“能补多少补多少”。</p>
+     *
+     * @param projectId 项目 ID
+     * @return 回填的行数（0 = 没有可回填的，属正常：多数世界的地点名与要素名不同源）
+     */
+    public int backfillCentersFromMap(Long projectId) {
+        if (projectId == null || mapRepository == null || mapFeatureRepository == null) {
+            return 0;
+        }
+        try {
+            com.holzyn.actor.domain.mapgen.entity.ActorWorldMap map =
+                    mapRepository.findFirstByProjectIdOrderByIdDesc(projectId).orElse(null);
+            if (map == null) {
+                return 0;
+            }
+            List<ActorWorldLocation> rows = repository.findByProjectIdOrderBySortOrderAscIdAsc(projectId);
+            if (rows == null || rows.isEmpty()) {
+                return 0;
+            }
+            java.util.Map<String, com.holzyn.actor.domain.mapgen.entity.ActorMapFeature> byName =
+                    new java.util.HashMap<>();
+            for (com.holzyn.actor.domain.mapgen.entity.ActorMapFeature f
+                    : mapFeatureRepository.findByMapIdOrderBySortOrderAsc(map.getId())) {
+                if (f == null || f.getPosX() == null || f.getPosZ() == null) {
+                    continue;
+                }
+                if (f.getName() != null && !f.getName().isBlank()) {
+                    byName.putIfAbsent(f.getName().trim(), f);
+                }
+            }
+            if (byName.isEmpty()) {
+                return 0;
+            }
+            int filled = 0;
+            for (ActorWorldLocation loc : rows) {
+                if (loc == null || loc.getName() == null) {
+                    continue;
+                }
+                if (loc.getCenterX() != null && loc.getCenterZ() != null) {
+                    continue;
+                }
+                com.holzyn.actor.domain.mapgen.entity.ActorMapFeature f = byName.get(loc.getName().trim());
+                if (f == null) {
+                    continue;
+                }
+                loc.setCenterX(f.getPosX());
+                loc.setCenterZ(f.getPosZ());
+                if (loc.getRadius() == null) {
+                    double w = f.getSizeW() == null ? 0 : f.getSizeW();
+                    double d = f.getSizeD() == null ? 0 : f.getSizeD();
+                    double r = Math.max(w, d) / 2.0 + 8.0;
+                    loc.setRadius(Math.max(12.0, Math.min(60.0, r)));
+                }
+                repository.save(loc);
+                filled++;
+            }
+            if (filled > 0) {
+                log.info("[worldlocation] 地点中心回填完成：project={} 回填 {} / {} 行", projectId, filled, rows.size());
+            } else {
+                log.info("[worldlocation] 地点中心回填：project={} 无同名要素（{} 行地点），区域反查走要素兜底",
+                        projectId, rows.size());
+            }
+            return filled;
+        } catch (Exception e) {
+            log.warn("[worldlocation] 地点中心回填失败（不影响世界运行）：project={} : {}", projectId, e.toString());
+            return 0;
+        }
+    }
+
+    /**
      * 查询某项目全部地点（排序稳定）。
      *
      * @param projectId 项目 ID
@@ -200,9 +297,12 @@ public class WorldLocationService {
         for (int attempt = 1; attempt <= MAX_RETRY; attempt++) {
             try {
                 String prompt = buildExtractPrompt(truncate(geography, GEO_SOURCE_MAX));
+                // jsonMode=false：顶层数组场景禁用 response_format=json_object。
+                // 实测 deepseek-v4-flash 在 json_object 约束下会把「JSON 数组」折叠成单个对象
+                //（只回一个地点），关掉后稳定返回 9 元数组；提示词本身已要求严格 JSON。
                 AiChatRequest req = new AiChatRequest(null, List.of(
                         new AiChatRequest.ChatMessage("system", "你只输出严格的 JSON，不输出任何其他文字。"),
-                        new AiChatRequest.ChatMessage("user", prompt)), 0.2, EXTRACT_MAX_TOKENS, true);
+                        new AiChatRequest.ChatMessage("user", prompt)), 0.2, EXTRACT_MAX_TOKENS, false);
                 AiChatResult result = AiCallContext.run("location_extract", null, () ->
                         aiChatGateway.chatCompletion(userId, null, null, req));
                 usageLogService.record(userId, null, null, result.providerId(), result.model(), "location_extract",
@@ -212,6 +312,11 @@ public class WorldLocationService {
                 List<WorldLocationDTO> locations = parseLocationText(result.content());
                 logLocations(locations);
                 log.info("[地点提取] 第 {} 次成功：耗时 {}ms，提取地点 {} 个", attempt, System.currentTimeMillis() - start, locations.size());
+                if (locations.isEmpty() && attempt < MAX_RETRY) {
+                    // 空结果不算成功：空数组通常是模型没读懂地理设定，重试一次再判定失败
+                    log.warn("[地点提取] 第 {} 次返回 0 个地点，重试", attempt);
+                    continue;
+                }
                 return locations;
             } catch (Exception e) {
                 lastError = e;
@@ -621,8 +726,11 @@ public class WorldLocationService {
         } catch (Exception e) {
             node = objectMapper.readTree(stripTrailingComma(json));
         }
-        // 兼容「数组」与「{locations:[...]}」两种输出形态
+        // 兼容「数组」「{locations:[...]}」「单个地点对象」三种输出形态
         JsonNode arr = node.isArray() ? node : node.path("locations");
+        if (!arr.isArray() && node.isObject() && node.hasNonNull("name")) {
+            arr = objectMapper.createArrayNode().add(node); // 模型只回了一个地点对象
+        }
         List<WorldLocationDTO> out = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
         if (arr != null && arr.isArray()) {

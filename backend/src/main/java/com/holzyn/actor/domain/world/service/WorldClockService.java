@@ -348,6 +348,52 @@ public class WorldClockService {
         return "深夜";
     }
 
+    // ==================== 星期语义（时间性验证） ====================
+
+    /** 一周天数：世界历简化为 7 日周（1=周一 … 7=周日）。 */
+    public static final int DAYS_PER_WEEK = 7;
+
+    private static final String[] WEEKDAY_LABELS = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
+
+    /**
+     * 世界历星期（1=周一 … 7=周日）。
+     * <p>换算：{@code floorDiv(gameSecond, 86400)} 为 0 基日序号，
+     * {@code floorMod(day, 7) + 1} 即星期；因此 gameSecond=0（0001 年 01 月 01 日）为<b>周一</b>。
+     * 世界历不含真实历法，星期只表达「周内相对位置」，连续自转、不跨世界比较。
+     * 世界起点若不是周一，调用方应先 {@code fastForward} 到目标周内位置再统计，审计层不做补偿。</p>
+     *
+     * @param gameSecond 游戏总秒数（可为负，按 floorMod 归一）
+     *
+     * @return 1..7（1=周一，7=周日）
+     */
+    public static int weekdayIndex(long gameSecond) {
+        long day = Math.floorDiv(gameSecond, SECONDS_PER_DAY);
+        return (int) Math.floorMod(day, (long) DAYS_PER_WEEK) + 1;
+    }
+
+    /**
+     * 星期中文名。
+     *
+     * @param weekday {@link #weekdayIndex(long)} 的返回值（越界按 7 取模归一）
+     *
+     * @return 「周一」…「周日」
+     */
+    public static String weekdayLabel(int weekday) {
+        return WEEKDAY_LABELS[Math.floorMod(weekday - 1, DAYS_PER_WEEK)];
+    }
+
+    /**
+     * 是否周末（周六/周日）。
+     *
+     * @param weekday {@link #weekdayIndex(long)} 的返回值
+     *
+     * @return true=周末
+     */
+    public static boolean isWeekend(int weekday) {
+        int w = Math.floorMod(weekday - 1, DAYS_PER_WEEK) + 1;
+        return w == 6 || w == 7;
+    }
+
     // ==================== 实例方法 ====================
 
     /**
@@ -694,6 +740,50 @@ public class WorldClockService {
             log.warn("[世界时钟] 沙盘 clock 广播失败（不影响快进）: project={} : {}", projectId, e.getMessage());
         }
         return toVO(clock);
+    }
+
+    /**
+     * 会话时间成本拨钟：世界暂停/停止时，把游戏时间前进指定秒数。
+     *
+     * <p>与 {@link #fastForward} 的区别：本方法是「对话产生的世界内时间」，不要求调用方
+     * 先手动暂停（但仍拒绝运行态——运行态由真实流逝推进，额外跳钟会跨过未模拟的 NPC tick）。
+     * 拨动同步前沿与锚点，保证下一轮引擎从新位置自然接续，不补拨动跨度。</p>
+     *
+     * @param projectId  项目 ID
+     * @param gameSeconds 前进的游戏秒（须 &gt; 0）
+     * @param reason     原因（日志）
+     */
+    @Transactional
+    public void advanceConversationTime(Long projectId, long gameSeconds, String reason) {
+        if (projectId == null || gameSeconds <= 0) {
+            return;
+        }
+        ActorWorldClock clock = requireClock(projectId);
+        boolean paused = Integer.valueOf(1).equals(clock.getPaused());
+        boolean stopped = !Integer.valueOf(1).equals(clock.getWorldRunning());
+        if (!paused && !stopped) {
+            log.debug("[世界时钟] 运行态不额外拨钟（会话时间由真实流逝承担）: project={}", projectId);
+            return;
+        }
+        long current = clock.getLastGameSecond() == null ? 0L : clock.getLastGameSecond();
+        long target = current + gameSeconds;
+        clock.setLastGameSecond(target);
+        clock.setLastGameHour(target / 3600L);
+        clock.setLastEngineRunAt(LocalDateTime.now());
+        clock.setLastSimTime(LocalDateTime.now());
+        // 拨动即显式设为目标：授权前沿一并设为目标，避免下一轮把这段再次消费
+        clock.setAuthorizedTargetSecond(target);
+        rebaseAnchorTo(clock, target);
+        clockRepository.save(clock);
+        log.info("[世界时钟] 会话时间成本：project={} {}→{}（游戏秒，+{} 分钟）原因={}",
+                projectId, current, target, gameSeconds / 60L, reason);
+        try {
+            if (sandboxStateService != null) {
+                sandboxStateService.publishClock(projectId, clock.getPaused());
+            }
+        } catch (Exception e) {
+            log.warn("[世界时钟] 沙盘 clock 广播失败（不影响拨钟）: project={} : {}", projectId, e.getMessage());
+        }
     }
 
     /**

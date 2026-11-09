@@ -97,7 +97,123 @@ public class RelationDynamicsService {
     @Value("${holzyn.actor.learning.relations.enabled:true}")
     private boolean relationsEnabled;
 
+    /** 冲突/失信类触发词（负向通道：命中即把增量改为负向，见 {@link #shapeShift}） */
+    private static final List<String> CONFLICT_WORDS = List.of(
+            "冲突", "争吵", "争执", "斥责", "责骂", "翻脸", "闹翻", "断交", "绝交", "失信", "背信",
+            "赖账", "欺骗", "撒谎", "偷", "抢", "殴打", "打架", "动手", "羞辱", "冷落", "记恨",
+            "结怨", "闹到", "不欢而散", "撕破脸", "挨骂", "被拒");
+
+    /** 互助/照拂类触发词（显著加权：±1 的小增量升级为 ±2） */
+    private static final List<String> CARE_WORDS = List.of(
+            "帮助", "帮衬", "搭把手", "照看", "照顾", "探望", "安慰", "劝", "送", "赠", "借给",
+            "分给", "教", "护", "救", "接济", "替", "陪同", "守", "让路", "相让");
+
+    /** 重大冲击类触发词（一次性大位移，允许 -8） */
+    private static final List<String> MAJOR_WORDS = List.of(
+            "绝交", "断交", "丧", "死", "病危", "救命", "成婚", "拜堂", "认亲", "弃", "卖身", "逐出");
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * 关系增量整形结果。
+     *
+     * @param affinity 整形后的好感增量
+     *
+     * @param trust 整形后的信任增量
+     *
+     * @param importance 本次关系事件重要度（1-5；写入 kind=relation 事件，供记忆沉淀与熵统计）
+     *
+     * @param salience 整形依据（中文短语，写进事件 payload 便于复核）
+     */
+    record RelationShift(int affinity, int trust, int importance, String salience) {
+    }
+
+    /**
+     * 关系增量整形（纯静态可单测）：把「一阶计数器」式的小增量改成有显著性差异的演化。
+     *
+     * <p><b>为什么必须整形</b>：澄江镇二日实跑的关系审计是三维一致地失败——
+     * 3134 次变化里 <b>91.1% 正好 +1</b>、<b>95.3% 正向</b>、118 对中 <b>32 对打满好感 100 后仍在继续 +1</b>，
+     * 且 {@code kind=relation} 事件的 importance 恒为 3（方差为零）。这意味着「关系」不是关系，
+     * 是一个只会上升的计数器：既无法表达冲突（负向通道缺失），也无法表达「已经很熟了」
+     * （饱和后继续加），更谈不上显著性（Δ 全都一样大）。</p>
+     *
+     * <p><b>三条规则</b>（只作用于小增量区间，大增量视为调用方已给出量级，原样放行）：</p>
+     * <ol>
+     * <li><b>饱和转维</b>：好感已到 ±100 时，正向/负向增量不再堆在好感上，转成信任的增减
+     * （{@code 好感 100 之后还能更熟，但那是"信不信得过"，不是"喜不喜欢"}）；</li>
+     * <li><b>负向通道</b>：触发源命中冲突/失信词 → 增量<b>强制取负</b>，幅度按重要度取
+     * 3/5/8（重大词 → 一次性 -8），让一次翻脸真的抵得上几十次寒暄；</li>
+     * <li><b>显著加权</b>：±1 的小增量若来自互助/照拂 → 升为 ±2；来自重大冲击 → 升为 ±6。
+     * 其余原样保留（避免把所有日常互动都放大成戏剧）。</li>
+     * </ol>
+     *
+     * <p><b>为什么不改调用方</b>：{@code RelationDynamicsService.updateRelation} 是关系表的
+     * 单一写入口（设计纪律：每张表只有一个领域服务写入）。整形放在这里一次收口，
+     * 对话/行动/事件/效果层四条来源自动同口径，不需要四处改 delta 常量。</p>
+     *
+     * @param oldAffinity 当前好感（-100~100）
+     *
+     * @param affinity 调用方给的好感增量
+     *
+     * @param trust 调用方给的信任增量
+     *
+     * @param reason 变更原因（对话/行动/事件摘要）
+     *
+     * @return 整形结果（永不返回 null）
+     */
+    static RelationShift shapeShift(int oldAffinity, int affinity, int trust, String reason) {
+        String text = reason == null ? "" : reason;
+        boolean major = containsAny(text, MAJOR_WORDS);
+        boolean conflict = major || containsAny(text, CONFLICT_WORDS);
+        boolean care = !conflict && containsAny(text, CARE_WORDS);
+        int importance = major ? 5 : conflict ? 4 : care ? 3 : 2;
+        // ① 饱和转维：好感打满后，增量转成信任（真的还有东西可以变，而不是空转）
+        if (oldAffinity >= 100 && affinity > 0) {
+            int spill = Math.min(2, Math.max(1, affinity));
+            return new RelationShift(0, trust + spill, 2, "好感打满→转信任");
+        }
+        if (oldAffinity <= -100 && affinity < 0) {
+            int spill = Math.min(2, Math.max(1, -affinity));
+            return new RelationShift(0, trust - spill, 4, "好感见底→转信任");
+        }
+        // ② 大增量：调用方已按情境给出量级（效果层/显式惩罚），原样放行
+        if (Math.abs(affinity) > 3) {
+            return new RelationShift(affinity, trust, importance, "显式量级");
+        }
+        int sign = Integer.signum(affinity);
+        if (sign == 0) {
+            return new RelationShift(0, trust, importance, "中性互动");
+        }
+        // ③ 负向通道：冲突/失信一律取负（哪怕调用方给的是正向小增量）
+        if (conflict) {
+            int mag = major ? 8 : importance >= 4 ? 5 : 3;
+            return new RelationShift(-Math.max(Math.abs(affinity), mag), trust, importance,
+                    major ? "重大冲突（-8）" : "冲突/失信（取负）");
+        }
+        // ④ 显著加权：只放大 ±1 的小增量（±2/±3 多来自有明确动作的调用方，保持原样）
+        if (Math.abs(affinity) == 1) {
+            if (care) {
+                return new RelationShift(sign * 2, trust, importance, "互助/照拂（+1→±2）");
+            }
+            if (major) {
+                return new RelationShift(sign * 6, trust, importance, "重大冲击（±6）");
+            }
+        }
+        return new RelationShift(affinity, trust, importance, "常规");
+    }
+
+    /** 文本是否命中任一触发词（空文本/空词表返回 false）。 */
+    private static boolean containsAny(String text, List<String> words) {
+        if (text == null || text.isBlank() || words == null || words.isEmpty()) {
+            return false;
+        }
+        for (String w : words) {
+            if (w != null && !w.isEmpty() && text.contains(w)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * 好感/信任更新（LearningService.updateRelation 真实实现）：
@@ -115,6 +231,24 @@ public class RelationDynamicsService {
      */
     @Transactional
     public void updateRelation(Long projectId, String fromRef, String toRef, int delta, String reason) {
+        // 既有语义：信任随好感同向变化，幅度为好感一半（防信任过快饱和/崩塌）。
+        updateRelation(projectId, fromRef, toRef, delta, delta / 2, reason);
+    }
+
+    /**
+     * 好感/信任精确更新（效果层）：两个增量分别钳制，仍走同一套
+     * 建行/镜像基线/状态机/事件逻辑，保持单一写入口。
+     *
+     * @param projectId     项目 ID
+     * @param fromRef       发起方统一角色引用
+     * @param toRef         目标方统一角色引用
+     * @param affinityDelta 好感增量（-100~100）
+     * @param trustDelta    信任增量（-100~100；与好感分开钳制）
+     * @param reason        变更原因
+     */
+    @Transactional
+    public void updateRelation(Long projectId, String fromRef, String toRef,
+                               int affinityDelta, int trustDelta, String reason) {
         if (!relationsEnabled || projectId == null) {
             return;
         }
@@ -134,7 +268,7 @@ public class RelationDynamicsService {
         }
         LocalDateTime now = LocalDateTime.now();
         ActorCharacterRelation rel = findRelation(projectId, fromEp, toEp);
-        if (delta == 0) {
+        if (affinityDelta == 0 && trustDelta == 0) {
             // 中性互动：仅刷新最近互动时间（不新建行、不发布事件，避免噪声）
             if (rel != null) {
                 rel.setLastInteractionAt(now);
@@ -144,12 +278,32 @@ public class RelationDynamicsService {
         }
         if (rel == null) {
             rel = createRelation(projectId, fromEp, toEp, "未知关系", null);
+            // 修（单向塌陷）：该方向的行首次建立时，若反向行已存在，则以反向行的
+            // 好感/信任/关系类型为基线。否则同一对关系会从 0 起算——既造成「一边 55、一边 0」
+            // 的单边塌陷（实测李小婉→钱串子 55→4），也让「新建行涨幅巨大」污染关系惯性口径。
+            ActorCharacterRelation mirror = findRelation(projectId, toEp, fromEp);
+            if (mirror != null) {
+                int baseAffinity = mirror.getAffinity() == null ? 0 : mirror.getAffinity();
+                int baseTrust = mirror.getTrust() == null ? 0 : mirror.getTrust();
+                rel.setAffinity(baseAffinity);
+                rel.setTrust(baseTrust);
+                rel.setRelationState(stateOf(baseAffinity, baseTrust));
+                if (mirror.getRelationType() != null && !mirror.getRelationType().isBlank()) {
+                    rel.setRelationType(mirror.getRelationType());
+                }
+                relationRepository.save(rel);
+            }
         }
         int oldAffinity = rel.getAffinity() == null ? 0 : rel.getAffinity();
         int oldTrust = rel.getTrust() == null ? 0 : rel.getTrust();
-        int newAffinity = clamp(oldAffinity + delta, -100, 100);
-        // 信任随好感同向变化（幅度为好感一半，防信任过快饱和/崩塌）
-        int newTrust = clamp(oldTrust + delta / 2, 0, 100);
+        // 关系显著性整形（单一写入口收口）：饱和转信任负向通道小增量显著加权。
+        // 调用方（对话/行动/事件/效果层）仍按原口径给 delta，整形口径只在这里生效。
+        RelationShift shift = shapeShift(oldAffinity, affinityDelta, trustDelta, reason);
+        affinityDelta = shift.affinity();
+        trustDelta = shift.trust();
+        int newAffinity = clamp(oldAffinity + affinityDelta, -100, 100);
+        // 信任独立钳制（既有 5 参入口传 delta/2，保持旧语义）
+        int newTrust = clamp(oldTrust + trustDelta, 0, 100);
         String oldState = rel.getRelationState();
         String newState = stateOf(newAffinity, newTrust);
         rel.setAffinity(newAffinity);
@@ -170,11 +324,15 @@ public class RelationDynamicsService {
             }
         }
         AiCallContext.recordStep(projectId, "agent_learning", "learning",
-                "关系好感更新：" + from + "→" + to + " delta=" + delta + "（affinity " + oldAffinity + "→" + newAffinity
-                        + " trust " + oldTrust + "→" + newTrust + " 状态=" + rel.getRelationState() + "）", 0);
-        log.info("[Learning] 关系好感更新：project={} {}→{} delta={}（affinity {}→{} 状态={}）",
-                projectId, from, to, delta, oldAffinity, newAffinity, rel.getRelationState());
-        publishRelationEvent(projectId, rel, fromEp, toEp, delta, reason, oldAffinity, oldTrust);
+                "关系好感更新：" + from + "→" + to + " delta=" + affinityDelta + "/" + trustDelta
+                        + "（affinity " + oldAffinity + "→" + newAffinity
+                        + " trust " + oldTrust + "→" + newTrust + " 状态=" + rel.getRelationState()
+                        + " 整形=" + shift.salience() + "）", 0);
+        log.info("[Learning] 关系好感更新：project={} {}→{} delta={}/{}（affinity {}→{} 状态={} 整形={}）",
+                projectId, from, to, affinityDelta, trustDelta, oldAffinity, newAffinity,
+                rel.getRelationState(), shift.salience());
+        publishRelationEvent(projectId, rel, fromEp, toEp, affinityDelta, reason, oldAffinity, oldTrust,
+                shift.importance());
     }
 
     /**
@@ -194,8 +352,56 @@ public class RelationDynamicsService {
         if (refA == null || refB == null || refA.equals(refB)) {
             return;
         }
+        // 先按镜像基线把两个方向的行都建好（0 增量），再统一叠加 delta。
+        // 否则第二次 updateRelation 会把「同一次互动」既算进镜像基线、又再加一次 delta
+        // （正向 1 → 反向先继承 1 再 +1 = 2），一次群聊轮被记成两次互动。
+        seedDirection(projectId, refA, refB);
+        seedDirection(projectId, refB, refA);
         updateRelation(projectId, refA, refB, delta, reason);
         updateRelation(projectId, refB, refA, delta, reason);
+    }
+
+    /**
+     * 确保某方向的关系行存在（不加减好感）：缺行时以反向行为基线建行。
+     * <p>群聊双向互动的「先建两边、再加 delta」步骤；与 {@link #updateRelation} 的镜像基线
+     * 语义一致，但不会把本次 delta 重复计入基线。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param fromRef   来源 ref
+     *
+     * @param toRef     目标 ref
+     */
+    private void seedDirection(Long projectId, String fromRef, String toRef) {
+        if (!relationsEnabled || projectId == null) {
+            return;
+        }
+        String from = trimRef(fromRef);
+        String to = trimRef(toRef);
+        if (from == null || to == null || from.equals(to)) {
+            return;
+        }
+        Endpoint fromEp = resolveEndpoint(projectId, from);
+        Endpoint toEp = resolveEndpoint(projectId, to);
+        if (fromEp == null || toEp == null || fromEp.ref() == null || toEp.ref() == null) {
+            return;
+        }
+        if (findRelation(projectId, fromEp, toEp) != null) {
+            return;
+        }
+        ActorCharacterRelation seeded = createRelation(projectId, fromEp, toEp, "未知关系", null);
+        ActorCharacterRelation mirror = findRelation(projectId, toEp, fromEp);
+        if (mirror != null) {
+            int baseAffinity = mirror.getAffinity() == null ? 0 : mirror.getAffinity();
+            int baseTrust = mirror.getTrust() == null ? 0 : mirror.getTrust();
+            seeded.setAffinity(baseAffinity);
+            seeded.setTrust(baseTrust);
+            seeded.setRelationState(stateOf(baseAffinity, baseTrust));
+            if (mirror.getRelationType() != null && !mirror.getRelationType().isBlank()) {
+                seeded.setRelationType(mirror.getRelationType());
+            }
+            relationRepository.save(seeded);
+        }
     }
 
     /**
@@ -284,10 +490,21 @@ public class RelationDynamicsService {
 
     // ==================== 私有辅助 ====================
 
-    /** 端点解析（名称优先正式 ref，修）；：npc:{id} 不再编码类型，此处按意图 A 处理（单表仓库） */
+    /** 端点解析（名称优先正式 ref）；npc:{id} 不再编码类型，此处按意图 A 处理（单表仓库） */
     private Endpoint resolveEndpoint(Long projectId, String refOrName) {
         RelationRefs.Endpoint ep = RelationRefs.resolve(projectId, refOrName, characterRepository);
-        return ep == null ? null : new Endpoint(ep.ref(), ep.id(), ep.name());
+        if (ep == null) {
+            return null;
+        }
+        // 已软删除角色不再参与动态关系：否则关系行/关系事件会把"不存在的人"继续带回世界。
+        if (ep.id() != null) {
+            com.holzyn.actor.domain.npc.profile.entity.ActorCharacter ch =
+                    characterRepository.findById(ep.id()).orElse(null);
+            if (ch != null && Integer.valueOf(1).equals(ch.getDeleted())) {
+                return null;
+            }
+        }
+        return new Endpoint(ep.ref(), ep.id(), ep.name());
     }
 
     /** 查找项目内匹配 from→to 方向的关系行（正式 ref 优先精确匹配） */
@@ -390,7 +607,8 @@ public class RelationDynamicsService {
 
     /** 发布关系变迁事件（kind=relation，源=learning；source_key 唯一防幂等折叠） */
     private void publishRelationEvent(Long projectId, ActorCharacterRelation rel, Endpoint from, Endpoint to,
-                                      int delta, String reason, int oldAffinity, int oldTrust) {
+                                      int delta, String reason, int oldAffinity, int oldTrust,
+                                      int importance) {
         try {
             List<String> refs = new ArrayList<>();
             if (from.ref() != null) {
@@ -413,11 +631,15 @@ public class RelationDynamicsService {
             payload.put("trust", rel.getTrust());
             payload.put("relationState", rel.getRelationState());
             payload.put("reason", reason == null ? "" : reason);
+            // 重要度随触发源分化：此前恒为 3 → kind=relation 事件 importance 方差为零，
+            // 记忆沉淀与叙事熵统计都拿不到「哪次关系变化才要紧」的信号。
+            payload.put("importance", importance);
             worldEventBus.publish(currentUserProvider.currentUserId(), projectId, EventSpec.builder()
                     .kind("relation")
                     .source("learning")
                     .characterRefs(refs)
                     .visibility("global")
+                    .importance(importance)
                     .title("关系变化：" + displayName(from) + " 对 " + displayName(to))
                     .content("好感 " + oldAffinity + "→" + rel.getAffinity() + "（Δ" + delta + "），信任 "
                             + oldTrust + "→" + rel.getTrust() + "，状态=" + stateLabel(rel.getRelationState())

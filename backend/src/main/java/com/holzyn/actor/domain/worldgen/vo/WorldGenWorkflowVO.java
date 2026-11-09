@@ -18,6 +18,8 @@
 
 package com.holzyn.actor.domain.worldgen.vo;
 
+import java.util.List;
+
 import lombok.Data;
 
 /**
@@ -40,6 +42,13 @@ public class WorldGenWorkflowVO {
 
     /** 节点数 */
     private Integer nodeCount;
+
+    /**
+     * 节点定义列表（按执行顺序；供前端把「尚未执行」的占位节点显示成真实阶段名）。
+     *
+     * <p>为 null/空表示该工作流定义无法解析（老数据或定义损坏），前端回退为占位文案。</p>
+     */
+    private List<WorldGenWorkflowNodeVO> nodes;
 
     /** 启用标记（1 启用） */
     private Integer enabled;

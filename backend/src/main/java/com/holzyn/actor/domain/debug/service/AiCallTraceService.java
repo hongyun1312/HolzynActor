@@ -100,6 +100,16 @@ public class AiCallTraceService {
     private TestUsageLogService testUsageRecorder;
 
     /**
+     * 世界时钟（可选注入）：给每条 AI 调用日志补记「写入时刻的世界内游戏秒」。
+     *
+     * <p>为什么要时钟：缓存命中率按<b>游戏天</b>聚合才有意义——同一游戏日内日程/天气/日期稳定，
+     * 前缀可复用；跨天整体换档。按真实时间聚合会把两个游戏日混成一份，看不出日内的稳定性。
+     * 拿不到时钟（未开世界/测试直构）时记 0，日维度聚合自动忽略。</p>
+     */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.service.WorldClockService worldClockService;
+
+    /**
      * 构造（Spring 使用：仓库注入，开关/截断/数据目录由 @Value 字段注入）。
      *
      * @param repository trace 仓库
@@ -178,15 +188,37 @@ public class AiCallTraceService {
         AiCallTrace current = AiCallContext.current();
         if (current != null) {
             current.setProjectId(projectId);
+            current.setGameSecond(gameSecondOf(projectId));
             current.markInvoked();
             return current;
         }
         AiCallTrace trace = new AiCallTrace("chat", null);
         trace.setContextOwned(false);
         trace.setProjectId(projectId);
+        trace.setGameSecond(gameSecondOf(projectId));
         trace.setTraceId(AiCallContext.currentTraceId());
         trace.markInvoked();
         return trace;
+    }
+
+    /**
+     * 取写入时刻的世界内游戏秒（按游戏天聚合缓存命中率用；拿不到时钟返回 0）。
+     *
+     * @param projectId 项目 ID（可空）
+     *
+     * @return 游戏秒；0=未知
+     */
+    private long gameSecondOf(Long projectId) {
+        if (projectId == null || worldClockService == null) {
+            return 0L;
+        }
+        try {
+            Long hour = worldClockService.currentEngineGameHour(projectId);
+            return hour == null ? 0L : hour * 3600L;
+        } catch (Exception e) {
+            // 时钟不可用（世界未打开/库未挂载）不该影响 AI 调用与落账
+            return 0L;
+        }
     }
 
     /**
@@ -217,6 +249,7 @@ public class AiCallTraceService {
         AiCallTrace trace = new AiCallTrace(scene == null ? "chat" : scene, null);
         trace.setContextOwned(false);
         trace.setProjectId(projectId);
+        trace.setGameSecond(gameSecondOf(projectId));
         trace.setTraceId(AiCallContext.currentTraceId());
         trace.markInvoked();
         return trace;

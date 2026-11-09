@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
@@ -147,7 +148,9 @@ class RelationDynamicsServiceTest {
         verify(worldEventBus, Mockito.times(1)).publish(anyLong(), anyLong(), any());
     }
 
-    /** 对话双向：applyDialogPairDelta 对 A→B 与 B→A 各应用一次（各自落一行） */
+    /** 对话双向：applyDialogPairDelta 对 A→B 与 B→A 各应用一次（各自落一行）。
+     *  <p>镜像基线 + 本次修复：先按基线把两方向行都建好，再统一叠加 delta，
+     *  同一次互动不会被反向行重复计入（两边都是 1，而不是 1/2）。</p> */
     @Test
     void dialogPairAppliesBothDirections() {
         service.applyDialogPairDelta(100L, "npc:3", "npc:4", 1, "群聊互动");
@@ -157,7 +160,7 @@ class RelationDynamicsServiceTest {
         assertEquals("npc:4", store.get(1).getFromRef());
         assertEquals("npc:3", store.get(1).getToRef());
         assertEquals(Integer.valueOf(1), store.get(0).getAffinity());
-        assertEquals(Integer.valueOf(1), store.get(1).getAffinity());
+        assertEquals(Integer.valueOf(1), store.get(1).getAffinity(), "双向各应用一次，不得重复计数");
     }
 
     /** 行动挂钩：target 命中项目内角色（名称解析）→ 单向好感（行动方→目标方） */
@@ -228,5 +231,62 @@ class RelationDynamicsServiceTest {
     void updateRelationSkipsGhostEndpoint() {
         service.updateRelation(100L, "npc:3", "阿明", 5, "与幽灵互动");
         assertEquals(0, store.size(), "幽灵端点无正式角色，不建立关系行");
+    }
+
+    // ====================关系显著性整形（shapeShift） ====================
+
+    /** 负向通道：冲突/失信类触发源 → +1 小增量强制取负，且重要度随之上调。 */
+    @Test
+    void shapeShift_conflictFlipsSmallPositiveToNegative() {
+        var s = RelationDynamicsService.shapeShift(40, 1, 0, "共同经历事件：两人为水渠吵了一架，翻脸");
+        assertTrue(s.affinity() < 0, "冲突应走负向通道: " + s);
+        assertTrue(s.affinity() <= -5, "冲突至少 -5（重要度 4 档）: " + s);
+        assertEquals(4, s.importance(), "冲突事件重要度应高于日常: " + s);
+    }
+
+    /** 重大冲击：一次性 -8（高于阈值允许的负向幅度）。 */
+    @Test
+    void shapeShift_majorConflictReachesMinusEight() {
+        var s = RelationDynamicsService.shapeShift(60, 1, 0, "共同经历事件：老吴与阿福当场绝交");
+        assertEquals(-8, s.affinity(), "重大冲突应一次到位 -8: " + s);
+        assertEquals(5, s.importance(), "重大冲突重要度 5: " + s);
+    }
+
+    /** 显著加权：互助/照拂的 +1 → +2（日常寒暄仍 +1，不被放大）。 */
+    @Test
+    void shapeShift_careUpgradesUnitDeltaOnly() {
+        assertEquals(2, RelationDynamicsService.shapeShift(40, 1, 0, "行动：帮助沈夜").affinity());
+        assertEquals(1, RelationDynamicsService.shapeShift(40, 1, 0, "群聊互动").affinity(), "普通互动保持 +1");
+        assertEquals(3, RelationDynamicsService.shapeShift(40, 3, 1, "行动：帮助沈夜").affinity(),
+                "±3 已有明确动作量级，不再放大");
+    }
+
+    /** 饱和转维：好感 100 之后不再空转 +1，增量转成信任。 */
+    @Test
+    void shapeShift_saturationRoutesToTrust() {
+        var s = RelationDynamicsService.shapeShift(100, 1, 0, "群聊互动");
+        assertEquals(0, s.affinity(), "好感打满后不再加好感: " + s);
+        assertEquals(1, s.trust(), "增量转成信任: " + s);
+        assertEquals(2, s.importance(), "空转的小变化重要度下调: " + s);
+    }
+
+    /** 显式量级放行：效果层/显式惩罚给的 |Δ|>3 原样透传（口径不被整形改写）。 */
+    @Test
+    void shapeShift_keepsExplicitMagnitude() {
+        assertEquals(20, RelationDynamicsService.shapeShift(0, 20, 10, "共同行动").affinity());
+        assertEquals(-200, RelationDynamicsService.shapeShift(100, -200, -100, "翻脸").affinity());
+    }
+
+    /** 端到端：+1 冲突互动落库后好感真的下降，事件带非 3 的重要度。 */
+    @Test
+    void updateRelationConflictLowersAffinityAndTagsImportance() {
+        service.updateRelation(100L, "npc:3", "npc:4", 20, "共同行动");
+        service.applyDialogPairDelta(100L, "npc:3", "npc:4", 1, "共同经历事件：为水渠的事争执不下");
+
+        ArgumentCaptor<EventSpec> captor = ArgumentCaptor.forClass(EventSpec.class);
+        verify(worldEventBus, Mockito.atLeastOnce()).publish(anyLong(), anyLong(), captor.capture());
+        EventSpec last = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertTrue(last.getImportance() != null && last.getImportance() >= 4,
+                "冲突型关系事件重要度应 ≥4: " + last.getImportance());
     }
 }

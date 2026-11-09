@@ -62,6 +62,8 @@ public final class WorldGraphVO {
             String name,
             String title,
             String type,
+            /** 控制方：npc=自主 NPC，player=玩家同构角色（关系图高亮） */
+            String controller,
             String affiliation,
             String occupation,
             String location,

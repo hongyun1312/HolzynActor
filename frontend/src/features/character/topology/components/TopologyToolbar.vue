@@ -158,14 +158,16 @@
         </div>
         <div class="switch-row">
           <span>点阵底纹</span>
-          <el-switch :model-value="options.showGrid" size="small"
+          <el-switch :model-value="!sky && options.showGrid" :disabled="sky" size="small"
             @update:model-value="(v) => $emit('patch-options', { showGrid: v })" />
         </div>
+        <div v-if="sky" class="filter-hint">星海用夜空底纹代替点阵（切回其它布局即恢复）</div>
         <div class="switch-row">
           <span>自由拖动节点</span>
-          <el-switch :model-value="options.draggable" size="small"
+          <el-switch :model-value="sky || options.draggable" :disabled="sky" size="small"
             @update:model-value="(v) => $emit('patch-options', { draggable: v })" />
         </div>
+        <div v-if="sky" class="filter-hint">星海布局下始终可拖动：拖一颗星，两跳内的邻居会跟着摆，松手归位</div>
         <div class="filter-sec">
           <div class="filter-label">关系文字</div>
           <el-radio-group :model-value="options.showEdgeLabels" size="small"
@@ -238,6 +240,8 @@ import { LAYOUT_IDS, LAYOUT_LABEL } from '../lib/deterministicLayout.js'
 const props = defineProps({
   /** 当前布局 ID */
   layout: { type: String, default: 'community' },
+  /** 是否星海布局（拖动开关在该档为常开且不可关） */
+  sky: { type: Boolean, default: false },
   /** 搜索词 */
   search: { type: String, default: '' },
   /** 搜索命中人数 */
@@ -278,6 +282,7 @@ const layoutLabels = LAYOUT_LABEL
 
 /** 布局说明（一句话讲清"这个布局看什么"；后两个不画圈子外框，说明里讲明原因） */
 const layoutDesc = {
+  nebula: '星海：每拨人散成一团星云，可拖一颗星带动它的邻居',
   community: '按圈子分块，先看分成哪几拨人',
   force: '按亲疏拉扯，看整体关系结构',
   concentric: '按重要度同心，看关注度分布（不画圈子外框）',

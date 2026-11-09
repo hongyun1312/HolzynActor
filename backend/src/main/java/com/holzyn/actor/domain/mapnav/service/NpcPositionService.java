@@ -121,7 +121,7 @@ public class NpcPositionService {
         row.setGameSecond(gameSecond);
         row.setUpdatedAt(LocalDateTime.now());
         try {
-            return repository.save(row);
+            return repository.saveAndFlush(row);
         } catch (Exception e) {
             log.warn("[mapnav] 写角色坐标失败（内存视图仍生效）：ref={} : {}", npcRef, e.getMessage());
             return row;
@@ -131,6 +131,10 @@ public class NpcPositionService {
     /**
      * 批量写（tick 一帧的变更一次性落库）。
      *
+     * <p>用 {@code saveAllAndFlush} 而不是 {@code saveAll}：权威坐标是「世界此刻在哪」的唯一真相，
+     * 必须在本方法返回时已经落盘。实测过强杀进程后权威表回退到上一次正常 unmount 的状态，
+     * 与渲染层、注入层同时错位——那正是三方对账最不能容忍的一种裂缝。</p>
+     *
      * @param rows 行
      */
     public void saveAll(List<ActorNpcPosition> rows) {
@@ -138,7 +142,7 @@ public class NpcPositionService {
             return;
         }
         try {
-            repository.saveAll(rows);
+            repository.saveAllAndFlush(rows);
         } catch (Exception e) {
             log.warn("[mapnav] 批量写角色坐标失败（内存视图仍生效）：{}", e.getMessage());
         }

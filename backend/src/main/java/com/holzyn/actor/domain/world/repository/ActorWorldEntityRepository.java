@@ -59,6 +59,14 @@ public interface ActorWorldEntityRepository extends JpaRepository<ActorWorldEnti
     Page<ActorWorldEntity> findByProjectIdAndEntityTypeAndValidToGameDayIsNullOrderByUpdatedAtDescIdDesc(
             Long projectId, String entityType, Pageable pageable);
 
+    /**
+     * 当前有效的某类型实体（新→旧，不分页）。
+     * <p>用途：段 2F【所处之地】在「{@code location:地点名}」精确键未命中时，按显示名在
+     * 地点域内兜底匹配（地点域行数量级 = 世界观地点数 × 状态版本，量小）。</p>
+     */
+    List<ActorWorldEntity> findByProjectIdAndEntityTypeAndValidToGameDayIsNullOrderByIdDesc(
+            Long projectId, String entityType);
+
     /** 当前有效且有近期变化的实体（【世界动态】注入素材：recent_change 非空，按更新时间降序）。 */
     List<ActorWorldEntity> findTop20ByProjectIdAndValidToGameDayIsNullAndRecentChangeIsNotNullOrderByUpdatedAtDescIdDesc(
             Long projectId);

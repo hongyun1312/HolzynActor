@@ -3,13 +3,32 @@ package com.holzyn.actor.domain.character.service;
 import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
 import com.holzyn.actor.domain.npc.relation.entity.ActorCharacterRelation;
 import com.holzyn.actor.domain.character.vo.CharacterRelationGraphVO;
+import com.holzyn.actor.domain.account.CurrentUserProvider;
+import com.holzyn.actor.domain.agent.brain.service.BrainProfileService;
+import com.holzyn.actor.domain.dialogue.repository.ActorTalkGroupMemberRepository;
+import com.holzyn.actor.domain.npc.dialogue.repository.ActorConversationMemberRepository;
+import com.holzyn.actor.domain.npc.goal.entity.ActorActionPlan;
+import com.holzyn.actor.domain.npc.goal.repository.ActorActionPlanRepository;
+import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
+import com.holzyn.actor.domain.npc.relation.repository.ActorCharacterRelationRepository;
+import com.holzyn.actor.domain.project.entity.ActorProject;
+import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * CharacterService 角色关系拓扑图构建 + 幽灵关系名称回填逻辑单元测试。
@@ -271,6 +290,58 @@ class CharacterServiceTest {
         CharacterRelationGraphVO g2 = CharacterService.buildGraph(List.of(a), List.of(), List.of(),
                 java.util.Map.of());
         assertEquals(CharacterRelationGraphVO.NodeMeta.EMPTY, g2.nodes().get(0).meta());
+    }
+
+    /**
+     * 删除角色必须级联：取消未执行计划、清会话成员、清群聊成员、删两端关系。
+     * <p>这是幽灵 NPC 反复出现的根因——只把 actor_profile.deleted 置 1 不够，
+     * 计划/成员/关系任何一处残留都会把已删角色重新带回世界。</p>
+     */
+    @Test
+    void deleteCascadesPendingPlansMembersAndRelations() {
+        ActorCharacterRepository charRepo = mock(ActorCharacterRepository.class);
+        ActorCharacterRelationRepository relRepo = mock(ActorCharacterRelationRepository.class);
+        ActorProjectRepository projectRepo = mock(ActorProjectRepository.class);
+        CurrentUserProvider userProvider = mock(CurrentUserProvider.class);
+        BrainProfileService brainProfileService = mock(BrainProfileService.class);
+        ActorConversationMemberRepository memberRepo = mock(ActorConversationMemberRepository.class);
+        ActorTalkGroupMemberRepository talkRepo = mock(ActorTalkGroupMemberRepository.class);
+        ActorActionPlanRepository planRepo = mock(ActorActionPlanRepository.class);
+
+        CharacterService svc = new CharacterService(charRepo, relRepo, mock(ActorCharacterRepository.class),
+                projectRepo, userProvider, brainProfileService);
+        ReflectionTestUtils.setField(svc, "memberRepository", memberRepo);
+        ReflectionTestUtils.setField(svc, "talkGroupMemberRepository", talkRepo);
+        ReflectionTestUtils.setField(svc, "actionPlanRepository", planRepo);
+
+        ActorCharacter c = npc(5L, "王阿婆", "special", 3, 0);
+        c.setProjectId(142L);
+        c.setDeleted(0);
+        when(charRepo.findById(5L)).thenReturn(Optional.of(c));
+        when(userProvider.currentUserId()).thenReturn(1L);
+        when(projectRepo.findByIdAndUserIdAndDeleted(142L, 1L, 0)).thenReturn(Optional.of(new ActorProject()));
+
+        ActorActionPlan planned = new ActorActionPlan();
+        planned.setStatus("planned");
+        when(planRepo.findByCharacterIdAndStatusInOrderByIdDesc(eq(5L), anyList())).thenReturn(List.of(planned));
+
+        ActorCharacterRelation hitFrom = rel(11L, 5L, 1L, "王阿婆", "周慧兰", "邻居", null);
+        ActorCharacterRelation hitTo = rel(12L, 1L, 5L, "周慧兰", "王阿婆", "邻居", null);
+        ActorCharacterRelation keep = rel(13L, 1L, 2L, "周慧兰", "陈茂林", "夫妻", null);
+        when(relRepo.findByProjectId(142L)).thenReturn(List.of(hitFrom, hitTo, keep));
+
+        svc.delete(5L);
+
+        assertEquals(1, c.getDeleted());
+        assertEquals("cancelled", planned.getStatus());
+        assertNotNull(planned.getExecutedAt());
+        verify(memberRepo).deleteByCharacterId(5L);
+        verify(talkRepo).deleteByCharacterRef("npc:5");
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ActorCharacterRelation>> cap = ArgumentCaptor.forClass(List.class);
+        verify(relRepo).deleteAll(cap.capture());
+        assertEquals(2, cap.getValue().size());
+        assertFalse(cap.getValue().contains(keep));
     }
 }
 

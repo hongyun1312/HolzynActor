@@ -113,7 +113,7 @@ class AgentMemoryConsolidationTest {
         ActorConversationMember member = new ActorConversationMember();
         member.setCharacterId(3L);
         member.setMemberType("special");
-        when(memberRepository.findByConversationId(convId)).thenReturn(List.of(member));
+        when(memberRepository.findActiveByConversationId(convId)).thenReturn(List.of(member));
         ActorCharacter ch = new ActorCharacter();
         ch.setId(3L);
         ch.setName("玄铁");

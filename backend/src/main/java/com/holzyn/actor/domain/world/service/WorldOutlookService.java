@@ -139,6 +139,12 @@ public class WorldOutlookService {
     /** 缓存：projectId → 已生成的预测段（含生成时的游戏日，跨日失效）。 */
     private final Map<Long, CachedOutlook> CACHE = new ConcurrentHashMap<>();
 
+    /** 单飞锁：projectId → 生成互斥对象（同项目并发请求共用一次生成）。 */
+    private final Map<Long, Object> LOCKS = new ConcurrentHashMap<>();
+
+    /** 游戏日不可用时的兜底缓存时长（毫秒）：宁可略旧，也不要每次决策都重打一次 AI。 */
+    private static final long FALLBACK_TTL_MS = 300_000L;
+
     /**
      * 构造器（仓库+序列化器全量构造注入；服务字段注入保持构造器不变）。
      */
@@ -366,19 +372,53 @@ public class WorldOutlookService {
         }
         try {
             Long day = gameDay(projectId);
-            CachedOutlook cached = day == null ? null : CACHE.get(projectId);
-            if (cached != null && day.equals(cached.gameDay())) {
-                return cached.segment(); // 同日复用
+            String cached = cachedSegment(projectId, day);
+            if (cached != null) {
+                return cached; // 同日复用 / 游戏日不可用时按 TTL 复用
             }
-            String segment = buildSegment(projectId);
-            if (day != null && segment != null) {
-                CACHE.put(projectId, new CachedOutlook(day, segment));
+            // 单飞：同一项目的并发请求只允许一个真正生成，其余等它生成完直接复用。
+            // 否则 12 个角色同 tick 一起要预测段，就是 12 次逐字相同的 AI 调用（实测跑满单实例网关）。
+            synchronized (LOCKS.computeIfAbsent(projectId, k -> new Object())) {
+                cached = cachedSegment(projectId, day);
+                if (cached != null) {
+                    return cached;
+                }
+                String segment = buildSegment(projectId);
+                if (segment != null) {
+                    CACHE.put(projectId, new CachedOutlook(day, segment, System.currentTimeMillis()));
+                }
+                return segment;
             }
-            return segment;
         } catch (Exception e) {
             log.warn("[世界走向] 预测段生成异常（fail-open 省略）: project={} : {}", projectId, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 取可用缓存：游戏日可用时按「同日」判定；游戏日不可用（时钟未就绪/读失败）时按
+     * {@link #FALLBACK_TTL_MS} 兜底，避免每次都重新生成。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param day 当前游戏日（可为 null）
+     *
+     * @return 缓存段；不可复用返回 null
+     */
+    private String cachedSegment(Long projectId, Long day) {
+        CachedOutlook cached = CACHE.get(projectId);
+        if (cached == null) {
+            return null;
+        }
+        if (day != null) {
+            return day.equals(cached.gameDay()) ? cached.segment() : null;
+        }
+        long age = System.currentTimeMillis() - cached.createdAtMs();
+        if (age < FALLBACK_TTL_MS) {
+            return cached.segment();
+        }
+        log.warn("[世界走向] 游戏日不可用且预测段已过期（{}ms）：重新生成 project={}", age, projectId);
+        return null;
     }
 
     /** 当前游戏日（世界时钟不可用返回 null——不缓存，每次重算）。 */
@@ -496,7 +536,7 @@ public class WorldOutlookService {
         return t.length() > max ? t.substring(0, max) + "…" : t;
     }
 
-    /** 缓存条目（生成时的游戏日 + 预测段文本）。 */
-    private record CachedOutlook(Long gameDay, String segment) {
+    /** 缓存条目（生成时的游戏日 + 预测段文本 + 生成时刻，供游戏日不可用时按 TTL 兜底）。 */
+    private record CachedOutlook(Long gameDay, String segment, long createdAtMs) {
     }
 }

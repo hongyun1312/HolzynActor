@@ -108,6 +108,18 @@ public class ActorInfoPacket {
     @Column(name = "status", length = 20)
     private String status = "active";
 
+    /** 来源事件 ID（info.packet 效果；溯源要求非空） */
+    @Column(name = "source_event_id")
+    private Long sourceEventId;
+
+    /** 主体 ref（谁的事；可空） */
+    @Column(name = "subject_ref", length = 64)
+    private String subjectRef;
+
+    /** 关联事实键（可空；事实类传闻用） */
+    @Column(name = "fact_key", length = 120)
+    private String factKey;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

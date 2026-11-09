@@ -33,8 +33,14 @@ import com.holzyn.actor.domain.npc.relation.entity.ActorCharacterRelation;
 import com.holzyn.actor.domain.npc.relation.repository.ActorCharacterRelationRepository;
 import com.holzyn.actor.domain.npc.state.entity.ActorNpcState;
 import com.holzyn.actor.domain.npc.state.service.NpcStateService;
+import com.holzyn.actor.domain.world.entity.ActorWorldEntity;
+import com.holzyn.actor.domain.world.entity.ActorWorldLocation;
+import com.holzyn.actor.domain.world.entity.ActorWorldMacroEvent;
 import com.holzyn.actor.domain.world.entity.ActorWorldSetting;
+import com.holzyn.actor.domain.world.repository.ActorWorldEntityRepository;
+import com.holzyn.actor.domain.world.repository.ActorWorldMacroEventRepository;
 import com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository;
+import com.holzyn.actor.domain.world.repository.WorldLocationRepository;
 import com.holzyn.actor.domain.world.service.SeasonService;
 import com.holzyn.actor.domain.world.service.WorldClockService;
 import lombok.extern.slf4j.Slf4j;
@@ -45,8 +51,12 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 统一 AI 上下文注入器（角色视角 AI 调用 · 上下文富化）。
@@ -92,6 +102,35 @@ public class AiContextInjector {
     /** 世界观设定仓库（读最新版本；null=跳过世界观简报段） */
     @Autowired(required = false)
     private ActorWorldSettingRepository worldSettingRepository;
+
+    /** 地点仓库（可选依赖）：常驻前缀「地点」段来源。 */
+    @Autowired(required = false)
+    private WorldLocationRepository worldLocationRepository;
+
+    /**
+     * L3 实体状态仓库（可选依赖）：段 2F【所处之地】的地点当前状态/近期变化来源。
+     * <p>为什么是<b>实体状态</b>而不是感知段：{@code actor_world_entity} 是「世界视角公共状态」
+     * （谁都知道的客观事实），角色站在哪儿、那儿眼下是什么样，属于所有角色共享的世界层，
+     * 不是某个人的私有感知。段 2E【当前状态】只有饥饿/心情/健康等自身数值，
+     * 决策因此只能围着生理需求打转（澄江镇二日实跑：老吴 122 条行动里「铁料/炉子」出现 0 次）。
+     * null=未装配跳过本段（单测直接 new 构造时保持行为不变）。</p>
+     */
+    @Autowired(required = false)
+    private ActorWorldEntityRepository worldEntityRepository;
+
+    /** 宏观事件仓库（可选依赖）：段 2F「镇上的大动静」一行来源；null=跳过该行。 */
+    @Autowired(required = false)
+    private ActorWorldMacroEventRepository macroEventRepository;
+
+    /**
+     * 感知服务（可选依赖）：判定输入里的【空间约束】段由它按权威坐标生成。
+     *
+     * <p>⚠️ {@code @Lazy}：PerceptionService 自身会被多个运行时服务注入，本类又被十余个调用方
+     * 注入——直接强引用会在启动期形成 Bean 环（与 PersonaService 同一类问题）。</p>
+     */
+    @Lazy
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.agent.perception.PerceptionService perceptionService;
 
     /** 档案服务（11 维档案分片渲染；null=跳过档案段）
      *  ⚠️ @Lazy：AiContextInjector 被 12 类角色视角调用方注入，且自身又依赖
@@ -152,6 +191,24 @@ public class AiContextInjector {
     @Lazy
     @Autowired(required = false)
     private com.holzyn.actor.domain.world.service.WorldToneService worldToneService;
+
+    /**
+     * 决策模型判定上下文<b>精简装配</b>开关（实跑事故）。
+     * <p>为什么：决策模型是 0.6B 判定层，原全量装配给每个 state 前置「700 字世界常识 +
+     * 1500 字角色卡 + 三段纪律」≈ 2.6KB；12 states 批量请求达 20-34KB，实测单请求
+     * 5s 起步、34KB 报文 120s 未返回，把世界推进拖成超时重试风暴。</p>
+     * <p>精简后单 state 约 300-500 字符（世界一行 + 角色 3 行 + 情境 + 一行约束）。</p>
+     */
+    @Value("${holzyn.actor.context.decision-compact:true}")
+    private boolean decisionCompact;
+
+    /** 精简装配·角色行字符上限（默认 220；<=0 视为默认值） */
+    @Value("${holzyn.actor.context.decision-card-chars:220}")
+    private int decisionCardChars;
+
+    /** 精简装配·世界行字符上限（默认 48；<=0 视为默认值） */
+    @Value("${holzyn.actor.context.decision-world-chars:48}")
+    private int decisionWorldChars;
 
     // ==================== V2.0 判定输入固定段文本（段 1B / 段 3I / 段 3J） ====================
 
@@ -572,7 +629,359 @@ public class AiContextInjector {
         if (!state.isBlank()) {
             segs.add(state);
         }
+        String locality = localitySegment(projectId, characterRef, gameSecond);
+        if (!locality.isBlank()) {
+            segs.add(locality);
+        }
         return segs.isEmpty() ? "" : String.join("\n\n", segs);
+    }
+
+    // ==================== 段 2F【所处之地】（世界状态进入行动决策） ====================
+
+    /**
+     * 段 2F 标题（去重判据：情境已含本段时不重复注入，防 prompt 双份）。
+     */
+    public static final String SEG_2F_HEADER = "【所处之地】";
+
+    /** 段 2F 字符预算（默认 320；&lt;=0 视为默认值） */
+    @Value("${holzyn.actor.context.locality-chars:320}")
+    private int localityChars;
+
+    /** 段 2F 单行裁剪上限（地点当前状态/近期变化） */
+    private static final int LOCALITY_LINE_MAX = 90;
+
+    /** 段 2F 旁证行裁剪上限（其它实体近期变化/宏观事件） */
+    private static final int LOCALITY_SIDE_MAX = 60;
+
+    /**
+     * 段 2F · 所处之地（世界状态进入行动决策的唯一装配口）。
+     *
+     * <p><b>为什么需要这一段</b>：澄江镇二日实跑的根因诊断是「叙事会说话、决策不会动」——
+     * 剧情全在编年史与对话里，行动层只有生理循环（觅食/饮水/稍候片刻/找人说说话）。
+     * 逐通道排查定位到装配层：{@code actor_world_entity}（地点当前状态/近期变化）与
+     * 当轮宏观事件在 {@code action} 决策 prompt 里出现 <b>0 次</b>，而反事实探针证明
+     * 一旦接上，输出分布位移可达 TV=0.833。所以不是模型不动，是喂进去的东西里
+     * 根本没有「此刻此地发生了什么」。</p>
+     *
+     * <p><b>四行结构</b>（逐行降级，任一缺失跳过该行）：</p>
+     * <ol>
+     * <li>{@code 这里眼下}：脚下这块地的 {@code current_state}；</li>
+     * <li>{@code 刚刚的变化}：同一行的 {@code recent_change}（最近一次状态变化）；</li>
+     * <li>{@code 四下里的动静}：其它实体（地点/人物/势力）近一两日的 {@code recent_change}，
+     * 最多 2 条——这是「消息传进耳朵」的最短路径；</li>
+     * <li>{@code 镇上的大动静}：最近一次重要度 ≥3 的宏观事件标题（旱情/歉收/黑船这类
+     * 影响全镇的事，不该只活在编年史里）。</li>
+     * </ol>
+     *
+     * <p><b>只陈述事实，不替角色做决定</b>：末行仅提示「要不要理会、怎么理会自己掂量」，
+     * 不指定行动（世界层只提供「势」，行动决策权仍在 AI，设计原则不变）。</p>
+     *
+     * <p><b>fail-open</b>：未装配/{@code projectId} 空/任何异常 → 返回空串（零阻断），
+     * 段 2D/2E 与决策主流程不受影响。</p>
+     *
+     * @param projectId 项目 ID（可空）
+     *
+     * @param characterRef 角色引用（{@code npc:{id}}；可空=只给「四下里的动静 + 时局」）
+     *
+     * @param gameSecond 游戏时刻（秒；可空=只给静态行，不按日筛宏观事件）
+     *
+     * @return 段 2F 文本（空串=无数据/未装配/读取失败）
+     */
+    public String localitySegment(Long projectId, String characterRef, Long gameSecond) {
+        if (projectId == null || worldEntityRepository == null) {
+            return "";
+        }
+        try {
+            long day = gameSecond == null || gameSecond <= 0 ? -1L : Math.floorDiv(gameSecond, 86400L);
+            List<String> lines = new ArrayList<>();
+            ActorCharacter self = characterOf(characterRef);
+            String hereName = self == null ? null : self.getLocation();
+            ActorWorldEntity here = locationEntity(projectId, hereName);
+            if (here != null) {
+                if (here.getName() != null && !here.getName().isBlank()) {
+                    hereName = here.getName();
+                }
+                addLocalityLine(lines, "这里眼下", clip(here.getCurrentState(), LOCALITY_LINE_MAX));
+                addLocalityLine(lines, "刚刚的变化", clip(here.getRecentChange(), LOCALITY_LINE_MAX));
+            }
+            // 四下里的动静：其它实体的近期变化（排除脚下的地点、角色本人与同源事件，最多 2 条）
+            boolean sideAdded = false;
+            for (ActorWorldEntity e : nearbyChanges(projectId, here, self, day)) {
+                addLocalityLine(lines, sideAdded ? "" : "四下里的动静",
+                        entityLabel(e) + "：" + clip(e.getRecentChange(), LOCALITY_SIDE_MAX));
+                sideAdded = true;
+                if (lines.size() >= 4) {
+                    break;
+                }
+            }
+            // 镇上的大动静：最近一次重要度 ≥3 的宏观事件（旱/歉收/黑船这类全镇级消息）
+            String macroLine = latestMacroLine(projectId, day);
+            if (!macroLine.isBlank()) {
+                addLocalityLine(lines, "镇上的大动静", macroLine);
+            }
+            if (lines.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder(SEG_2F_HEADER);
+            if (hereName != null && !hereName.isBlank()) {
+                sb.append(hereName);
+            }
+            int budget = localityChars > 0 ? localityChars : 320;
+            int used = sb.length();
+            for (String line : lines) {
+                if (used + line.length() + 1 > budget) {
+                    break;
+                }
+                sb.append('\n').append(line);
+                used += line.length() + 1;
+            }
+            if (sb.length() <= SEG_2F_HEADER.length()) {
+                return "";
+            }
+            // 有「当场的动静」才加一句行动提示（纯背景时不给，避免每轮都催角色找事做）
+            boolean hasLiveChange = sideAdded
+                    || (here != null && here.getRecentChange() != null && !here.getRecentChange().isBlank());
+            if (hasLiveChange) {
+                sb.append("\n（这些动静也许与你有关，也许无关；要不要理会、怎么理会，你自己掂量）");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.debug("[上下文注入] 段2F 所处之地失败（跳过）: ref={} : {}", characterRef, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 段 2F 单行版（决策模型 快判路径用）：把「此地刚有什么变化」压成一行 ≤80 字。
+     *
+     * <p><b>为什么不直接喂完整段 2F</b>：空间快判走的是 0.6B 判定层，实跑事故
+     * 证明单次请求报文从 20KB 涨到 34KB 就会把世界推进拖成超时重试风暴。快判要的不是
+     * 完整世界描述，而是<b>一个具体的钩子</b>——脚边刚发生了什么；所以这里只给一行。</p>
+     *
+     * <p>取值顺序：地点 {@code recent_change} → 最近一次重要度 ≥3 的宏观事件标题；
+     * 都没有返回空串（快判情境零变化，行为与前一致）。</p>
+     *
+     * @param projectId 项目 ID（可空）
+     *
+     * @param characterRef 角色引用（{@code npc:{id}}；可空）
+     *
+     * @param gameSecond 游戏时刻（秒；可空）
+     *
+     * @return 单行提示（空串=无变化/未装配/读取失败）
+     */
+    public String localityHint(Long projectId, String characterRef, Long gameSecond) {
+        if (projectId == null || worldEntityRepository == null) {
+            return "";
+        }
+        try {
+            long day = gameSecond == null || gameSecond <= 0 ? -1L : Math.floorDiv(gameSecond, 86400L);
+            ActorCharacter self = characterOf(characterRef);
+            ActorWorldEntity here = locationEntity(projectId, self == null ? null : self.getLocation());
+            if (here != null && here.getRecentChange() != null && !here.getRecentChange().isBlank()) {
+                return "此地刚有变化：" + clip(here.getRecentChange(), LOCALITY_SIDE_MAX);
+            }
+            String macroLine = latestMacroLine(projectId, day);
+            return macroLine.isBlank() ? "" : "镇上近来的动静：" + clip(macroLine, LOCALITY_SIDE_MAX);
+        } catch (Exception e) {
+            log.debug("[上下文注入] 段2F 单行版失败（跳过）: ref={} : {}", characterRef, e.getMessage());
+            return "";
+        }
+    }
+
+    /** 角色实体（{@code actor_profile} 行；解析失败返回 null）。 */
+    private ActorCharacter characterOf(String characterRef) {
+        if (characterRepository == null || characterRef == null || characterRef.isBlank()) {
+            return null;
+        }
+        try {
+            Long id = NpcRefs.idOf(characterRef);
+            return id == null ? null : characterRepository.findById(id).orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 地点当前有效实体行：先按规范键 {@code location:地点名} 精确取，未命中再按显示名在地点域兜底。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param locationName 地点名（可空）
+     *
+     * @return 实体行（null=无此地点状态）
+     */
+    private ActorWorldEntity locationEntity(Long projectId, String locationName) {
+        if (worldEntityRepository == null || locationName == null || locationName.isBlank()) {
+            return null;
+        }
+        String key = ActorWorldEntity.TYPE_LOCATION + ":" + locationName.trim();
+        Optional<ActorWorldEntity> exact = worldEntityRepository
+                .findTopByProjectIdAndEntityKeyAndValidToGameDayIsNullOrderByIdDesc(projectId, key);
+        if (exact.isPresent()) {
+            return exact.get();
+        }
+        for (ActorWorldEntity e : worldEntityRepository
+                .findByProjectIdAndEntityTypeAndValidToGameDayIsNullOrderByIdDesc(
+                        projectId, ActorWorldEntity.TYPE_LOCATION)) {
+            if (e.getName() != null && locationName.trim().equals(e.getName().trim())) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 其它实体的近期变化（排除指定实体 / 角色本人 / <b>与脚下地点同源的事件</b>；按更新时间倒序，最多 2 条）。
+     *
+     * <p><b>为什么要按事件源去重</b>：复验里出现「同一件事说两遍」——地点行（{@code recent_change}）
+     * 与人物行（该事件同时刷了参与者的实体状态）都写了「河神庙夜聚，众人信任加深」，
+     * 于是「刚刚的变化」和「四下里的动静」各说一遍。读起来像是两件独立的事，
+     * 实际只有一件，反而稀释了真正的新消息。这里按
+     * {@code (provenance, provenance_ref)} 与变化文本双重去重：同一条事件只留脚下地点那一行。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param here      脚下的地点实体（可空=无地点视角，不做同源去重）
+     *
+     * @param self      角色本人（可空）
+     *
+     * @param day       当前游戏日（&lt;=0 不按日筛）
+     *
+     * @return 其它实体（最多 2 条）
+     */
+    private List<ActorWorldEntity> nearbyChanges(Long projectId, ActorWorldEntity here,
+                                                 ActorCharacter self, long day) {
+        List<ActorWorldEntity> out = new ArrayList<>();
+        if (worldEntityRepository == null) {
+            return out;
+        }
+        String excludeKey = here == null ? null : here.getEntityKey();
+        String hereSource = here == null ? null : sourceKeyOf(here);
+        Set<String> seenChanges = new HashSet<>();
+        if (here != null && here.getRecentChange() != null && !here.getRecentChange().isBlank()) {
+            seenChanges.add(normalizeChange(here.getRecentChange()));
+        }
+        String selfKey = null;
+        if (self != null && self.getId() != null) {
+            selfKey = ActorWorldEntity.TYPE_PERSON + ":" + NpcRefs.of(self.getId());
+        }
+        String selfName = self == null ? null : self.getName();
+        for (ActorWorldEntity e : worldEntityRepository
+                .findTop20ByProjectIdAndValidToGameDayIsNullAndRecentChangeIsNotNullOrderByUpdatedAtDescIdDesc(projectId)) {
+            if (e.getEntityKey() == null || e.getEntityKey().equals(excludeKey)) {
+                continue;
+            }
+            if (selfKey != null && e.getEntityKey().equals(selfKey)) {
+                continue;
+            }
+            // 人物实体也可能按姓名建键（person:姓名）：同名一律不当作「四下里的动静」
+            if (selfName != null && !selfName.isBlank() && selfName.equals(e.getName())) {
+                continue;
+            }
+            if (e.getRecentChange() == null || e.getRecentChange().isBlank()) {
+                continue;
+            }
+            // 与脚下地点同源（同一条事件同时刷新了地点与人物/势力）→ 已经说过，不再重复
+            String source = sourceKeyOf(e);
+            if (hereSource != null && hereSource.equals(source)) {
+                continue;
+            }
+            // 同一句变化文本（不同实体被同一事件刷成同一句话）→ 只说一次
+            if (!seenChanges.add(normalizeChange(e.getRecentChange()))) {
+                continue;
+            }
+            // 只留「近一两日」的变化：更旧的已经在编年史里，重复注入等于稀释当下
+            if (day > 0 && e.getValidFromGameDay() != null && e.getValidFromGameDay() < day - 1) {
+                continue;
+            }
+            out.add(e);
+            if (out.size() >= 2) {
+                break;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 实体状态行的来源标识（{@code provenance:provenanceRef}；无 ref 返回 null=不参与同源去重）。
+     *
+     * @param e 实体行（可空）
+     *
+     * @return 来源标识（null=无事件来源，无法判同源）
+     */
+    private static String sourceKeyOf(ActorWorldEntity e) {
+        if (e == null || e.getProvenanceRef() == null) {
+            return null;
+        }
+        return (e.getProvenance() == null ? "" : e.getProvenance()) + ":" + e.getProvenanceRef();
+    }
+
+    /**
+     * 变化文本归一（去空白/去标点差异，用于「同一句话」判定）。
+     *
+     * @param change 变化描述（可空）
+     *
+     * @return 归一文本（可空）
+     */
+    private static String normalizeChange(String change) {
+        if (change == null) {
+            return "";
+        }
+        return change.replaceAll("[\\s，。、；：！？,. ;:!?]", "");
+    }
+
+    /** 最近一次重要度 ≥3 的宏观事件标题行（当天优先，回退前一日；无事件返回空串）。 */
+    private String latestMacroLine(Long projectId, long day) {
+        if (macroEventRepository == null || day <= 0) {
+            return "";
+        }
+        try {
+            List<ActorWorldMacroEvent> events = macroEventRepository
+                    .findByProjectIdAndGameDayBetweenAndSeverityGreaterThanEqualOrderByGameDayAsc(
+                            projectId, day - 1, day, 3);
+            if (events == null || events.isEmpty()) {
+                return "";
+            }
+            ActorWorldMacroEvent latest = events.get(events.size() - 1);
+            String title = latest.getTitle() == null || latest.getTitle().isBlank()
+                    ? latest.getEventType() : latest.getTitle().trim();
+            StringBuilder sb = new StringBuilder(title);
+            // 叙事只在「能整句装下」时才带：截半句会出现「阿珍的菜摊上，（重要度 4）」这种断头话，
+            // 反而把一条有用的时局读成噪声；装不下就只给标题。
+            String narrative = latest.getNarrative() == null ? "" : latest.getNarrative().trim();
+            if (!narrative.isEmpty() && narrative.length() <= LOCALITY_SIDE_MAX) {
+                sb.append("——").append(narrative);
+            }
+            if (latest.getSeverity() != null) {
+                sb.append("（重要度 ").append(latest.getSeverity()).append("）");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.debug("[上下文注入] 段2F 宏观事件行失败（跳过）: project={} : {}", projectId, e.getMessage());
+            return "";
+        }
+    }
+
+    /** 实体显示名（name 优先，缺失回退 entity_key 冒号后的部分）。 */
+    private static String entityLabel(ActorWorldEntity e) {
+        if (e.getName() != null && !e.getName().isBlank()) {
+            return e.getName().trim();
+        }
+        String key = e.getEntityKey() == null ? "" : e.getEntityKey();
+        int idx = key.indexOf(':');
+        return idx >= 0 && idx + 1 < key.length() ? key.substring(idx + 1) : key;
+    }
+
+    /** 段 2F 行追加（label 空=续行，缩进对齐；value 空=整行跳过）。 */
+    private static void addLocalityLine(List<String> lines, String label, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        if (label == null || label.isBlank()) {
+            lines.add("  · " + value.trim());
+        } else {
+            lines.add("- " + label + "：" + value.trim());
+        }
     }
 
     /**
@@ -620,9 +1029,804 @@ public class AiContextInjector {
         if (!base.isBlank()) {
             segs.add("【本次情境】\n" + base);
         }
+        String constraint = spatialConstraintLine(projectId, characterRef);
+        if (!constraint.isBlank()) {
+            segs.add(constraint);
+        }
         segs.add("【行为护栏】\n" + SEG_3I_BEHAVIOR_GUARD);
         segs.add("【输出契约】\n" + SEG_3J_OUTPUT_CONTRACT);
         return String.join("\n\n", segs).trim();
+    }
+
+    // ==================== 常驻前缀（跨场景稳定头 · 缓存命中率） ====================
+
+    /**
+     * 常驻前缀总开关（{@code holzyn.actor.context.stable-prefix}）。
+     * <p>关掉即回到「契约 + 世界观」的两段头，用于对照实验。</p>
+     */
+    @Value("${holzyn.actor.context.stable-prefix:true}")
+    private boolean stablePrefixEnabled;
+
+    /** 名册单人预算（字符）：姓名/年龄/性别/身份/归属/常在/性格/说话风格，默认 150。 */
+    @Value("${holzyn.actor.context.stable-person-chars:150}")
+    private int stablePersonChars;
+
+    /** 地点单条预算（字符）：名称（类型）：简介，默认 90。 */
+    @Value("${holzyn.actor.context.stable-location-chars:90}")
+    private int stableLocationChars;
+
+    /** 民情常识预算（字符）：来自 {@code actor_world_setting.common_knowledge}，默认 600。 */
+    @Value("${holzyn.actor.context.stable-custom-chars:600}")
+    private int stableCustomChars;
+
+    /** 常驻前缀缓存：projectId → [写入毫秒, 文本]；TTL 见 {@link #STABLE_PREFIX_TTL_MS}。 */
+    private final Map<Long, String[]> stablePrefixCache = new ConcurrentHashMap<>();
+
+    /** 常驻前缀缓存有效期（毫秒）：名册/地点改动后最迟 5 分钟生效。 */
+    private static final long STABLE_PREFIX_TTL_MS = 300_000L;
+
+    /**
+     * 常驻前缀：本世界「跨场景、跨角色逐字一致」的一段文字，排在每个 AI 请求的最前面。
+     *
+     * <p><b>为什么需要它</b>：两游戏日实测（run3，3,188 次 deepseek-v4-flash 调用）
+     * 命中率仅 32.35%。根因不是排版错，而是<b>连续稳定前缀只有约 780 token</b>
+     * （共享契约 827 字符 + 世界设定 1,141 字符，若 system 段 370 字符也算入约 1,940 token），
+     * 而服务端缓存以 2048 token 为块向下取整——头跨不过第一块，后续易变内容再多也不计。
+     * 本方法把「全镇名册 + 地点 + 民情常识」这类本来就恒定、却散落在各场景正文里的内容
+     * 前移到头里，把稳定前缀从 1 块推到 2-3 块。</p>
+     *
+     * <p><b>边界</b>：只放「世界级恒定」内容，绝不放时间/天气/在场者/当前状态等易变值——
+     * 头里出现一个会变的字符，整段缓存即失效。缓存 5 分钟，覆盖名册/地点编辑。</p>
+     *
+     * @param projectId 项目 ID（可空）
+     *
+     * @return 常驻前缀文本（无数据/关闭/异常返回空串，调用方按空串降级）
+     */
+    public String stablePrefix(Long projectId) {
+        if (!stablePrefixEnabled || projectId == null) {
+            return "";
+        }
+        long now = System.currentTimeMillis();
+        String[] cached = stablePrefixCache.get(projectId);
+        if (cached != null && now - Long.parseLong(cached[0]) < STABLE_PREFIX_TTL_MS) {
+            return cached[1];
+        }
+        String text;
+        try {
+            text = buildStablePrefix(projectId);
+        } catch (Exception e) {
+            log.debug("[上下文注入] 常驻前缀组装失败（降级为空）: project={} : {}", projectId, e.getMessage());
+            text = "";
+        }
+        stablePrefixCache.put(projectId, new String[] {String.valueOf(now), text});
+        return text;
+    }
+
+    /**
+     * 组装常驻前缀：段头 + 人物名册 + 地点 + 民情常识（任一段为空则跳过该段）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 常驻前缀文本（三段全空返回空串）
+     */
+    private String buildStablePrefix(Long projectId) {
+        List<ActorWorldLocation> locations = loadLocations(projectId);
+        List<ActorCharacter> characters = loadCharacters(projectId);
+        Map<Long, String> locById = locationIndex(locations);
+        String places = locationBlock(locations);
+        String roster = rosterBlock(characters, locById, new java.util.HashSet<>(locById.values()));
+        String kinship = kinshipBlock(projectId, characterNames(characters));
+        String customs = customsBlock(projectId);
+        if (roster.isBlank() && places.isBlank() && customs.isBlank()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(6144);
+        sb.append("—— 常驻设定（对这个世界恒定；任何场景都当作既定事实，不得改写、不得张冠李戴） ——");
+        if (!roster.isBlank()) {
+            sb.append('\n').append(roster);
+        }
+        if (!kinship.isBlank()) {
+            sb.append('\n').append(kinship);
+        }
+        if (!places.isBlank()) {
+            sb.append('\n').append(places);
+        }
+        if (!customs.isBlank()) {
+            sb.append('\n').append(customs);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 亲属关系段：只列血缘/婚姻/师徒这类<b>稳定</b>关系，不列好感/信任等每秒都在变的数值。
+     *
+     * <p><b>为什么只列亲属</b>：常驻前缀要逐字一致才有缓存价值，而 {@code affinity/trust}
+     * 每次互动都变；全量关系（本项目 66 条）本身也会把稳定头撑得远超缓存块边界，
+     * 多出来的部分既不被缓存、又摊薄命中率。只取「谁是谁的谁」这一层。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param rosterNames 名册姓名集合（只收双方都在册的关系）
+     *
+     * @return 亲属关系段（无数据返回空串）
+     */
+    private String kinshipBlock(Long projectId, java.util.Set<String> rosterNames) {
+        if (relationRepository == null || projectId == null) {
+            return "";
+        }
+        List<ActorCharacterRelation> rows;
+        try {
+            rows = relationRepository.findByProjectId(projectId);
+        } catch (Exception e) {
+            log.debug("[上下文注入] 亲属关系读取失败（跳过）: project={} : {}", projectId, e.getMessage());
+            return "";
+        }
+        if (rows == null || rows.isEmpty()) {
+            return "";
+        }
+        String[] kinWords = {"夫妻", "夫", "妻", "父", "母", "子", "女", "兄", "弟", "姐", "妹",
+            "爷", "奶", "祖", "孙", "叔", "伯", "姑", "姨", "舅", "侄", "甥", "婆", "媳", "婿", "亲"};
+        int max = 15;
+        StringBuilder sb = new StringBuilder("【亲属关系】（既定关系，不含当下好恶）");
+        int n = 0;
+        for (ActorCharacterRelation r : rows) {
+            if (r == null || r.getFromName() == null || r.getToName() == null || r.getRelationType() == null) {
+                continue;
+            }
+            String from = r.getFromName().trim();
+            String to = r.getToName().trim();
+            String type = r.getRelationType().trim();
+            if (from.isEmpty() || to.isEmpty() || type.isEmpty()) {
+                continue;
+            }
+            if (rosterNames != null && (!rosterNames.contains(from) || !rosterNames.contains(to))) {
+                continue;
+            }
+            boolean kin = false;
+            for (String w : kinWords) {
+                if (type.contains(w)) {
+                    kin = true;
+                    break;
+                }
+            }
+            if (!kin) {
+                continue;
+            }
+            sb.append('\n').append("- ").append(from).append(" — ").append(to).append("：").append(type);
+            if (++n >= max) {
+                break;
+            }
+        }
+        return n == 0 ? "" : sb.toString();
+    }
+
+    /**
+     * 读取本项目已建档地点（按排序号 + ID 升序；失败返回空表）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 地点列表（不返回 null）
+     */
+    private List<ActorWorldLocation> loadLocations(Long projectId) {
+        if (worldLocationRepository == null || projectId == null) {
+            return List.of();
+        }
+        try {
+            List<ActorWorldLocation> list =
+                    worldLocationRepository.findByProjectIdOrderBySortOrderAscIdAsc(projectId);
+            return list == null ? List.of() : list;
+        } catch (Exception e) {
+            log.debug("[上下文注入] 地点读取失败（跳过）: project={} : {}", projectId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 地点索引：ID → 名称，以及名称集合（判角色档案里的「所在地」是否可信）。
+     *
+     * @param locations 地点列表
+     *
+     * @return ID → 名称（不返回 null）
+     */
+    private Map<Long, String> locationIndex(List<ActorWorldLocation> locations) {
+        Map<Long, String> index = new java.util.LinkedHashMap<>();
+        if (locations == null) {
+            return index;
+        }
+        for (ActorWorldLocation loc : locations) {
+            if (loc != null && loc.getId() != null && notBlank(loc.getName())) {
+                index.put(loc.getId(), loc.getName().trim());
+            }
+        }
+        return index;
+    }
+
+    /**
+     * 人物名册段：本世界在册角色每人一行，按 ID 升序（顺序固定=字节固定）。
+     *
+     * @param list 角色列表
+     *
+     * @param locationNames 地点名集合（判「所在地」是否可信）
+     *
+     * @return 名册段（无角色返回空串）
+     */
+    private String rosterBlock(List<ActorCharacter> list, Map<Long, String> locById, java.util.Set<String> locationNames) {
+        if (list == null || list.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("【人物名册】（本世界在册角色；「性格/背景」是你判断他们言行举止的既定依据）");
+        int n = 0;
+        for (ActorCharacter ch : list) {
+            if (ch == null || ch.getName() == null || ch.getName().isBlank()) {
+                continue;
+            }
+            sb.append('\n').append("- ").append(rosterLine(ch, locById, locationNames));
+            n++;
+        }
+        return n == 0 ? "" : sb.toString();
+    }
+
+    /**
+     * 读取本项目在册角色（按 ID 升序；失败返回空表）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 角色列表（不返回 null）
+     */
+    private List<ActorCharacter> loadCharacters(Long projectId) {
+        if (characterRepository == null || projectId == null) {
+            return List.of();
+        }
+        try {
+            List<ActorCharacter> list = characterRepository.findByProjectIdOrderByIdAsc(projectId);
+            return list == null ? List.of() : list;
+        } catch (Exception e) {
+            log.debug("[上下文注入] 名册读取失败（跳过）: project={} : {}", projectId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 角色姓名集合（亲属关系段只收双方都在册的关系）。
+     *
+     * @param characters 角色列表
+     *
+     * @return 姓名集合（不返回 null）
+     */
+    private java.util.Set<String> characterNames(List<ActorCharacter> characters) {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        if (characters == null) {
+            return names;
+        }
+        for (ActorCharacter ch : characters) {
+            if (ch != null && notBlank(ch.getName())) {
+                names.add(ch.getName().trim());
+            }
+        }
+        return names;
+    }
+
+    /**
+     * 名册单人行：{@code 姓名，年龄，性别，身份，归属X，常在Y；性格：…；背景：…}。
+     *
+     * <p>「常在」只在档案所在地确实是已建档地点名时才出现——实测角色档案的 location 字段
+     * 常被填成别人的名字或俗称（「常在铁匠老吴」），直接拼进名册会污染全员常识。</p>
+     *
+     * @param ch 角色实体
+     *
+     * @param locationNames 地点名集合
+     *
+     * @return 单行文本（按 {@code stable-person-chars} 截断）
+     */
+    private String rosterLine(ActorCharacter ch, Map<Long, String> locById, java.util.Set<String> locationNames) {
+        List<String> head = new ArrayList<>(6);
+        head.add(ch.getName().trim());
+        if (ch.getAge() != null) {
+            head.add(ch.getAge() + "岁");
+        }
+        if (notBlank(ch.getGender())) {
+            head.add(ch.getGender().trim());
+        }
+        String role = notBlank(ch.getOccupation()) ? ch.getOccupation().trim()
+                : (notBlank(ch.getTitle()) ? ch.getTitle().trim() : "");
+        if (!role.isBlank()) {
+            head.add(role);
+        }
+        if (notBlank(ch.getAffiliation())) {
+            head.add("归属" + ch.getAffiliation().trim());
+        }
+        // 「常在」优先按 locationId 反查地名（可靠）；档案 location 字段常被填成别人的名字
+        // （实测「常在铁匠老吴」），只有它确实是已建档地点名时才采信。
+        String place = ch.getLocationId() == null ? null : locById.get(ch.getLocationId());
+        if (place == null && notBlank(ch.getLocation()) && locationNames != null
+                && locationNames.contains(ch.getLocation().trim())) {
+            place = ch.getLocation().trim();
+        }
+        if (place != null && !place.isBlank()) {
+            head.add("常在" + place);
+        }
+        StringBuilder sb = new StringBuilder(String.join("，", head));
+        String traits = traitSummary(ch.getId());
+        if (!traits.isBlank()) {
+            sb.append("；性格：").append(traits);
+        }
+        // 背景只取静态档案（detail），不含好感/信任等易变数值——否则常驻前缀每 5 分钟变一次，
+        // 缓存永远命中不了。
+        String detail = backgroundLine(ch);
+        if (!detail.isBlank()) {
+            sb.append("；背景：").append(detail);
+        }
+        int budget = stablePersonChars <= 0 ? 200 : stablePersonChars;
+        return clip(sb.toString(), Math.max(60, budget));
+    }
+
+    /**
+     * 名册用的一句话背景。
+     * <p>实测角色档案有两种形态：叙事段（「阿福是老陈机帆船上的帮手…」）与元数据段
+     * （{@code 【角色档案锚定】陈阿伯（渡口码头船夫，机帆船船长） 身份：… 性别：…}）。
+     * 后者直接截断会拼出「身份：机帆船船长 性别：男 种族：汉族 年龄：58」这类噪声，
+     * 且与名册行已有的年龄/性别/身份重复——只取括号里那句身份概括。</p>
+     *
+     * @param ch 角色实体
+     *
+     * @return 一句话背景（缺失返回空串）
+     */
+    private String backgroundLine(ActorCharacter ch) {
+        if (ch == null || !notBlank(ch.getDetail())) {
+            return "";
+        }
+        String detail = ch.getDetail().replaceAll("\\s+", " ").trim();
+        if (detail.contains("【角色档案锚定】")) {
+            int lp = detail.indexOf('（');
+            int rp = lp < 0 ? -1 : detail.indexOf('）', lp + 1);
+            if (lp >= 0 && rp > lp) {
+                return clip(detail.substring(lp + 1, rp).trim(), 60);
+            }
+        }
+        return clip(detail, 170);
+    }
+
+    /**
+     * 地点段：本世界已建档地点每条一行，按排序号 + ID 升序。
+     *
+     * @param list 地点列表
+     *
+     * @return 地点段（无地点返回空串）
+     */
+    private String locationBlock(List<ActorWorldLocation> list) {
+        if (list == null || list.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("【地点】（本世界已建档地点）");
+        int n = 0;
+        for (ActorWorldLocation loc : list) {
+            if (loc == null || loc.getName() == null || loc.getName().isBlank()) {
+                continue;
+            }
+            StringBuilder line = new StringBuilder(loc.getName().trim());
+            if (notBlank(loc.getType())) {
+                line.append("（").append(loc.getType().trim()).append("）");
+            }
+            if (notBlank(loc.getIntro())) {
+                line.append("：").append(loc.getIntro().trim());
+            }
+            int budget = stableLocationChars <= 0 ? 90 : stableLocationChars;
+            sb.append('\n').append("- ").append(clip(line.toString(), Math.max(30, budget)));
+            n++;
+        }
+        return n == 0 ? "" : sb.toString();
+    }
+
+    /**
+     * 民情常识段：只取 {@code common_knowledge}（世界观段已含文化/历史/设定，不重复注入）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 民情段（无常识返回空串）
+     */
+    private String customsBlock(Long projectId) {
+        if (worldSettingRepository == null) {
+            return "";
+        }
+        Optional<ActorWorldSetting> opt;
+        try {
+            opt = worldSettingRepository.findTopByProjectIdOrderByVersionDesc(projectId);
+        } catch (Exception e) {
+            log.debug("[上下文注入] 民情常识读取失败（跳过）: project={} : {}", projectId, e.getMessage());
+            return "";
+        }
+        if (opt.isEmpty() || !notBlank(opt.get().getCommonKnowledge())) {
+            return "";
+        }
+        int budget = stableCustomChars <= 0 ? 600 : stableCustomChars;
+        return "【民情常识】\n" + clip(opt.get().getCommonKnowledge().trim(), Math.max(120, budget));
+    }
+
+    // ==================== 决策模型判定·精简装配（实跑事故） ====================
+
+    /**
+     * 精简装配总开关（{@code holzyn.actor.context.decision-compact}）。
+     * <p>供判定门做「全局开关 ∧ 当前适配器是否本地打分模型」的与运算；形态由调用方
+     * （{@code DecisionGate}）按实际适配器选择 {@link #decisionInputCompact} 或
+     * {@link #decisionInput}。</p>
+     *
+     * @return true=允许精简（仍需调用方确认适配器类型）
+     */
+    public boolean decisionCompactEnabled() {
+        return decisionCompact;
+    }
+
+    /**
+     * 精简判定输入（决策模型 0.6B 判定层专用）。
+     * <p><b>为什么精简</b>：全量装配给每个 state 前置「世界常识 700 字 + 角色卡 1500 字 +
+     * 三段纪律」，12 states 批量请求达 20-34KB；实测 20KB 单请求 5s、34KB 120s 无响应，
+     * 世界推进被拖成超时重试风暴。判定层真正需要的是「谁、此刻什么处境、要判什么」。</p>
+     * <p>结构（单 state 约 300-500 字符）：
+     * {@code 【世界】名称｜时代｜时刻} → {@code 【角色】姓名，年龄，身份，归属；性格：…；此刻：…}
+     * → {@code 【情境】原 state} → {@code 【约束】一行}。</p>
+     *
+     * @param projectId 项目 ID（可空）
+     *
+     * @param characterRef 角色引用（{@code npc:{id}}；可空=只有世界行与情境）
+     *
+     * @param stateText 原判定输入（可空）
+     *
+     * @return 精简判定输入（全空时仍返回约束行，保证模型拿到输出纪律）
+     */
+    public String decisionInputCompact(Long projectId, String characterRef, String stateText) {
+        List<String> segs = new ArrayList<>(4);
+        String world = compactWorldLine(projectId);
+        if (!world.isBlank()) {
+            segs.add(world);
+        }
+        String role = compactCharacterLine(projectId, characterRef);
+        if (!role.isBlank()) {
+            segs.add(role);
+        }
+        String base = stateText == null ? "" : stateText.trim();
+        if (!base.isBlank()) {
+            segs.add("【情境】\n" + base);
+        }
+        String constraint = spatialConstraintLine(projectId, characterRef);
+        if (!constraint.isBlank()) {
+            segs.add(constraint);
+        }
+        segs.add("【约束】只依据情境中给出的事实判断，不臆测；按每个问题的判据给出概率。");
+        return String.join("\n", segs).trim();
+    }
+
+    /**
+     * 空间约束行（判定输入用）：把「在什么地方」翻译成「在这里能做什么、不能做什么」。
+     *
+     * <p><b>为什么判定输入需要它</b>：反事实实验（同角色、同目标、只换环境）
+     * 测出 TVD 只有 2.4%~9.6%，卡方 p=0.76——环境出现了，但没改变选择。原因之一是判定输入里
+     * 只有坐标和平铺叙述，没有「此处是别人家，进门要先敲门」这类可执行约束。这里把约束补上，
+     * 并保持一句话、同一位置逐字稳定（可缓存）。</p>
+     *
+     * @param projectId    项目 ID（可空）
+     *
+     * @param characterRef 角色引用（可空）
+     *
+     * @return 约束段（空串=不注入）
+     */
+    private String spatialConstraintLine(Long projectId, String characterRef) {
+        if (projectId == null || characterRef == null || characterRef.isBlank()
+                || perceptionService == null) {
+            return "";
+        }
+        try {
+            String text = perceptionService.spatialConstraint(projectId, characterRef, null);
+            return text == null ? "" : text.trim();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 精简世界行：{@code 【世界】名称｜题材｜年代｜地域｜当前时刻}。
+     * <p>判定层不需要百科式世界观；「哪个镇、什么年代、眼下什么时节」足以支撑处境判断。</p>
+     * <p><b>为什么要"适配"而不是"截断"</b>（用户要求）：整段 clip 到 48 字会把
+     * 「二〇〇三年夏，江南水乡，撤乡并镇之后的头一」这种半句喂给判定模型，语义不完整；
+     * 改为按句读整项取用（{@link #firstClause}）+ 超预算整项丢弃（{@link #fitParts}），
+     * 保证模型读到的是完整的「年代/地域/时刻」，宁可少一项也不给残句。</p>
+     *
+     * @param projectId 项目 ID（可空）
+     *
+     * @return 世界行（无数据返回空串）
+     */
+    private String compactWorldLine(Long projectId) {
+        List<String> bits = new ArrayList<>(5);
+        try {
+            if (projectId != null && worldSettingRepository != null) {
+                Optional<ActorWorldSetting> opt =
+                        worldSettingRepository.findTopByProjectIdOrderByVersionDesc(projectId);
+                if (opt.isPresent()) {
+                    ActorWorldSetting w = opt.get();
+                    if (notBlank(w.getName())) {
+                        bits.add(w.getName().trim());
+                    }
+                    if (notBlank(w.getGenre())) {
+                        bits.add(w.getGenre().trim());
+                    }
+                    String era = firstClause(w.getEra(), 24);
+                    if (!era.isBlank()) {
+                        bits.add(era);
+                    }
+                    String geo = firstClause(w.getGeography(), 14);
+                    if (!geo.isBlank()) {
+                        bits.add(geo);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[上下文注入] 精简世界行组装失败（跳过）: project={} : {}", projectId, e.getMessage());
+        }
+        // 时刻/时节放最后：它是唯一会随时间变的部分，放尾部不影响前面几项的稳定性
+        String dynamics = firstClause(worldDynamicsLine(projectId), 22);
+        if (!dynamics.isBlank()) {
+            bits.add(dynamics);
+        }
+        if (bits.isEmpty()) {
+            return "";
+        }
+        int budget = decisionWorldChars <= 0 ? 48 : decisionWorldChars;
+        return "【世界】" + fitParts(bits, Math.max(24, budget), "｜");
+    }
+
+    /**
+     * 精简角色行：{@code 【角色】姓名，性别，年龄，身份，归属X；性格：3 个关键词；此刻：正在…，状态位}。
+     * <p>保留「身份 + 性格关键词 + 当下生理/活动」，丢弃 11 维全量档案与核心记忆长段。</p>
+     * <p><b>整项装填</b>（用户要求）：按优先级「姓名/性别/年龄/身份 → 归属 → 性格 → 此刻」
+     * 逐项累加，超预算就整项跳过——不再把「米行掌柜」切成「米行掌」。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param characterRef 角色引用（{@code npc:{id}}）
+     *
+     * @return 角色行（无数据返回空串）
+     */
+    private String compactCharacterLine(Long projectId, String characterRef) {
+        if (projectId == null || characterRef == null || characterRef.isBlank() || characterRepository == null) {
+            return "";
+        }
+        Long characterId = NpcRefs.idOf(characterRef);
+        if (characterId == null) {
+            return "";
+        }
+        try {
+            ActorCharacter ch = characterRepository.findById(characterId).orElse(null);
+            if (ch == null) {
+                return "";
+            }
+            int budget = decisionCardChars <= 0 ? 220 : decisionCardChars;
+            List<String> head = new ArrayList<>(4);
+            head.add(notBlank(ch.getName()) ? ch.getName().trim() : "该角色");
+            if (notBlank(ch.getGender())) {
+                head.add(ch.getGender().trim());
+            }
+            if (ch.getAge() != null) {
+                head.add(ch.getAge() + "岁");
+            }
+            if (notBlank(ch.getOccupation())) {
+                head.add(ch.getOccupation().trim());
+            } else if (notBlank(ch.getTitle())) {
+                head.add(ch.getTitle().trim());
+            }
+            StringBuilder sb = new StringBuilder("【角色】").append(String.join("，", head));
+            // 归属（低优先，放不下就丢）
+            if (notBlank(ch.getAffiliation())) {
+                appendWithin(sb, "，归属" + ch.getAffiliation().trim(), budget);
+            }
+            // 性格：只取前 3 个关键词（整词，不切字）
+            String traits = traitKeywords(characterId, 3);
+            if (!traits.isBlank()) {
+                appendWithin(sb, "；性格：" + traits, budget);
+            }
+            // 此刻：正在做的事 + 状态位（各自的整句/整项）
+            List<String> now = new ArrayList<>(2);
+            if (notBlank(ch.getCurrentActivity())) {
+                String act = firstClause(ch.getCurrentActivity(), 14);
+                if (!act.isBlank()) {
+                    now.add("正在" + act);
+                }
+            }
+            String flags = firstClause(stateBits(projectId, characterRef).replace("【当前状态】", "").trim(), 24);
+            if (!flags.isBlank()) {
+                now.add(flags);
+            }
+            if (!now.isEmpty()) {
+                appendWithin(sb, "；此刻：" + String.join("，", now), budget);
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.debug("[上下文注入] 精简角色行组装失败（跳过）: ref={} : {}", characterRef, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 性格关键词：取「特质摘要」整行后按顿号/逗号切词，取前 {@code max} 个整词。
+     *
+     * @param characterId 角色 ID
+     *
+     * @param max 关键词个数
+     *
+     * @return 关键词串（缺失返回空串）
+     */
+    private String traitKeywords(Long characterId, int max) {
+        String line = personaLine(characterId, "特质摘要：", 160);
+        if (line.isBlank()) {
+            return "";
+        }
+        List<String> words = new ArrayList<>(4);
+        for (String w : line.split("[、，,；;]")) {
+            String t = w.trim();
+            if (!t.isEmpty()) {
+                words.add(t);
+            }
+            if (words.size() >= Math.max(1, max)) {
+                break;
+            }
+        }
+        return String.join("、", words);
+    }
+
+    /**
+     * 按预算追加一段：放得下才追加（整段取舍，绝不切断）。
+     *
+     * @param sb 目标缓冲
+     *
+     * @param seg 待追加段（自带前导标点）
+     *
+     * @param budget 字符预算
+     */
+    private static void appendWithin(StringBuilder sb, String seg, int budget) {
+        if (seg == null || seg.isEmpty() || budget <= 0) {
+            return;
+        }
+        if (sb.length() + seg.length() <= budget) {
+            sb.append(seg);
+        }
+    }
+
+    /**
+     * 整项装填：按顺序累加各项，直到再加一项就超预算为止（不切断任何一项）。
+     *
+     * @param parts 候选项（已按优先级排序）
+     *
+     * @param budget 字符预算
+     *
+     * @param sep 分隔符
+     *
+     * @return 拼接结果（至少返回第一项）
+     */
+    private static String fitParts(List<String> parts, int budget, String sep) {
+        if (parts == null || parts.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(parts.get(0));
+        for (int i = 1; i < parts.size(); i++) {
+            String p = parts.get(i);
+            if (p == null || p.isBlank()) {
+                continue;
+            }
+            if (sb.length() + sep.length() + p.length() > budget) {
+                break;
+            }
+            sb.append(sep).append(p);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 取整句：按句读（。；！？，、）切分，累加整句直到超过 {@code max} 字符。
+     * <p>用于「适配而非截断」——返回的永远是完整的句子片段，不会是半句。</p>
+     *
+     * @param text 原文（可空）
+     *
+     * @param max 字符上限
+     *
+     * @return 整句片段（原文为空返回空串）
+     */
+    private static String firstClause(String text, int max) {
+        if (text == null) {
+            return "";
+        }
+        String s = text.replaceAll("\\s+", " ").trim();
+        if (s.isEmpty()) {
+            return "";
+        }
+        if (max <= 0 || s.length() <= max) {
+            return s;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String frag : s.split("(?<=[。；！？，、])")) {
+            String f = frag.trim();
+            if (f.isEmpty()) {
+                continue;
+            }
+            if (sb.length() + f.length() > max) {
+                break;
+            }
+            sb.append(f);
+        }
+        if (sb.length() == 0) {
+            // 整段没有句读（如英文名/无标点活动描述）：取第一段空白词，仍然不切字
+            int sp = s.indexOf(' ');
+            return sp > 0 && sp <= max ? s.substring(0, sp) : s;
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 性格关键词摘要：从精简分片档案（场景 {@code decision_compact}）取「特质摘要」一行。
+     * <p>判定层只吃性格关键词（寡言/守时/怕水…），不需要 OCEAN 数值与十维细节。</p>
+     *
+     * @param characterId 角色 ID
+     *
+     * @return 特质摘要（缺失返回空串）
+     */
+    private String traitSummary(Long characterId) {
+        return personaLine(characterId, "特质摘要：", 40);
+    }
+
+    /**
+     * 从精简分片档案（场景 {@code decision_compact}）取某一行特征文本。
+     * <p>供性格关键词与说话风格共用：名册只要一两行，不要 11 维全量。</p>
+     *
+     * @param characterId 角色 ID
+     *
+     * @param key 行首标签（如「特质摘要：」「言语风格：」）
+     *
+     * @param max 字符上限
+     *
+     * @return 该行内容（缺失返回空串）
+     */
+    private String personaLine(Long characterId, String key, int max) {
+        if (personaService == null || characterId == null || key == null || key.isEmpty()) {
+            return "";
+        }
+        try {
+            String text = personaService.renderShardsForScene(characterId, "decision_compact");
+            if (text == null || text.isBlank()) {
+                return "";
+            }
+            int idx = text.indexOf(key);
+            if (idx < 0) {
+                return "";
+            }
+            String rest = text.substring(idx + key.length());
+            int end = rest.indexOf('\n');
+            if (end < 0) {
+                end = rest.length();
+            }
+            return clip(rest.substring(0, end).trim(), max);
+        } catch (Exception e) {
+            log.debug("[上下文注入] 特征行读取失败（跳过）: id={} key={} : {}", characterId, key, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 按字符预算截断（句读优先：在最后一个「；，、。」处收口，避免半句进 Prompt）。
+     *
+     * @param text 原文
+     *
+     * @param max  字符上限（<=0 直接返回原文）
+     *
+     * @return 截断后文本
+     */
+    private static String clip(String text, int max) {
+        if (text == null) {
+            return "";
+        }
+        if (max <= 0 || text.length() <= max) {
+            return text;
+        }
+        String head = text.substring(0, max);
+        int cut = Math.max(Math.max(head.lastIndexOf('；'), head.lastIndexOf('，')),
+                Math.max(head.lastIndexOf('、'), head.lastIndexOf('。')));
+        return cut >= max / 2 ? head.substring(0, cut + 1) : head;
     }
 
     /**
@@ -670,8 +1874,8 @@ public class AiContextInjector {
     /**
      * 段 3I · 行为护栏（Post-History 高权重指令位，对话模板用）。
      * <p>V2.0 规范化结构 §3.4：历史后的指令约束力显著强于历史前（SillyTavern jailbreak 同构）。
-     * 单聊/群聊共用同一套护栏（第一人称 / 不替他人发言 / 只回复一轮 / 不跳出角色），
-     * 落在触发消息末尾（会话历史之后的高权重位）。</p>
+     * 单聊/群聊共用同一套护栏（第一人称 / 不替他人发言 / 只回复一轮 / 不跳出角色 /
+     * 认知边界以世界时代为限），落在触发消息末尾（会话历史之后的高权重位）。</p>
      *
      * @param name 角色名（可空=用「你」）
      *
@@ -681,7 +1885,17 @@ public class AiContextInjector {
         String who = name == null || name.isBlank() ? "你" : name;
         return "以【" + who + "】的第一人称说话，只说你自己的话：\n"
                 + "1. 不替其他角色（或玩家）发言、不代答、不转述或标注其他角色的台词；\n"
-                + "2. 只回复这一轮，不要替对方做决定，不要跳出角色。";
+                + "2. 只回复这一轮，不要替对方做决定，不要跳出角色；\n"
+                + "3. 你的见识以这个世界和这个时代为限：凡此处尚不存在的东西，你都没见过也没听过，"
+                + "不能声称「见过／晓得／听人说过」，更不能指认它的本地来历——如实表现出不解，"
+                + "或拿你熟悉的东西作比；但不要每次都用同一句话搪塞（别反复说「没听说过」「头一回听说」），"
+                + "换着法子说不认得，或用你熟悉的东西打个比方；\n"
+                + "4. 对方告诉你的、关于你自己或你亲人的新消息，只要当场没有确凿反证，就要当真："
+                + "先做出反应，并在之后的话里按它行事，不能装作没听见、也不能直接回到旧说法；\n"
+                + "5. 同一个问题被再问一次时，不能把先前的答复原样再背一遍——要么给新的细节，"
+                + "要么承认自己方才说得不清楚、把话往深里说一层；\n"
+                + "6. 不要每一轮都用同一套动作或神态开场（例如每次都「拇指摩挲铜印系绳」）："
+                + "手上的动作、看的地方、语气的轻重都要跟着眼前这件事变，没动作时就直说。";
     }
 
     /**

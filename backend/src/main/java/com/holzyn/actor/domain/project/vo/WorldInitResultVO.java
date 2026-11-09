@@ -39,6 +39,8 @@ package com.holzyn.actor.domain.project.vo;
 public record WorldInitResultVO(
         Long projectId,
         int locations,
+        /** 本次由 AI 生成的核心角色数（第 ③ 步「生成角色」；已有角色时为 0） */
+        int cast,
         int cards,
         int npcs,
         int relations,

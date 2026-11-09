@@ -297,7 +297,7 @@ public class EnvironmentStimulusService implements WorldEventSubscriber {
         boolean global = region == null || region.isBlank();
         List<ActorCharacter> targets = new ArrayList<>();
         for (ActorCharacter ch : chars) {
-            if (ch == null || Integer.valueOf(1).equals(ch.getDeleted()) || ch.isDeceased()) {
+            if (ch == null || Integer.valueOf(1).equals(ch.getDeleted()) || ch.isDeceased() || ch.isPlayer()) {
                 continue;
             }
             if (global || matchesRegion(ch.getLocation(), region)) {

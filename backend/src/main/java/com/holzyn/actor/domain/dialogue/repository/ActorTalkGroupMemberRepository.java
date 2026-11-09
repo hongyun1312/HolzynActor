@@ -41,4 +41,7 @@ public interface ActorTalkGroupMemberRepository extends JpaRepository<ActorTalkG
 
     /** 删除会话内全部成员（会话关闭/清理用）。 */
     void deleteBySessionId(Long sessionId);
+
+    /** 删除某角色在所有群聊会话中的成员行（角色软删除级联清理）。 */
+    void deleteByCharacterRef(String characterRef);
 }

@@ -21,6 +21,26 @@ holzyn:
       events-enabled: ${HOLOZYN_ACTOR_AGENT_EVENTS_ENABLED:true}
       # 事件滚动保护：每项目最多保留的事件条数（防无人值守逐时事件膨胀 H2；0=不限制）
       events-max-per-project: ${HOLOZYN_ACTOR_AGENT_EVENTS_MAX_PER_PROJECT:5000}
+    # 判定上下文装配（AiContextInjector）
+    context:
+      # 决策模型（0.6B 判定层）判定输入精简装配：true=世界一行+角色 3 行+情境+一行约束（约 300-500 字符/state）
+      # ⚠️实跑事故：全量装配 20-34KB/请求（12 states × 2.6KB），单请求 5s 起步、
+      #    34KB 报文 120s 无响应 → 世界推进超时重试风暴。false=切回全量（仅对照/复现用，勿长期开）
+      decision-compact: ${HOLOZYN_ACTOR_CONTEXT_DECISION_COMPACT:true}
+      # 精简角色行字符上限（身份+性格关键词+当下状态）
+      decision-card-chars: ${HOLOZYN_ACTOR_CONTEXT_DECISION_CARD_CHARS:220}
+      # 精简世界行字符上限（名称｜题材｜年代｜地域｜时刻；整项装填，超预算丢整项、不切半句）
+      decision-world-chars: ${HOLOZYN_ACTOR_CONTEXT_DECISION_WORLD_CHARS:64}
+      # 常驻前缀（跨场景稳定头）：true=在 user 正文前拼「人物名册 + 地点 + 民情常识」，
+      # 把连续稳定前缀从 1 个缓存块（≈2048 token）拉到 2-3 块；false=回到契约+世界观两段头（对照用）
+      # ⚠️两游戏日实测：命中率 32.35%，根因是稳定头仅 780-1940 token，跨不过缓存块
+      stable-prefix: ${HOLOZYN_ACTOR_CONTEXT_STABLE_PREFIX:true}
+      # 名册单人字符上限（姓名/年龄/性别/身份/归属/常在/性格/说话风格）
+      stable-person-chars: ${HOLOZYN_ACTOR_CONTEXT_STABLE_PERSON_CHARS:200}
+      # 地点单条字符上限（名称（类型）：简介）
+      stable-location-chars: ${HOLOZYN_ACTOR_CONTEXT_STABLE_LOCATION_CHARS:140}
+      # 民情常识字符上限（取 actor_world_setting.common_knowledge）
+      stable-custom-chars: ${HOLOZYN_ACTOR_CONTEXT_STABLE_CUSTOM_CHARS:600}
     # 感知上下文：对话/决策注入【当前所见】感知段
     perception:
       enabled: ${HOLOZYN_ACTOR_PERCEPTION_ENABLED:true}
@@ -333,7 +353,11 @@ holzyn:
         # 总开关（false=完全退回自由并发模型——不等待/不排队/小时级决策串行，快速回退用）
         enabled: ${HOLOZYN_ACTOR_WORLD_BARRIER_ENABLED:true}
         # 单 tick 等待在途任务的上限（毫秒；到点放行 + WARN 计数，不冻结世界）
-        max-wait-ms: ${HOLOZYN_ACTOR_WORLD_BARRIER_MAX_WAIT_MS:30000}
+        # 默认从 30000 降到 5000。实测本地 35B 单次决策 150~300 秒，
+        # 30 秒上限意味着每个 tick 都白等满 30 秒（rate=24 下等于 720 游戏秒 ≈ 2.4 个 tick），
+        # 世界推进速度被硬压到约 10 游戏秒/真实秒。慢依赖的写回本来就允许落在本 tick 之后，
+        # 5 秒足够吃掉「正常快模型」的尾巴；连续超时后还有自适应退避（1/2、1/4…）。
+        max-wait-ms: ${HOLOZYN_ACTOR_WORLD_BARRIER_MAX_WAIT_MS:5000}
         # 等待轮询间隔（毫秒）
         poll-ms: ${HOLOZYN_ACTOR_WORLD_BARRIER_POLL_MS:20}
         # 等待超过该时长才打 INFO（毫秒，避免正常 tick 刷屏）
@@ -379,6 +403,165 @@ holzyn:
       common-knowledge:
         # 定期扫描间隔（毫秒；默认 6 小时，对齐知识生命周期维护周期）
         scan-interval-ms: ${HOLOZYN_ACTOR_WORLD_COMMON_KNOWLEDGE_SCAN_INTERVAL_MS:21600000}
+    # ---- 角色↔世界闭环（地基：事实层/因果链/权威脚手架）----
+    # 总开关默认 true（整世界长跑后翻转）。
+    # 原来默认 false 是早期阶段的「不改变基线行为」策略；各阶段全部交付后，
+    # 这个默认值成了最大的孤岛来源：关着的时候对话不回写世界、事实不被感知、行动不裁决，
+    # 于是 I 阶段挂在裁决器上的吃/买/卖/做/装备全部不执行——实测角色「说吃了面包」但背包一件不少。
+    # 需要退回旧行为时仍可用 HOLOZYN_ACTOR_WORLD_LOOP_ENABLED=false 一键关闭。
+    world-loop:
+      enabled: ${HOLOZYN_ACTOR_WORLD_LOOP_ENABLED:true}
+      # 权威维度：auto（按 Unity 连接态）/ brain（桌面端强制后端权威）/ engine（接引擎）
+      authority:
+        mode: ${HOLOZYN_ACTOR_WORLD_LOOP_AUTHORITY_MODE:auto}
+        # 只允许世界关闭时切换权威（避免运行中半状态）
+        require-closed-for-switch: ${HOLOZYN_ACTOR_WORLD_LOOP_AUTHORITY_REQUIRE_CLOSED_FOR_SWITCH:true}
+        # hydrate 分页大小（每页事实条数）
+        hydrate-page-size: ${HOLOZYN_ACTOR_WORLD_LOOP_AUTHORITY_HYDRATE_PAGE_SIZE:500}
+        # 镜像超过该游戏分钟数未更新 → WARN + 决策标注过时
+        stale-warn-game-minutes: ${HOLOZYN_ACTOR_WORLD_LOOP_AUTHORITY_STALE_WARN_GAME_MINUTES:10}
+        # 允许的 drift 条数（0=任何 drift 都记 WARN）
+        drift-tolerance: ${HOLOZYN_ACTOR_WORLD_LOOP_AUTHORITY_DRIFT_TOLERANCE:0}
+      # 对话回写（只落配置，链路未接）
+      dialog:
+        enabled: ${HOLOZYN_ACTOR_WORLD_LOOP_DIALOG_ENABLED:true}
+        # 每 N 轮对话触发一次批量抽取
+        extract-batch-rounds: ${HOLOZYN_ACTOR_WORLD_LOOP_DIALOG_EXTRACT_BATCH_ROUNDS:6}
+        # 会话闲置多少游戏分钟后触发抽取
+        extract-idle-game-minutes: ${HOLOZYN_ACTOR_WORLD_LOOP_DIALOG_EXTRACT_IDLE_GAME_MINUTES:10}
+        # 每轮对话折算的游戏分钟（时间成本）
+        time-cost-minutes-per-round: ${HOLOZYN_ACTOR_WORLD_LOOP_DIALOG_TIME_COST_MINUTES_PER_ROUND:2}
+        # 是否向同地点广播对话事件
+        announce-to-location: ${HOLOZYN_ACTOR_WORLD_LOOP_DIALOG_ANNOUNCE_TO_LOCATION:true}
+      # 事实层（建能力，接线）
+      fact:
+        enabled: ${HOLOZYN_ACTOR_WORLD_LOOP_FACT_ENABLED:true}
+        # 决策提示词注入「我知道的事实」条数上限
+        prompt-top-k: ${HOLOZYN_ACTOR_WORLD_LOOP_FACT_PROMPT_TOP_K:8}
+        # 到期扫描周期（游戏小时）
+        sweep-cron-game-hours: ${HOLOZYN_ACTOR_WORLD_LOOP_FACT_SWEEP_CRON_GAME_HOURS:1}
+        # 秘密类事实是否生成传闻包
+        rumor-from-secret: ${HOLOZYN_ACTOR_WORLD_LOOP_FACT_RUMOR_FROM_SECRET:true}
+      # 行为裁决（只落配置）
+      adjudicate:
+        enabled: ${HOLOZYN_ACTOR_WORLD_LOOP_ADJUDICATE_ENABLED:true}
+        # 触发 AI 裁决的最低重要度
+        ai-min-importance: ${HOLOZYN_ACTOR_WORLD_LOOP_ADJUDICATE_AI_MIN_IMPORTANCE:4}
+        # AI 裁决最多返回的效果条数
+        ai-max-effects: ${HOLOZYN_ACTOR_WORLD_LOOP_ADJUDICATE_AI_MAX_EFFECTS:4}
+        # 规则无法判定时默认放行（fail-open；关开关时与现状一致）
+        default-allow: ${HOLOZYN_ACTOR_WORLD_LOOP_ADJUDICATE_DEFAULT_ALLOW:true}
+      # 因果链（建列，写入）
+      causal:
+        enabled: ${HOLOZYN_ACTOR_WORLD_LOOP_CAUSAL_ENABLED:true}
+        # 最大链深
+        max-depth: ${HOLOZYN_ACTOR_WORLD_LOOP_CAUSAL_MAX_DEPTH:6}
+        # 单条关联链最大节点数
+        max-nodes-per-chain: ${HOLOZYN_ACTOR_WORLD_LOOP_CAUSAL_MAX_NODES_PER_CHAIN:32}
+        # 单角色每游戏小时最多被动反应次数
+        max-reactions-per-actor-hour: ${HOLOZYN_ACTOR_WORLD_LOOP_CAUSAL_MAX_REACTIONS_PER_ACTOR_HOUR:6}
+      # NPC 主动性（默认关）
+      initiative:
+        enabled: ${HOLOZYN_ACTOR_WORLD_LOOP_INITIATIVE_ENABLED:false}
+        min-urgency: ${HOLOZYN_ACTOR_WORLD_LOOP_INITIATIVE_MIN_URGENCY:3}
+        max-per-hour: ${HOLOZYN_ACTOR_WORLD_LOOP_INITIATIVE_MAX_PER_HOUR:2}
+        # 久未见面阈值（游戏日）
+        absence-days: ${HOLOZYN_ACTOR_WORLD_LOOP_INITIATIVE_ABSENCE_DAYS:3}
+        visit-notify: ${HOLOZYN_ACTOR_WORLD_LOOP_INITIATIVE_VISIT_NOTIFY:true}
+    # ---- 物品域（定义/堆叠/持有/转移）----
+    # ⚠️ 默认关：关闭时 InventoryPort 不装配，EffectApplier 的 inventory.* 记
+    # SKIPPED_NO_INVENTORY 并继续，行为与基线逐字节一致。
+    # 桌面端后端验证用 HOLOZYN_ACTOR_ITEM_ENABLED=true 打开。
+    item:
+      enabled: ${HOLOZYN_ACTOR_ITEM_ENABLED:false}
+      # 实现形态：db（后端权威）/ engine（E1d，引擎权威，尚未实现）
+      provider: ${HOLOZYN_ACTOR_ITEM_PROVIDER:db}
+      # 未知 itemKey 是否懒建最小定义（material/99/0）；false=拒绝未登记物品
+      lazy-def: ${HOLOZYN_ACTOR_ITEM_LAZY_DEF:true}
+      # 懒建定义的默认堆叠上限
+      default-stack-max: ${HOLOZYN_ACTOR_ITEM_DEFAULT_STACK_MAX:99}
+      # 单次转移数量上限（防 AI 幻觉一次搬空世界）
+      max-qty-per-transfer: ${HOLOZYN_ACTOR_ITEM_MAX_QTY_PER_TRANSFER:999}
+    # ---- 市场交易（报价结算赊账）----
+    # ⚠️ 从属于 item.enabled：物品域关闭时 InventoryPort 不装配，市场不生效（效果记 SKIPPED）。
+    # 货币就是物品（默认 coin），走持有栈与账本，不另立钱包表。
+    market:
+      enabled: ${HOLOZYN_ACTOR_MARKET_ENABLED:true}
+      # 计价货币的物品键
+      currency-item-key: ${HOLOZYN_ACTOR_MARKET_CURRENCY_ITEM_KEY:coin}
+      # 物品定义没写基准价时的默认基准价（文/件）
+      default-base-price: ${HOLOZYN_ACTOR_MARKET_DEFAULT_BASE_PRICE:10}
+      # 单价下限/上限（防 0 元购与天文数字）
+      min-price: ${HOLOZYN_ACTOR_MARKET_MIN_PRICE:1}
+      max-price: ${HOLOZYN_ACTOR_MARKET_MAX_PRICE:100000}
+      # 中性库存（件）：视为「正常备货」，价格≈基准价
+      neutral-stock: ${HOLOZYN_ACTOR_MARKET_NEUTRAL_STOCK:10}
+      # 需求窗口（游戏日）：窗口内成交量作为需求
+      demand-window-days: ${HOLOZYN_ACTOR_MARKET_DEMAND_WINDOW_DAYS:7}
+      # 报价有效期（游戏分钟）
+      quote-ttl-game-minutes: ${HOLOZYN_ACTOR_MARKET_QUOTE_TTL_GAME_MINUTES:60}
+      # 成交后是否同步 stock:* 事实（让旁人「看见」货变少了）
+      stock-fact-sync: ${HOLOZYN_ACTOR_MARKET_STOCK_FACT_SYNC:true}
+      # 单笔成交数量上限
+      max-qty-per-trade: ${HOLOZYN_ACTOR_MARKET_MAX_QTY_PER_TRADE:99}
+    # ---- 制作与建造（配方计时作业设施占用）----
+    # ⚠️ 从属于 item.enabled：物品域关闭时没有可扣的材料，CRAFT 保持「配方未知」UNSURE。
+    # 制作不是瞬时的：开工即扣料 → 到点（finish_game_second）才出产物 → 中途离场则材料作废。
+    craft:
+      # 制作/建造总开关（false=规则层保持 RECIPE_UNKNOWN，行为回之前）
+      enabled: ${HOLOZYN_ACTOR_CRAFT_ENABLED:false}
+      # 一次开工最多做几份（防 AI 幻觉一次把全世界的料吃光）
+      max-batches-per-job: ${HOLOZYN_ACTOR_CRAFT_MAX_BATCHES_PER_JOB:5}
+      # 单次结算扫描最多处理多少件活（剩下的下一轮继续）
+      max-jobs-per-sweep: ${HOLOZYN_ACTOR_CRAFT_MAX_JOBS_PER_SWEEP:50}
+      # 配方没写耗时时的默认耗时（游戏分钟）
+      default-duration-minutes: ${HOLOZYN_ACTOR_CRAFT_DEFAULT_DURATION_MINUTES:30}
+      # 单件活耗时上限（游戏分钟）
+      max-duration-minutes: ${HOLOZYN_ACTOR_CRAFT_MAX_DURATION_MINUTES:1440}
+      # 建造产物是否写成世界事实（facility:* / prop:*）
+      build-fact-sync: ${HOLOZYN_ACTOR_CRAFT_BUILD_FACT_SYNC:true}
+      # 建造产物的可见性（public=全镇都知道；location=只有到场的人知道）
+      build-visibility: ${HOLOZYN_ACTOR_CRAFT_BUILD_VISIBILITY:location}
+    # ---- 损耗与装备（耐久腐坏装备战斗）----
+    # ⚠️ 从属于 item.enabled：物品域关闭时没有可信的持有栈，损耗域整体不生效。
+    # 关闭时（默认）：不腐坏、不磨损、不解析装备；R-ATTACK-01 走 「身上有武器即算」
+    # 旧路径，R-REPAIR-01 / R-EQUIP-01 直接放行——行为与逐字节一致。
+    wear:
+      # 损耗域总开关（耐久 + 腐坏 tick + 装备 + 战斗结算）
+      enabled: ${HOLOZYN_ACTOR_WEAR_ENABLED:false}
+      # 每次挥砍扣多少耐久（扣到 0 就断）
+      attack-wear: ${HOLOZYN_ACTOR_WEAR_ATTACK_WEAR:2}
+      # 成色低于该值视为「卷刃」：还砍得动，但打不狠（裁决给 PARTIAL）
+      blunt-threshold: ${HOLOZYN_ACTOR_WEAR_BLUNT_THRESHOLD:25}
+      # 一次修理恢复多少耐久
+      repair-points: ${HOLOZYN_ACTOR_WEAR_REPAIR_POINTS:25}
+      # 满成色时一击的基准伤害（实际伤害按成色折算，最低 50%）
+      base-damage: ${HOLOZYN_ACTOR_WEAR_BASE_DAMAGE:8}
+      # 护具（body 槽）最多吃掉多少伤害（0–1，按成色折算；0=衣服不影响挨打）
+      armor-reduction: ${HOLOZYN_ACTOR_WEAR_ARMOR_REDUCTION:0.4}
+      # 装备变化是否同步 equip:* 事实（让旁人「看见他腰间别着刀」）
+      equip-fact-sync: ${HOLOZYN_ACTOR_WEAR_EQUIP_FACT_SYNC:true}
+      # 装备事实的可见性（location=只有到场的人知道；public=全镇都知道）
+      equip-visibility: ${HOLOZYN_ACTOR_WEAR_EQUIP_VISIBILITY:location}
+    # ---- 开局供给（对接：让世界刚打开时真的有东西）----
+    # ⚠️ 从属于 item.enabled：物品域关闭时本段整体 no-op（不写任何持有栈）。
+    # 为什么要这一段：物品域之后真实世界的所有持有栈仍是空的，没有东西可旧、可烂、
+    # 可买、可抢——M 侧的感知/裁决/主动性也就永远读不到「他手里有把刀」。
+    # 幂等：每笔发放带固定幂等键（provision:{holder}:{item}:{bag|worn}），
+    # 每次开世界都跑一遍是安全的：第一次真发，之后全是 no-op。
+    provision:
+      # 供给总开关（仍需 item.enabled=true）
+      enabled: ${HOLOZYN_ACTOR_PROVISION_ENABLED:true}
+      # 给 NPC 发随身物品（职业家伙 + 口粮 + 衣物）
+      npc-kit: ${HOLOZYN_ACTOR_PROVISION_NPC_KIT:true}
+      # 给「像店铺的地点」（集市/铺/店/摊/仓/栈/作坊）铺货
+      location-stock: ${HOLOZYN_ACTOR_PROVISION_LOCATION_STOCK:true}
+      # 给玩家发开局随身物品（短刀/口粮/100 文/粗布衣）
+      player-kit: ${HOLOZYN_ACTOR_PROVISION_PLAYER_KIT:true}
+      # 发下去的衣物是否顺手穿在身上（false=只放进背包）
+      auto-wear: ${HOLOZYN_ACTOR_PROVISION_AUTO_WEAR:true}
+      # 单次供给最多处理多少个持有者（防病态世界把开世界拖住）
+      max-holders: ${HOLOZYN_ACTOR_PROVISION_MAX_HOLDERS:500}
     # ---- 角色生命与人格系统（成长/注意力/婚育/婴儿/身后事）----
     growth:
       # 认知注意力与高频微决策（每 tick 全 NPC 批量注意力 + 微决策 + 群聊参与度 + 相机聚焦）
@@ -513,7 +696,7 @@ holzyn:
         # judge 仅离线批跑（长跑热路径不调用），未配置时评测接口不可用、不影响世界推进
         api-key: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_API_KEY:}
         model: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_MODEL:deepseek-v4-flash}
-        provider-label: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_PROVIDER_LABEL:ark-coding-v3}
+        provider-label: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_PROVIDER_LABEL:local-gateway}
         # 超时（秒，与 AI 层同口径；2026-10-02 随 AI 层调大——同一自托管网关重活生成可达 200s+）
         timeout-read-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_READ_SECONDS:300}
         timeout-connect-seconds: ${HOLOZYN_ACTOR_EVALUATION_JUDGE_TIMEOUT_CONNECT_SECONDS:30}
@@ -888,8 +1071,14 @@ holzyn:
       # 打断记录恢复过期窗口（游戏分钟：超过未恢复即放弃）
       interrupt-expire-game-minutes: ${HOLOZYN_ACTOR_REALTIME_INTERRUPT_EXPIRE_GAME_MINUTES:60}
       # 即时决策防重入重试（多角色并发刺激被拦截时自动重试，保证每个刺激完成「决策→行动→恢复」闭环）
-      stimulus-retry-max-attempts: ${HOLOZYN_ACTOR_REALTIME_STIMULUS_RETRY_MAX_ATTEMPTS:20}
-      stimulus-retry-wait-ms: ${HOLOZYN_ACTOR_REALTIME_STIMULUS_RETRY_WAIT_MS:3000}
+      # ⚠️实跑事故：20 次 × 3s = 单刺激最长 60s 忙等，与决策模型超时叠成重试风暴
+      #    （5 分钟内 6908 次防重入重试）。默认收敛到 3 次 × 2s；同角色在途时新刺激直接合并跳过。
+      stimulus-retry-max-attempts: ${HOLOZYN_ACTOR_REALTIME_STIMULUS_RETRY_MAX_ATTEMPTS:3}
+      stimulus-retry-wait-ms: ${HOLOZYN_ACTOR_REALTIME_STIMULUS_RETRY_WAIT_MS:2000}
+      # 同时在途的即时决策流水线上限（超出即降级跳过，角色保持当前计划，下一 tick 仍紧急会再触发）
+      # ⚠️实跑事故：一次扫描可同时对 12 角色发刺激，每条流水线再派生探针/空间/微决策调用，
+      #    决策模型单进程吞吐约 1 req/s → 队列堆积 → 超时整批失败。0=不限（仅供排障，勿在生产开启）
+      max-concurrent-decisions: ${HOLOZYN_ACTOR_REALTIME_MAX_CONCURRENT_DECISIONS:3}
       # 个性注入：【角色个性】段（persona+L3+brainProfile+关系摘要+时间感）注入即时决策情境
       personality-inject-enabled: ${HOLOZYN_ACTOR_REALTIME_PERSONALITY_INJECT_ENABLED:true}
       # 个性段总长上限（字符；超限按段边界省略并在日志 WARN 列出段名，不无声截断）

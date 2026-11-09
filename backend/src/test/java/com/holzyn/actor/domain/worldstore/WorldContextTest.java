@@ -103,6 +103,33 @@ class WorldContextTest {
         assertFalse(WorldContext.isGlobal());
     }
 
+    @Test
+    @DisplayName("callAsWorld 临时挂起 GLOBAL，结束后按原深度恢复")
+    void callAsWorldSuspendsGlobalAndRestores() {
+        try (var ignored = WorldContext.global()) {
+            assertTrue(WorldContext.isGlobal());
+            Boolean inside = WorldContext.callAsWorld(() -> {
+                assertFalse(WorldContext.isGlobal(), "世界内查询必须打到当前挂载世界库");
+                return WorldContext.isGlobal();
+            });
+            assertFalse(inside);
+            assertTrue(WorldContext.isGlobal(), "挂起结束后必须还原外层 GLOBAL");
+            assertEquals(1, WorldContext.depth());
+        }
+        assertFalse(WorldContext.isGlobal());
+    }
+
+    @Test
+    @DisplayName("callAsWorld 异常路径同样还原 GLOBAL")
+    void callAsWorldRestoresOnException() {
+        try (var ignored = WorldContext.global()) {
+            assertThrows(IllegalStateException.class, () -> WorldContext.callAsWorld(() -> {
+                throw new IllegalStateException("boom");
+            }));
+            assertTrue(WorldContext.isGlobal());
+        }
+    }
+
     private static void assertNull(Object o) {
         if (o != null) {
             throw new AssertionError("不应有异常：" + o);

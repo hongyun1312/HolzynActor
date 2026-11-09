@@ -142,6 +142,7 @@ const GROUPS = [
     items: [
       { path: '/decision-coord', label: '决策协调 O2', icon: '⇌' },
       { path: '/eval-test', label: '行为评估 O2.5', icon: '⚖' },
+      { path: '/temporal-audit', label: '时间性验证 V1.1.4', icon: '⏳' },
       { path: '/ai-policy', label: '护栏与路由 O3', icon: '⛨' },
       { path: '/prompt-eng', label: 'Prompt 工程 O4', icon: '✍' },
       { path: '/drift', label: '漂移度量', icon: '≈' },

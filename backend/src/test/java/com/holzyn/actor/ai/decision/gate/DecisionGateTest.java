@@ -1,6 +1,7 @@
 package com.holzyn.actor.ai.decision.gate;
 
 import com.holzyn.actor.ai.decision.DecisionAnswer;
+import com.holzyn.actor.domain.agent.context.AiContextInjector;
 import com.holzyn.actor.ai.decision.DecisionCallClient;
 import com.holzyn.actor.ai.decision.DecisionResponse;
 import com.holzyn.actor.ai.decision.DecisionQuestion;
@@ -434,6 +435,71 @@ class DecisionGateTest {
         // 段 1 前缀在原始判定文本之前、段 3 契约在原始判定文本之后（AI 先读身份与世界观再读变化，契约在末尾高权重位）
         assertTrue(sent.indexOf("【世界观】") < sent.indexOf("关系从"));
         assertTrue(sent.indexOf("关系从") < sent.indexOf("【行为护栏】"));
+    }
+
+    @Test
+    @DisplayName("上下文注入：本地打分模型走精简装配（短输入），换成文本模型仍走全量装配")
+    void compactInjectionOnlyForScorerAdapter() {
+        AiContextInjector injector = mock(AiContextInjector.class);
+        ReflectionTestUtils.setField(gate, "aiContextInjector", injector);
+        when(injector.decisionCompactEnabled()).thenReturn(true);
+        when(injector.decisionInputCompact(eq(1L), eq("npc:7"), any())).thenAnswer(inv ->
+                "【世界】青禾村｜2003年｜14时\n【角色】沈砚秋，58岁，村长\n【情境】\n" + inv.getArgument(2)
+                        + "\n【约束】只依据情境判断，不臆测；按判据给概率。");
+        when(injector.decisionInput(eq(1L), eq("npc:7"), any())).thenReturn("【世界观】\n青禾村四面环山。");
+        when(decisionClient.evaluateOnce(eq(1L), eq(1L), eq(7L),
+                eq(DecisionScenes.SOCIAL_WILLINGNESS), any(List.class)))
+                .thenReturn(boolResponse("s1", "willing", 0.8));
+
+        // 场景一：本地打分模型（nanojev-batch 线协议）→ 精简
+        when(decisionClient.protocolId()).thenReturn("nanojev-batch");
+        gate.booleanDecision(1L, 7L, DecisionScenes.SOCIAL_WILLINGNESS,
+                boolState("s1", "npc:7 与 npc:6 的关系变化", 0.8), "willing");
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<java.util.List<DecisionState>> compactCaptor =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(decisionClient).evaluateOnce(eq(1L), eq(1L), eq(7L),
+                eq(DecisionScenes.SOCIAL_WILLINGNESS), compactCaptor.capture());
+        String compact = compactCaptor.getValue().get(0).state().toString();
+        assertTrue(compact.startsWith("【世界】"));
+        assertTrue(compact.contains("【角色】"));
+        assertTrue(compact.contains("【约束】"));
+        assertFalse(compact.contains("【世界观】"), "精简形态不应带全量世界观段");
+
+        // 场景二：用户把决策模型换成普通文本模型（chat 形状）→ 保持既有全量 Prompt 风格
+        when(decisionClient.protocolId()).thenReturn("chat-completions");
+        when(decisionClient.adapterId()).thenReturn("openai-chat");
+        gate.booleanDecision(1L, 7L, DecisionScenes.SOCIAL_WILLINGNESS,
+                boolState("s1", "npc:7 与 npc:6 的关系变化", 0.8), "willing");
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<java.util.List<DecisionState>> fullCaptor =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(decisionClient, org.mockito.Mockito.times(2)).evaluateOnce(eq(1L), eq(1L), eq(7L),
+                eq(DecisionScenes.SOCIAL_WILLINGNESS), fullCaptor.capture());
+        String full = fullCaptor.getAllValues().get(1).get(0).state().toString();
+        assertEquals("【世界观】\n青禾村四面环山。", full, "文本模型形态应走 decisionInput 全量装配");
+    }
+
+    @Test
+    @DisplayName("上下文注入：精简开关关闭时即使本地打分模型也走全量装配")
+    void compactDisabledFallsBackToFull() {
+        AiContextInjector injector = mock(AiContextInjector.class);
+        ReflectionTestUtils.setField(gate, "aiContextInjector", injector);
+        when(injector.decisionCompactEnabled()).thenReturn(false);
+        when(injector.decisionInput(eq(1L), eq("npc:7"), any())).thenReturn("【世界观】\n青禾村四面环山。");
+        when(decisionClient.protocolId()).thenReturn("nanojev-batch");
+        when(decisionClient.evaluateOnce(eq(1L), eq(1L), eq(7L),
+                eq(DecisionScenes.SOCIAL_WILLINGNESS), any(List.class)))
+                .thenReturn(boolResponse("s1", "willing", 0.8));
+
+        gate.booleanDecision(1L, 7L, DecisionScenes.SOCIAL_WILLINGNESS,
+                boolState("s1", "关系变化", 0.8), "willing");
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<java.util.List<DecisionState>> captor =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(decisionClient).evaluateOnce(eq(1L), eq(1L), eq(7L),
+                eq(DecisionScenes.SOCIAL_WILLINGNESS), captor.capture());
+        assertEquals("【世界观】\n青禾村四面环山。", captor.getValue().get(0).state());
     }
 
     @Test

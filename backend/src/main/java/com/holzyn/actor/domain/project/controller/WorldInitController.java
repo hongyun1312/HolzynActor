@@ -22,6 +22,7 @@ import com.holzyn.actor.common.BizException;
 import com.holzyn.actor.common.R;
 import com.holzyn.actor.common.sse.SseLifecycle;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
+import com.holzyn.actor.domain.project.dto.WorldMetaDraftDTO;
 import com.holzyn.actor.domain.project.service.ProjectService;
 import com.holzyn.actor.domain.project.service.WorkflowLog;
 import com.holzyn.actor.domain.project.service.WorldInitService;
@@ -217,6 +218,25 @@ public class WorldInitController {
     @PostMapping("/{id}/meta-suggest")
     public R<WorldMetaSuggestVO> metaSuggest(@PathVariable("id") Long id) {
         return R.ok(metaSuggestService.suggest(currentUserProvider.currentUserId(), id));
+    }
+
+    /**
+     * 依据「尚未落库的世界观草稿」生成世界名与世界简介建议（不读库、不写库）。
+     *
+     * <p><b>为什么不复用 {@code POST /{id}/meta-suggest}</b>：那个入口读的是已落库的世界观设定，
+     * 而创意发散刚生成完时设定还在前端（confirm 落库发生在用户点「下一步」），此时调用它必然
+     * 「该项目还没有世界观设定」400。新建向导第一步因此只能拿「题材·创意前 20 字」拼接当世界名。</p>
+     *
+     * <p>含 AI 调用，故本方法<b>不</b>开事务（AGENTS §8.1.1）；前端拿到结果回填表单，
+     * 用户可改写后再调 {@code POST /api/worlds/{id}/meta} 落库。</p>
+     *
+     * @param body 世界观草稿（{@link WorldMetaDraftDTO}，全字段可选；name 留空表示从设定重新起名）
+     *
+     * @return 建议的世界名（6-14 字）与简介（60-100 字）
+     */
+    @PostMapping("/meta-suggest")
+    public R<WorldMetaSuggestVO> metaSuggestFromDraft(@RequestBody(required = false) WorldMetaDraftDTO body) {
+        return R.ok(metaSuggestService.suggestFromDraft(currentUserProvider.currentUserId(), null, body));
     }
 
     /**

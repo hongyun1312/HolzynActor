@@ -65,6 +65,18 @@ public class ActorCharacter {
     @Column(length = 10, nullable = false)
     private String type = "special";
 
+    /**
+     * 控制方：npc / player（玩家同构）。
+     * <p>默认 {@code npc}：旧存档行天然兼容（迁移列默认值也是 npc）。玩家行由
+     * {@code PlayerCharacterService} 幂等创建，引用仍走 {@code npc:{id}} 单前缀。</p>
+     */
+    @Column(nullable = false, length = 12)
+    private String controller = "npc";
+
+    /** 玩家账号 ID（controller=player 时非空；对齐 actor_project.user_id，列宽 64） */
+    @Column(name = "player_user_id", length = 64)
+    private String playerUserId;
+
     /** 角色姓名 */
     @Column(nullable = false, length = 50)
     private String name;
@@ -211,6 +223,18 @@ public class ActorCharacter {
     @Transient
     public boolean isDeceased() {
         return "DECEASED".equalsIgnoreCase(stage);
+    }
+
+    /**
+     * 是否玩家角色（controller=player）。
+     * <p>玩家与 NPC 共用同一套数据与读写路径；本判定的唯一用途是把玩家从
+     * 「NPC 自主决策/自主婚育/继承候选」名单中排除，而不是另起一条玩家专用代码路径。</p>
+     *
+     * @return true=玩家
+     */
+    @Transient
+    public boolean isPlayer() {
+        return "player".equalsIgnoreCase(controller);
     }
 
     /**

@@ -99,8 +99,11 @@ public final class DecisionReActParse {
             return null;
         }
         String actionType = node.path("action_type").asText("").trim();
-        String actionDetail = node.path("action_detail").asText("").trim();
-        String reasoning = node.path("reasoning").asText("").trim();
+        // 模型偶尔把内层契约再套一层——action_detail 的值本身是 {"action": "…"} 字符串。
+        // 不解包就会把整段 JSON 当动作落库（实跑 32/1464），并按字面去解析目的地（TARGET_NOT_FOUND）。
+        // 解包是纯清洗：抽不到人话就当空 → 下面判空返回 null，走程序化兜底，而不是把 JSON 当动作。
+        String actionDetail = unwrapText(node.path("action_detail").asText(""));
+        String reasoning = unwrapText(node.path("reasoning").asText(""));
         if (!ACTION_TYPES.contains(actionType)) {
             return null;
         }
@@ -108,7 +111,7 @@ public final class DecisionReActParse {
         if (actionDetail.isBlank()) {
             return null;
         }
-        String target = node.path("target").asText("").trim();
+        String target = unwrapText(node.path("target").asText(""));
         int priority = node.path("priority").asInt(3);
         priority = Math.max(1, Math.min(5, priority));
         int duration = node.path("expected_duration_minutes").asInt(30);
@@ -172,6 +175,18 @@ public final class DecisionReActParse {
             }
         }
         return decision;
+    }
+
+    /**
+     * 字段解包：JSON 就抽内层人话，否则原样 trim；null 安全。
+     *
+     * @param raw 原始字段文本（可空）
+     *
+     * @return 解包后的文本（可能为空串，绝不为 null）
+     */
+    private static String unwrapText(String raw) {
+        String v = com.holzyn.actor.common.ActionTexts.unwrap(raw);
+        return v == null ? "" : v.trim();
     }
 
     /**

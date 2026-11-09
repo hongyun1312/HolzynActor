@@ -1040,7 +1040,9 @@ public class OrdinaryNpcService {
                     AiChatRequest req = new AiChatRequest(null, List.of(
                             new AiChatRequest.ChatMessage("system", promptTemplateService.systemMessage(userId, projectId,
                                     PromptTemplateService.CODE_CROWD_NPC_GEN, placeholders)),
-                            new AiChatRequest.ChatMessage("user", prompt)), 0.5, NPC_MAX_TOKENS, true);
+                            new AiChatRequest.ChatMessage("user", prompt)), 0.5, NPC_MAX_TOKENS, false);
+                    // jsonMode=false：本场景顶层即 JSON 数组。deepseek-v4-flash 在 response_format=json_object
+                    // 约束下会把「一批居民」折叠成单个对象（实测只回 1 位），关掉约束后稳定返回整批数组。
                     AiChatResult result = AiCallContext.run("ordinary_npc_gen", null, () ->
                             aiChatGateway.chatCompletion(userId, projectId, null, req));
                     // 收口：数组元素 = 结构列草稿 + 该居民的 11 维档案原文（同批产出，零额外 AI 调用）

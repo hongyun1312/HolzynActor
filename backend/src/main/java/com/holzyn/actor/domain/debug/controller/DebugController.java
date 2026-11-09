@@ -165,6 +165,68 @@ public class DebugController {
     //
 
     /**
+     * 缓存命中按「游戏天」聚合（成本主指标）。
+     *
+     * <p>为什么按游戏天而不是真实时间：同一游戏日内日程/天气/日期稳定，prompt 前缀可复用；
+     * 跨到下一个游戏日整体换档。按真实时间聚合会把两个游戏日混成一份，看不出日内的稳定性。</p>
+     *
+     * <p>口径：只统计真实调用（{@code token_in > 0}），按 {@code game_second / 86400} 分组；
+     * 命中率 = 命中 token /（命中 + 未命中）。0 秒的历史行不参与。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 日维度聚合 + 合计
+     */
+    @GetMapping("/ai-calls/cache-by-game-day")
+    public Map<String, Object> cacheByGameDay(@RequestParam("projectId") Long projectId) {
+        List<Object[]> rows = aiCallLogRepository.aggregateCacheByGameDay(projectId);
+        List<Map<String, Object>> days = new ArrayList<>();
+        long totalIn = 0;
+        long totalHit = 0;
+        long totalMiss = 0;
+        long totalCalls = 0;
+        for (Object[] r : rows) {
+            long day = r[0] == null ? 0L : ((Number) r[0]).longValue();
+            long calls = r[1] == null ? 0L : ((Number) r[1]).longValue();
+            long tin = r[2] == null ? 0L : ((Number) r[2]).longValue();
+            long hit = r[3] == null ? 0L : ((Number) r[3]).longValue();
+            long miss = r[4] == null ? 0L : ((Number) r[4]).longValue();
+            totalIn += tin;
+            totalHit += hit;
+            totalMiss += miss;
+            totalCalls += calls;
+            Map<String, Object> dayRow = new LinkedHashMap<>();
+            dayRow.put("gameDay", day);
+            dayRow.put("calls", calls);
+            dayRow.put("tokenIn", tin);
+            dayRow.put("cacheHit", hit);
+            dayRow.put("cacheMiss", miss);
+            dayRow.put("hitRatio", tin > 0 ? round4((double) hit / tin) : 0.0);
+            days.add(dayRow);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("projectId", projectId);
+        out.put("days", days);
+        out.put("calls", totalCalls);
+        out.put("tokenIn", totalIn);
+        out.put("cacheHit", totalHit);
+        out.put("cacheMiss", totalMiss);
+        out.put("hitRatio", totalIn > 0 ? round4((double) totalHit / totalIn) : 0.0);
+        return out;
+    }
+
+    /**
+     * 四舍五入到 4 位小数（比率展示口径统一）。
+     *
+     * @param v 原值
+     *
+     * @return 保留 4 位小数的值
+     */
+    private static double round4(double v) {
+        return Math.round(v * 10000d) / 10000d;
+    }
+
+    /**
      * AI Trace 分页列表：筛选 projectId/scene/status/keyword/时间范围 + 排序（时间/耗时/token）。
      *
      * @param projectId 项目 ID（可空）

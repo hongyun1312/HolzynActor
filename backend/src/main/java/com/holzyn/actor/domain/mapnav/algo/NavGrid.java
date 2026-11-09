@@ -94,6 +94,26 @@ public final class NavGrid {
     }
 
     /**
+     * 空白壳栅格：水/坡/林/海拔全部为「未知即无害」的默认值，只有尺寸与格距来自地图行。
+     *
+     * <p><b>用途</b>：{@code nav.bin} 缺失时（产物没落盘、导入的旧世界没带文件）当作寻路的
+     * 兜底底座。这不是「假装有地形」——它明确放弃水与坡的事实，让 A* 只按<b>道路与建筑</b>
+     * 这两类活数据走，比原来的「两点直线穿墙」可信得多：人至少会沿着画出来的路走、会绕开房子。
+     * 快照会带上 {@code degraded=true}，对账接口与日志都会暴露它。</p>
+     *
+     * @param size          边长（格）
+     * @param metersPerCell 每格米数
+     * @param seed          地图种子
+     * @return 空白壳栅格
+     */
+    public static NavGrid flatShell(int size, double metersPerCell, long seed) {
+        int s = Math.max(16, size);
+        int n = s * s;
+        return new NavGrid(s, 0.0, metersPerCell, seed, new boolean[n], new byte[n],
+                new short[n], new boolean[n]);
+    }
+
+    /**
      * 从 S1 地形切出导航栅格（生成期调用一次，之后只读文件）。
      *
      * @param terrain S1 地形

@@ -70,6 +70,22 @@ public class WorldMapQueryService {
     /** 场景边长缺省 */
     private static final int DEFAULT_SCENE_SIZE = 500;
 
+    /** 要素区域反查半径（米）：40 米内算「就在这个要素这里」 */
+    private static final double FEATURE_REGION_RADIUS_M = 40.0;
+
+    /**
+     * 地图行（地图域边长来源；字段注入保持构造器不变，null=按缺省 1024 处理）
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapgen.repository.ActorWorldMapRepository mapRepository;
+
+    /**
+     * 地图要素（区域反查第二级兜底：地点表没有中心坐标时按有名要素取最近；
+     * 字段注入保持构造器不变，null=跳过兜底）
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapgen.repository.ActorMapFeatureRepository featureRepository;
+
     /**
      * 沙盘状态仓库（M3 附近角色查询——途中可见/途中遭遇用；字段注入保持构造器不变，
      * 存量单测零改动；null=未装配跳过附近角色查询）
@@ -181,23 +197,111 @@ public class WorldMapQueryService {
             return null;
         }
         int size = sceneSizeOf(projectId);
-        double mapX = sandboxX + size / 2.0;
-        double mapZ = sandboxZ + size / 2.0;
+        double span = mapSpanOf(projectId);
+        double[] map = com.holzyn.actor.domain.mapnav.service.MapCoordinateSystem
+                .sandboxToMap(sandboxX, sandboxZ, span, size);
+        return regionAtMap(projectId, map[0], map[1]);
+    }
+
+    /**
+     * 地图域坐标 → 区域口语描述（修复）。
+     *
+     * <p><b>这一层为什么必须存在</b>：地图生成只写 {@code actor_map_feature}，
+     * 不写 {@code actor_world_location}；于是 mapgen 世界的地点表 9 行 {@code center_x/center_z}
+     * 全是 null，旧的 {@link #regionAt} 一次都命中不了，AI 的空间段永远是空的。
+     * 现在两级兜底：先按地点表的中心圆命中（有数据时最准），
+     * 再按<b>有名字的地图要素</b>取最近的一个——要素坐标本来就是地图域，不存在换算误差。</p>
+     *
+     * @param projectId 项目
+     * @param mapX      地图域 X（米）
+     * @param mapZ      地图域 Z（米）
+     * @return 区域口语描述；两级都没命中返回 null
+     */
+    public String regionAtMap(Long projectId, double mapX, double mapZ) {
+        if (projectId == null) {
+            return null;
+        }
         String best = null;
         double bestDist = Double.MAX_VALUE;
-        for (ActorWorldLocation loc : locationRepository.findByProjectId(projectId)) {
-            if (loc == null || loc.getCenterX() == null || loc.getCenterZ() == null) {
-                continue;
+        try {
+            for (ActorWorldLocation loc : locationRepository.findByProjectId(projectId)) {
+                if (loc == null || loc.getCenterX() == null || loc.getCenterZ() == null) {
+                    continue;
+                }
+                double d = Math.hypot(mapX - loc.getCenterX(), mapZ - loc.getCenterZ());
+                double r = loc.getRadius() == null ? 12.0 : loc.getRadius();
+                if (d <= r && d < bestDist) {
+                    bestDist = d;
+                    best = loc.getRegionDesc() != null && !loc.getRegionDesc().isBlank()
+                            ? loc.getRegionDesc().trim() : loc.getName();
+                }
             }
-            double d = Math.hypot(mapX - loc.getCenterX(), mapZ - loc.getCenterZ());
-            double r = loc.getRadius() == null ? 12.0 : loc.getRadius();
-            if (d <= r && d < bestDist) {
-                bestDist = d;
-                best = loc.getRegionDesc() != null && !loc.getRegionDesc().isBlank()
-                        ? loc.getRegionDesc().trim() : loc.getName();
-            }
+        } catch (Exception e) {
+            log.debug("[worldmap] 区域反查读地点表失败：{}", e.getMessage());
         }
-        return best;
+        if (best != null) {
+            return best;
+        }
+        return nearestNamedFeature(projectId, mapX, mapZ);
+    }
+
+    /** 最近的有名要素（地图域，40 米内算「就在这里」）。 */
+    private String nearestNamedFeature(Long projectId, double mapX, double mapZ) {
+        if (featureRepository == null || mapRepository == null) {
+            return null;
+        }
+        try {
+            com.holzyn.actor.domain.mapgen.entity.ActorWorldMap map =
+                    mapRepository.findFirstByProjectIdOrderByIdDesc(projectId).orElse(null);
+            if (map == null) {
+                return null;
+            }
+            String bestName = null;
+            double bestDist = FEATURE_REGION_RADIUS_M;
+            for (com.holzyn.actor.domain.mapgen.entity.ActorMapFeature f
+                    : featureRepository.findByMapIdOrderBySortOrderAsc(map.getId())) {
+                if (f == null || f.getPosX() == null || f.getPosZ() == null) {
+                    continue;
+                }
+                String name = f.getName() == null || f.getName().isBlank() ? f.getCode() : f.getName().trim();
+                if (name == null || name.isBlank()) {
+                    continue;
+                }
+                double d = Math.hypot(mapX - f.getPosX(), mapZ - f.getPosZ());
+                if (d < bestDist) {
+                    bestDist = d;
+                    bestName = name;
+                }
+            }
+            return bestName;
+        } catch (Exception e) {
+            log.debug("[worldmap] 要素反查失败：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 地图域边长（米）：有地图行时用 {@code size × metersPerCell}；
+     * <b>没有地图行时退回场景边长</b>——老世界（沙盘先于地图生成存在）里地图域就等于场景域，
+     * 这时候按 1024 去换算会把所有沙盘坐标搬到图外。只有确实存在地图行时，
+     * 两域才可能是 1024 对 500 这种不同边长。
+     */
+    private double mapSpanOf(Long projectId) {
+        if (mapRepository == null) {
+            return sceneSizeOf(projectId);
+        }
+        try {
+            com.holzyn.actor.domain.mapgen.entity.ActorWorldMap map =
+                    mapRepository.findFirstByProjectIdOrderByIdDesc(projectId).orElse(null);
+            if (map == null || map.getSize() == null || map.getSize() <= 0) {
+                return sceneSizeOf(projectId);
+            }
+            double mpc = map.getMetersPerCell() == null || map.getMetersPerCell() <= 0
+                    ? 1.0 : map.getMetersPerCell();
+            return map.getSize() * mpc;
+        } catch (Exception e) {
+            return sceneSizeOf(projectId);
+        }
     }
 
     /**

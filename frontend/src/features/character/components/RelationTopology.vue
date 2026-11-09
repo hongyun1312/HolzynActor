@@ -83,8 +83,10 @@
             :show-hulls="hullsEnabled"
             :show-edge-labels="options.showEdgeLabels"
             :show-minimap="options.showMinimap"
-            :show-grid="options.showGrid"
-            :draggable="options.draggable"
+            :show-grid="options.showGrid && !skyMode"
+            :draggable="skyMode || options.draggable"
+            :sky="skyMode"
+            :clouds="clouds"
             :insets="canvasInsets"
             :min-fit-zoom="variant === 'tab' ? 0.7 : 0"
             :variant="variant"
@@ -112,6 +114,7 @@
           <div class="float float-bar">
             <TopologyToolbar
               :layout="layoutId"
+              :sky="skyMode"
               :search="search"
               :search-hit-count="searchHitCount"
               :filters="filters"
@@ -427,8 +430,16 @@ const hintDismissed = ref(false)
 const preview = reactive({ visible: false, mode: 'supplement', scope: 'character', characterId: null, items: [] })
 
 // ==================== 工作台状态 ====================
-/** 布局 ID */
-const layoutId = ref('community')
+/**
+ * 布局 ID。
+ *
+ * <p>整页工作台（variant=page）默认「星海」：这个页面的第一印象应该是
+ * 「一村子的人各自散在夜空里」，而不是一张整齐的排布图；星海也是唯一带拖拽牵引的一档
+ * （拖一颗星，两跳内的邻居跟着摆）。角色页内嵌的 Tab（variant=tab）仍默认「圈子分区」——
+ * 那块画布只有 400 多像素宽，星云的「空」在那点面积里显不出来，反而挤。
+ * 需要看结构时切到其余五档，那几档的观感与交互完全不变。</p>
+ */
+const layoutId = ref(props.variant === 'page' ? 'nebula' : 'community')
 /** 搜索词 */
 const search = ref('')
 /** 筛选条件 */
@@ -586,6 +597,45 @@ const layoutResult = computed(() => {
 })
 
 const positions = computed(() => layoutResult.value.positions)
+
+/** 星海模式（nebula）：夜空底图 + 发光粒子 + 拖拽牵引，只在这一档生效 */
+const skyMode = computed(() => layoutId.value === 'nebula')
+
+/**
+ * 星云团几何（星海底图用）：每个可见圈子的质心与外接半径（世界坐标）。
+ *
+ * <p>为什么不直接用 layoutResult.clusters：位置缓存命中时（含 localStorage 还原）
+ * 只带了 positions，clusters 是空的——那样刷新一次页面星云就没了。这里从
+ * 圈子成员的位置现算，任何时候都成立，且与画布上的节点位置严格一致。</p>
+ */
+const clouds = computed(() => {
+  if (!skyMode.value) return []
+  const pos = positions.value
+  const out = []
+  for (const c of visibleClusters.value) {
+    let sx = 0
+    let sy = 0
+    let n = 0
+    for (const id of c.members) {
+      const p = pos[id]
+      if (!p) continue
+      sx += p.x
+      sy += p.y
+      n += 1
+    }
+    if (!n) continue
+    const cx = sx / n
+    const cy = sy / n
+    let far = 0
+    for (const id of c.members) {
+      const p = pos[id]
+      if (!p) continue
+      far = Math.max(far, Math.hypot(p.x - cx, p.y - cy))
+    }
+    out.push({ id: c.id, x: cx, y: cy, radius: Math.max(46, far * 1.18), color: colorForCluster(c) })
+  }
+  return out
+})
 
 /** 位置持久化（跨会话稳定：同一世界下次进来还是同一张图） */
 function persistLayout(key, pos) {

@@ -82,6 +82,18 @@ public class DecisionService {
     private final PerceptionService perceptionService;
     private final WorldClockService worldClockService;
     private final BrainProfileService brainProfileService;
+
+    /**
+     * 世界事实查询：AI 决策前把当时 stateVersion 写入 trace，保证
+     * {@code actor_ai_call_log} 能复现“这条决策看到的是哪个世界版本”。
+     * 字段注入保持构造器不变，null=未装配（单测）跳过，不影响决策。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.fact.service.WorldFactQuery worldFactQuery;
+
+    /** 世界事实待处理信号（阶段门控/空间快判让路 + 决策输入版本留证；null=未装配跳过）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.fact.service.WorldFactDecisionSignal worldFactDecisionSignal;
     private final ObjectMapper objectMapper;
 
     /** 沙盘状态服务（S2 npc:thought T1 决策源：AI 决策产物写入想法气泡；字段注入保持构造器不变） */
@@ -203,6 +215,18 @@ public class DecisionService {
     private com.holzyn.actor.domain.agent.context.AiContextInjector aiContextInjector;
 
     /**
+     * 规划服务（目标状态机：卡住的目标必须进入决策——「【卡住的目标】」段）。
+     * <p>为什么放在决策侧：卡住的目标已被生命周期扫描移出 active 名单，
+     * 因而不再出现在【当前目标】里；如果没有人把它重新摆到桌面上，
+     * 角色就会像什么都没发生一样继续过日子，把「受挫」变成「遗忘」。</p>
+     * <p>⚠️ {@code @Lazy}：PlanningService 侧依赖链较长（目标/计划/预算/记忆），
+     * 且决策服务是热点入口，懒注入避免启动期环。</p>
+     */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PlanningService planningService;
+
+    /**
      * 生成行动决策（thinking 组件入口）：按 brainProfile 门控认知深度。
      * <p><b>脑力门控</b>：{@code brain_level=programmatic}（纯程序化档）→ 直接程序化决策
      * （0 AI 成本）；full/light → 原 AI 决策链（Schema 校验 + 重试≤2 + 程序化兜底）。
@@ -245,11 +269,15 @@ public class DecisionService {
         String brainLevel = resolveBrainLevel(ch);
         log.info("[Thinking] 决策生成（brainLevel={}）: char={} name={}", brainLevel, ch.getId(), ch.getName());
         try {
+            // 决策情境统一补齐（闭环修复）：调用方传 null（引擎 tick）或传自定义情境
+            // （玩家干预/结局摘要）时，必须把「感知 + 我所知道的世界事实」补齐——否则
+            // 事实已入库、knowledge 已建立，决策输入却看不见，世界→角色这一跳断开。
+            String effectiveSituation = ensureDecisionSituation(ch, situation);
             // 主动记忆检索自问环节（决策全局挂载，P1 ②-1）：AI 按情境判定是否需要主动想起/查证，
             // 需要时定向检索三源并组装【主动想起】段（经 AiCallContext holder 传递给 AI 深思
             // {{proactive_memory}} 占位符与 决策模型 快判情境文本）；programmatic 档 0 AI 除外；
             // 判定失败/冷却中/无命中 → 不注入（fail-open 零阻断，含异常隔离）
-            runProactiveRetrieval(ch, userId, situation, brainLevel);
+            runProactiveRetrieval(ch, userId, effectiveSituation, brainLevel);
             // BrainStrategy 可插拔决策策略链（P2-3）：router 装配时按角色类型+脑力档位组链
             // （SPECIAL 链=危险强制→阶段门控→空间选择→AI 深思→程序化兜底；programmatic 档=危险强制→兜底），
             // 链式责任首中即胜、命中写 trace（双过程显式化：快通道优先、System 2 深思兜底）；
@@ -258,7 +286,7 @@ public class DecisionService {
                 com.holzyn.actor.domain.agent.brain.strategy.DecisionOutcome outcome =
                         brainStrategyRouter.decide(new com.holzyn.actor.domain.agent.brain.strategy.DecisionContext(
                                 ch.getProjectId(), ch, userId, com.holzyn.actor.domain.agent.brain.strategy.NpcKind.SPECIAL,
-                                brainLevel, situation, null, null, hasStimulus));
+                                brainLevel, effectiveSituation, null, null, hasStimulus));
                 if (outcome != null) {
                     // P0-03 决策源可追溯：链命中由策略名判定来源（programmatic_fallback/physio_danger
                     // → FALLBACK_PROGRAMMATIC；其余 AI 策略 → AI），打标进决策 Map（落库侧透传）
@@ -299,14 +327,14 @@ public class DecisionService {
             // 低频生成空间（语义质量），决策模型 做「此刻挑一个」的高频快判（差异=真人随机波动）。
             // 判定失败/未启用/空间无效 → 回退 Qwen 生成式决策（零阻断）。
             // （决策前空间保障已内置于 trySpaceDecision：空间缺失/过期才 AI 生成，有效直接复用零成本）
-            Map<String, Object> spaceDecision = trySpaceDecision(ch, situation);
+            Map<String, Object> spaceDecision = trySpaceDecision(ch, effectiveSituation);
             if (spaceDecision != null) {
                 // 与 AI 路径同后处理：护栏 + 前瞻 + 沙盘想法；P0-03：快判=AI 通道产出，打标 AI
                 return DecisionSources.tag(postProcessDecision(ch, spaceDecision), DecisionSource.AI);
             }
             // AI 深思（System 2）：action_gen 生成式决策（重试≤2 + 程序化回退指标埋点）；
             // 全部重试失败 → null → 程序化兜底 continue（与 P2-3 前行为一致）
-            Map<String, Object> aiDecision = deliberateDecision(ch, userId, situation);
+            Map<String, Object> aiDecision = deliberateDecision(ch, userId, effectiveSituation);
             if (aiDecision != null) {
                 // P0-03：AI 深思成功=真实 AI 产出，打标 AI
                 return DecisionSources.tag(postProcessDecision(ch, aiDecision), DecisionSource.AI);
@@ -362,11 +390,17 @@ public class DecisionService {
      * @return 内部规范决策 Map（未过 Schema 校验/全部重试失败 → null）
      */
     public Map<String, Object> deliberateDecision(ActorCharacter ch, Long userId, String situation) {
+        // 决策输入统一补齐（闭环修复）：null/自定义情境也要含感知与【我所知道的事】，
+        // 否则事实层已写、knowledge 已有，AI 深思的 prompt 仍看不见——L4 断链根因。
+        situation = ensureDecisionSituation(ch, situation);
         String personaSummary = buildPersonaSummary(ch);
         // 批3 决策与感知：action_gen 情境缺【当前状态】段时前置 段2D 当前世界动态 +
         // 段2E 当前状态（STIMULUS 个性刺激情境「只知刺激不知处境」的补齐——AI 带着当下
         // 时节天气与自身生理/情绪做决定，真人感；周期感知情境已含 段2E/2D，跳过防重复）
         String decisionSituation = enrichDecisionSituation(ch, situation);
+        // 把决策输入的 stateVersion + 决策情境快照落 trace（非 AI 步骤，零 AI 成本）；
+        // user_prompt 存情境快照（含【我所知道的事】），让验收能直接检索事实文本。
+        recordDecisionInputVersion(ch, decisionSituation, decisionSituation);
         // 主动记忆检索【主动想起】段（决策全局自问命中时）：经 action_gen 模板
         // {{proactive_memory}} 占位符显式注入（AI 深思被主动想起的记忆影响；
         // 未命中/无段 → 空占位，行为零变化）
@@ -392,7 +426,7 @@ public class DecisionService {
         for (int attempt = 1; attempt <= MAX_RETRY; attempt++) {
             final int att = attempt;
             try {
-                return AiCallContext.run("action", ch.getId(), att, () -> {
+                Map<String, Object> decided = AiCallContext.run("action", ch.getId(), att, () -> {
                     try {
                 // ：主决策 ToM 推断深度段（按角色卡 OCEAN 宜人性×神经质；开关关/无卡=空串）
                 String tomSection = tomInjectEnabled ? tomSectionOf(ch) : "";
@@ -453,6 +487,11 @@ public class DecisionService {
                         throw e;
                     }
                 });
+                // 世界事实因果挂接（闭环修复）：本次深思是在「有到期事实」的让路信号下发生的，
+                // 把事实来源事件写进决策 JSON（_worldFact），行动事件据此挂因果父链；
+                // 无待处理事实/事实无来源事件 → 决策原样返回（零影响）。
+                tagWorldFactCause(ch, decided);
+                return decided;
             } catch (Exception e) {
                 lastError[0] = e;
                 log.warn("[Thinking] 行动决策生成第 {} 次失败: {}", attempt, e.getMessage());
@@ -484,6 +523,209 @@ public class DecisionService {
     }
 
     /**
+     * 把本次 AI 决策输入的 stateVersion 写入决策 trace。
+     * <p>只写非 AI 步骤，不改变决策内容；未装配事实查询/异常时静默跳过。
+     * 验收可查 {@code actor_ai_call_log.scene='agent_decision'} 且
+     * {@code step_type='state_version'} 的 content。</p>
+     *
+     * @param ch 角色实体
+     *
+     * @param situation 已组装的决策情境
+     *
+     * @param promptSnapshot 决策情境快照（实际进入 action_gen 的事实段；可空）
+     */
+    private void recordDecisionInputVersion(ActorCharacter ch, String situation, String promptSnapshot) {
+        if (worldFactQuery == null || ch == null || ch.getProjectId() == null || ch.getId() == null) {
+            return;
+        }
+        try {
+            Long gameSecond = worldClockService == null ? null
+                    : worldClockService.currentEngineGameSecond(ch.getProjectId());
+            long gs = gameSecond == null ? 0L : gameSecond;
+            String version = worldFactQuery.stateVersion(ch.getProjectId(), gs);
+            if (version == null || version.isBlank()) {
+                return;
+            }
+            String content = "[世界状态版本 " + version + "] 决策输入字数="
+                    + (situation == null ? 0 : situation.length()) + " char=" + ch.getId();
+            // user_prompt 存决策情境快照（含【我所知道的事】），不是为复制完整模板；
+            // 这样 actor_ai_call_log 单行即可核对「本轮事实是否进入决策输入」。
+            // 快照行必须带 character_id（复验缺陷：此前恒为 null，取证只能按 prompt 里的
+            // 姓名反查，重名角色就串了）。
+            AiCallContext.recordStep(ch.getProjectId(), ch.getId(), "agent_decision", "state_version",
+                    content, 0, promptSnapshot);
+        } catch (Exception e) {
+            log.warn("[Thinking] 决策输入版本 trace 写入失败（跳过）: char={} : {}", ch.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 情境里是否已含「事实段」（判重口径）。
+     *
+     * <p>两种合法形态：有认知时是 {@code 【我所知道的事】} 段；零认知时 {@code worldFactsSegment}
+     * 只给一行 {@code [世界状态版本 …]}（要求零认知角色也能复现世界版本）。只按前者判重，
+     * 后者就会被再追加一次。</p>
+     *
+     * @param situation 已装配的情境（可空）
+     *
+     * @return true=已含事实段（无需再补）
+     */
+    private static boolean containsFactsSegment(String situation) {
+        if (situation == null || situation.isEmpty()) {
+            return false;
+        }
+        return situation.contains("【我所知道的事】") || situation.contains("[世界状态版本");
+    }
+
+    /**
+     * 决策情境统一补齐（角色—世界闭环修复）。
+     *
+     * <p><b>为什么需要</b>：事实层与 knowledge 只解决“世界知道什么”，决策输入才是
+     * “角色看得见什么”。三条路径曾各自为政——手动触发器组装感知情境、引擎 tick 传
+     * null、玩家干预/结局摘要传自定义短情境；只有第一条含【我所知道的事】。结果就是
+     * 事实已入库、knowledge 已建立，L4 仍判 FAIL。</p>
+     *
+     * <p><b>本方法做两件事</b>：① 情境为空 → 走 {@link #buildSituation(ActorCharacter)}
+     * 的全量感知组装（含状态/世界动态/事实段）；② 情境非空但不含【我所知道的事】→
+     * 用 {@link PerceptionService#worldFactsSegment} 的同一格式化入口补齐事实段
+     * （不复制 WorldFactQuery 的拼串）。失败/未装配 → 原样返回，零阻断。</p>
+     *
+     * @param ch 角色实体（可空）
+     *
+     * @param situation 调用方情境（可空）
+     *
+     * @return 含感知与事实段的决策情境
+     */
+    private String ensureDecisionSituation(ActorCharacter ch, String situation) {
+        if (ch == null || ch.getProjectId() == null) {
+            return situation;
+        }
+        try {
+            String effective = (situation == null || situation.isBlank()) ? buildSituation(ch) : situation;
+            // 到期约定置顶（闭环修复的“影响”半边）：只把事实塞进 8 条【我所知道的事】里，
+            // 模型会把它当背景；即将到期的约定必须出现在情境最前，才可能驱动本次行动。
+            // 已在情境内（重复调用）则不重复插段。
+            String urgent = urgentFactSegment(ch);
+            if (urgent != null && !urgent.isBlank()
+                    && (effective == null || !effective.contains("【待处理约定】"))) {
+                effective = effective == null || effective.isBlank() ? urgent : urgent + "\n\n" + effective;
+            }
+            // 判重不能只看【我所知道的事】——零认知角色的 worldFactsSegment 只会产出
+            // 一行 [世界状态版本 …]（digest 为空），既有情境里其实已经有这一行却判不出重复，
+            // 于是同一行版本标识进 prompt 两次（实跑 18/1215 命中）。
+            if (perceptionService == null || (effective != null && containsFactsSegment(effective))) {
+                return effective;
+            }
+            Long gs = worldClockService == null ? null
+                    : worldClockService.currentEngineGameSecond(ch.getProjectId());
+            String facts = perceptionService.worldFactsSegment(ch.getProjectId(),
+                    com.holzyn.actor.common.NpcRefs.of(ch.getId()), gs);
+            if (facts == null || facts.isBlank()) {
+                return effective;
+            }
+            return effective == null || effective.isBlank() ? facts : effective + "\n\n" + facts;
+        } catch (Exception e) {
+            log.warn("[Thinking] 决策情境事实段补齐失败（原样情境继续）: char={} : {}",
+                    ch.getId(), e.getMessage());
+            return situation;
+        }
+    }
+
+    /**
+     * 世界事实因果挂接：把本次决策所响应的到期事实写进决策 JSON 的 {@code _worldFact}。
+     *
+     * <p>为什么放在决策 Map 而不是直接在处理器里查库：行动事件的父链由
+     * {@code AgentActionService} 在发布时读取决策 JSON，决策侧只负责“我当时在为哪条事实
+     * 做决定”。这样手动触发与引擎 tick 两条路径共用同一段因果逻辑，且不新增写入口。</p>
+     *
+     * <p>只挂 {@code sourceEventId} 非空的事实（要求事实变更必须有来源事件；
+     * 历史脏数据没有来源时宁可不画因果边，也不伪造父事件）。异常/未装配 → 原样返回。</p>
+     *
+     * @param ch 角色实体
+     *
+     * @param decision 决策 Map（可空/不可变 Map 时跳过）
+     */
+    private void tagWorldFactCause(ActorCharacter ch, Map<String, Object> decision) {
+        if (decision == null || worldFactDecisionSignal == null || ch == null
+                || ch.getProjectId() == null || ch.getId() == null) {
+            return;
+        }
+        try {
+            com.holzyn.actor.domain.world.fact.entity.ActorWorldFact fact =
+                    worldFactDecisionSignal.nearestDueFact(ch.getProjectId(),
+                            com.holzyn.actor.common.NpcRefs.of(ch.getId()), null);
+            if (fact == null || fact.getSourceEventId() == null) {
+                return;
+            }
+            Map<String, Object> meta = new LinkedHashMap<>();
+            meta.put("factId", fact.getId());
+            meta.put("factKey", fact.getFactKey());
+            meta.put("sourceEventId", fact.getSourceEventId());
+            meta.put("dueGameSecond", fact.getValidToGameSecond());
+            decision.put("_worldFact", meta);
+            AiCallContext.recordStep(ch.getProjectId(), "agent_decision", "brain_strategy",
+                    "决策因果挂接：待处理事实 " + fact.getFactKey()
+                            + " → 来源事件 " + fact.getSourceEventId(), 0);
+        } catch (Exception e) {
+            log.warn("[Thinking] 世界事实因果挂接失败（决策原样继续）: char={} : {}",
+                    ch.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 到期约定置顶段（【待处理约定】）：把“即将到期的、角色知道的事实”放在情境最前。
+     *
+     * <p>为什么需要独立段：{@code digestForPrompt} 是固定格式的“我所知道的事”清单，
+     * 排序按获知时间，契约常常埋在第 6~8 条；实测模型会把它当背景，继续做手头的事。
+     * 本段只做<b>显著性</b>提升，不替模型决定行动（仍由 AI 在赴约/提醒/暂缓之间选择），
+     * 且复用 {@link com.holzyn.actor.domain.world.fact.service.WorldFactDecisionSignal}
+     * 的同一判定（最近到期的一条），不产生第二套“什么算待处理”的口径。</p>
+     *
+     * @param ch 角色实体
+     *
+     * @return 段文本；无待处理事实/未装配/异常返回空串
+     */
+    private String urgentFactSegment(ActorCharacter ch) {
+        if (worldFactDecisionSignal == null || ch == null || ch.getProjectId() == null) {
+            return "";
+        }
+        try {
+            com.holzyn.actor.domain.world.fact.entity.ActorWorldFact fact =
+                    worldFactDecisionSignal.nearestDueFact(ch.getProjectId(),
+                            com.holzyn.actor.common.NpcRefs.of(ch.getId()), null);
+            if (fact == null) {
+                return "";
+            }
+            long gs = 0L;
+            if (worldClockService != null) {
+                Long now = worldClockService.currentEngineGameSecond(ch.getProjectId());
+                gs = now == null ? 0L : now;
+            }
+            String dueNote = "";
+            Long due = fact.getValidToGameSecond();
+            if (due != null && gs > 0) {
+                long remainingSeconds = due - gs;
+                dueNote = remainingSeconds <= 0 ? "（已经到期）"
+                        : "（约 " + Math.max(1, remainingSeconds / 60L) + " 游戏分钟后到期）";
+            }
+            String name = fact.getName() == null || fact.getName().isBlank()
+                    ? fact.getFactKey() : fact.getName();
+            StringBuilder sb = new StringBuilder("【待处理约定】");
+            sb.append('\n').append("- ").append(name).append('：')
+                    .append(fact.getStateText() == null ? "" : fact.getStateText()).append(dueNote);
+            if (fact.getLocationName() != null && !fact.getLocationName().isBlank()) {
+                sb.append("；地点：").append(fact.getLocationName());
+            }
+            sb.append("\n这件事与你直接相关且即将到期。本次决策请优先考虑它"
+                    + "（去赴约、提醒对方、或先为它做安排）；只有更紧急的生存危险才可以暂缓。");
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("[Thinking] 待处理约定段生成失败（跳过）: char={} : {}", ch.getId(), e.getMessage());
+            return "";
+        }
+    }
+
+    /**
      * 批3 决策与感知：action_gen 情境前置 段2D/2E（世界动态 + 当前状态）。
      * <p>判据：情境已含【当前状态】段（周期感知情境经 PerceptionService 注入 段2E/2D，
      * 不重复）→ 原样返回；情境缺【当前状态】（STIMULUS 个性刺激情境「只知刺激不知处境」）
@@ -498,23 +740,96 @@ public class DecisionService {
      * @return 可能被前置 段2D/2E 后的情境文本
      */
     private String enrichDecisionSituation(ActorCharacter ch, String situation) {
-        if (aiContextInjector == null || ch == null || ch.getProjectId() == null) {
+        if (ch == null || ch.getProjectId() == null) {
             return situation;
         }
-        if (situation != null && situation.contains("【当前状态】")) {
+        // 段2E 已有时不重复注入 2D/2E（token 保护），但段2F【所处之地】必须恒在——
+        // 世界状态（脚下这块地的现状/刚发生的变化/全镇大动静）要进入<b>每一次</b>行动决策，
+        // 否则行动层只剩饥饿/口渴/心情的生理循环（澄江镇二日实跑根因：叙事会说话、决策不会动）。
+        // 注意：2F/卡住目标段各自有独立的装配口，不能被「注入器未装配」一并短路。
+        String enriched = situation;
+        if (aiContextInjector != null && (situation == null || !situation.contains("【当前状态】"))) {
+            try {
+                Long gameSecond = worldClockService == null ? null
+                        : worldClockService.currentEngineGameSecond(ch.getProjectId());
+                String prefix = aiContextInjector.decisionStatePrefix(ch.getProjectId(),
+                        com.holzyn.actor.common.NpcRefs.of(ch.getId()), gameSecond);
+                if (prefix != null && !prefix.isBlank()) {
+                    enriched = enriched == null || enriched.isBlank() ? prefix : prefix + "\n\n" + enriched;
+                }
+            } catch (Exception e) {
+                log.warn("[Thinking] 段2D/2E 决策前缀注入失败（原样情境继续）: char={} : {}", ch.getId(), e.getMessage());
+            }
+        }
+        return appendStalledGoals(ch, appendLocalitySegment(ch, enriched));
+    }
+
+    /**
+     * 段【卡住的目标】追加：把「这件事卡住了」重新摆到决策桌面上。
+     *
+     * <p>去重键为段头「【卡住的目标】」；无卡住目标/未装配/异常 → 原样返回（零阻断）。</p>
+     *
+     * @param ch 角色实体
+     *
+     * @param situation 已补 2D/2E/2F 的情境（可空）
+     *
+     * @return 追加后的情境
+     */
+    private String appendStalledGoals(ActorCharacter ch, String situation) {
+        if (planningService == null) {
+            return situation;
+        }
+        if (situation != null && situation.contains("【卡住的目标】")) {
             return situation;
         }
         try {
             Long gameSecond = worldClockService == null ? null
                     : worldClockService.currentEngineGameSecond(ch.getProjectId());
-            String prefix = aiContextInjector.decisionStatePrefix(ch.getProjectId(),
+            String stalled = planningService.stalledGoalsSegment(ch.getProjectId(),
                     com.holzyn.actor.common.NpcRefs.of(ch.getId()), gameSecond);
-            if (prefix == null || prefix.isBlank()) {
+            if (stalled == null || stalled.isBlank()) {
                 return situation;
             }
-            return situation == null || situation.isBlank() ? prefix : prefix + "\n\n" + situation;
+            return situation == null || situation.isBlank() ? stalled : situation + "\n\n" + stalled;
         } catch (Exception e) {
-            log.warn("[Thinking] 段2D/2E 决策前缀注入失败（原样情境继续）: char={} : {}", ch.getId(), e.getMessage());
+            log.warn("[Thinking] 卡住目标段注入失败（原样情境继续）: char={} : {}", ch.getId(), e.getMessage());
+            return situation;
+        }
+    }
+
+    /**
+     * 段2F【所处之地】追加：情境末尾补「这里眼下刚刚的变化四下里的动静镇上的大动静」。
+     *
+     * <p>为什么放在决策侧而不是只放注入器：{@code decisionStatePrefix} 只在情境缺【当前状态】时
+     * 前置，而引擎周期的感知情境<b>自带</b>【当前状态】（段2E），那条主路径会整段跳过前缀注入——
+     * 实跑 1452 次决策里，真正带世界状态的只有少数刺激决策。放在这里等于给两条路径同一个兜底：
+     * 已含【所处之地】（去重键 {@link com.holzyn.actor.domain.agent.context.AiContextInjector#SEG_2F_HEADER}）
+     * 则跳过，否则追加。</p>
+     *
+     * <p>fail-open：注入器未装配/段为空/异常 → 原样返回（零阻断，行为与前一致）。</p>
+     *
+     * @param ch 角色实体
+     *
+     * @param situation 已补 2D/2E 的情境（可空）
+     *
+     * @return 追加段2F 后的情境
+     */
+    private String appendLocalitySegment(ActorCharacter ch, String situation) {
+        if (situation != null
+                && situation.contains(com.holzyn.actor.domain.agent.context.AiContextInjector.SEG_2F_HEADER)) {
+            return situation;
+        }
+        try {
+            Long gameSecond = worldClockService == null ? null
+                    : worldClockService.currentEngineGameSecond(ch.getProjectId());
+            String locality = aiContextInjector.localitySegment(ch.getProjectId(),
+                    com.holzyn.actor.common.NpcRefs.of(ch.getId()), gameSecond);
+            if (locality == null || locality.isBlank()) {
+                return situation;
+            }
+            return situation == null || situation.isBlank() ? locality : situation + "\n\n" + locality;
+        } catch (Exception e) {
+            log.warn("[Thinking] 段2F 所处之地注入失败（原样情境继续）: char={} : {}", ch.getId(), e.getMessage());
             return situation;
         }
     }
@@ -604,8 +919,13 @@ public class DecisionService {
      */
     public String buildSituation(ActorCharacter ch) {
         try {
+            // 关键：必须把当前引擎游戏秒传给感知层。传 null 会让【我所知道的事】
+            // 以 gs=0 过滤（新写入事实 validFrom>0 被误判为未生效），并生成
+            // gs0/vN 的伪版本——这正是「事实已入库但决策 prompt 看不见」的根因。
+            Long decisionGameSecond = worldClockService == null ? null
+                    : worldClockService.currentEngineGameSecond(ch.getProjectId());
             String perception = perceptionService.buildPerceptionText(ch.getProjectId(),
-                    com.holzyn.actor.common.NpcRefs.of(ch.getId()), null);
+                    com.holzyn.actor.common.NpcRefs.of(ch.getId()), decisionGameSecond);
             if (perception != null && !perception.isBlank()) {
                 return perception;
             }
@@ -791,6 +1111,34 @@ public class DecisionService {
             return null;
         }
         try {
+            // 到期事实让路：空间快判只从当前空间候选里挑，天然看不见「一小时后还银币」
+            // 这类跨地点约定；存在待处理事实时直接回退 AI 深思（action_gen）。
+            if (worldFactDecisionSignal != null
+                    && worldFactDecisionSignal.hasActionableFact(ch.getProjectId(),
+                    com.holzyn.actor.common.NpcRefs.of(ch.getId()), null)) {
+                AiCallContext.recordStep(ch.getProjectId(), "agent_decision", "brain_strategy",
+                        "space_decision 让路：存在待处理世界事实（6 游戏小时内到期），交给 AI 深思", 0);
+                return null;
+            }
+            // 决策输入统一补齐（闭环修复）：空间快判同样是一次决策——情境必须含
+            // 感知与【我所知道的事】，否则第三人称事实（public/location）无法影响选择。
+            situation = ensureDecisionSituation(ch, situation);
+            // 世界状态进入快判：段2F 的单行版（此地刚有什么变化镇上近来的动静）。
+            // 只给一行——0.6B 判定层要的是具体钩子，整段世界描述会撑爆报文（超时事故）。
+            if (aiContextInjector != null) {
+                try {
+                    Long gs = worldClockService == null ? null
+                            : worldClockService.currentEngineGameSecond(ch.getProjectId());
+                    String hint = aiContextInjector.localityHint(ch.getProjectId(),
+                            com.holzyn.actor.common.NpcRefs.of(ch.getId()), gs);
+                    if (hint != null && !hint.isBlank()) {
+                        situation = situation == null || situation.isBlank()
+                                ? hint : situation + "\n" + hint;
+                    }
+                } catch (Exception e) {
+                    log.debug("[Thinking] 段2F 单行版注入失败（跳过）: char={} : {}", ch.getId(), e.getMessage());
+                }
+            }
             // 主动记忆检索【主动想起】段（决策全局自问命中时）：拼入 决策模型 判定情境文本
             // 首部（buildSpaceStateText 对 situation 尾部截断 300 字——段在首部保活，快判
             // 路径也能被「主动想起的记忆」影响；未命中/无段 → 原样行为零影响）
@@ -889,10 +1237,14 @@ public class DecisionService {
             // 标注到判定候选文本（决策可据此权衡远近；坐标/服务未装配/失败跳过标注，行为零影响）
             candidates = enrichCandidatesWithDistance(projectId, ch, candidates);
             // 判定编排（一次前向）→ 选中候选
+            String spaceStateText = buildSpaceStateText(ch, st, doc, situation);
+            // 空间快判同样属于一次决策输入：把 stateVersion + 情境快照留证
+            // （user_prompt 内含【我所知道的事】，供 L6 第三人称事实核对）。
+            recordDecisionInputVersion(ch, spaceStateText, spaceStateText);
             com.holzyn.actor.domain.growth.space.SpaceDecisionCandidates.SpaceCandidate chosen =
                     com.holzyn.actor.domain.growth.space.SpaceDecisionServiceUtils.decide(
                             decisionGate, projectId, ch.getId(), candidates, pctx,
-                            buildSpaceStateText(ch, st, doc, situation));
+                            spaceStateText);
             if (chosen == null) {
                 return null;
             }

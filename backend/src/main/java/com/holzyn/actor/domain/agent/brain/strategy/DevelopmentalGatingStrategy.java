@@ -124,6 +124,15 @@ public class DevelopmentalGatingStrategy implements BrainStrategy {
     @Lazy
     private com.holzyn.actor.domain.agent.context.AiContextInjector aiContextInjector;
 
+    /**
+     * 世界事实“待处理”信号：角色知道一条 6 游戏小时内到期的契约/约定时，
+     * 阶段门控必须让路给 AI 深思，否则「老人按习惯打盹」会吞掉还银币约定。
+     * null=未装配（单测）/异常=false，保持原行为。
+     */
+    @Autowired(required = false)
+    @Lazy
+    private com.holzyn.actor.domain.world.fact.service.WorldFactDecisionSignal worldFactDecisionSignal;
+
     @Override
     public String name() {
         return "stage_gating";
@@ -162,6 +171,17 @@ public class DevelopmentalGatingStrategy implements BrainStrategy {
             }
             if (NpcKind.COMMON == ctx.kind() && ctx.environmentText() != null
                     && !ctx.environmentText().isBlank()) {
+                return Optional.empty();
+            }
+            // 世界事实让路：角色知道一条 6 游戏小时内到期的契约/约定时，
+            // 「老人按习惯打盹」不能吞掉「一个时辰后还银币」这类世界事实；
+            // 交给 AI 深思读取【我所知道的事】并决定行动。无事实/服务未装配 → 原行为。
+            if (worldFactDecisionSignal != null
+                    && worldFactDecisionSignal.hasActionableFact(ctx.projectId(),
+                    ch.npcRef(), ctx.gameSecond())) {
+                AiCallContext.recordStep(ctx.projectId(), "agent_decision", "brain_strategy",
+                        "stage_gating 让路：存在待处理世界事实（6 游戏小时内到期），交给 AI 深思", 0);
+                log.info("[BrainStrategy] stage_gating 让路：待处理世界事实 ref={}", ch.npcRef());
                 return Optional.empty();
             }
             // ② 时段 + 候选池骨架（0 AI）

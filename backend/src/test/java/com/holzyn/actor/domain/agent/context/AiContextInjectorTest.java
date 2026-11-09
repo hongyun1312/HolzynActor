@@ -14,7 +14,11 @@ import com.holzyn.actor.domain.npc.relation.entity.ActorCharacterRelation;
 import com.holzyn.actor.domain.npc.relation.repository.ActorCharacterRelationRepository;
 import com.holzyn.actor.domain.npc.state.entity.ActorNpcState;
 import com.holzyn.actor.domain.npc.state.service.NpcStateService;
+import com.holzyn.actor.domain.world.entity.ActorWorldEntity;
+import com.holzyn.actor.domain.world.entity.ActorWorldMacroEvent;
 import com.holzyn.actor.domain.world.entity.ActorWorldSetting;
+import com.holzyn.actor.domain.world.repository.ActorWorldEntityRepository;
+import com.holzyn.actor.domain.world.repository.ActorWorldMacroEventRepository;
 import com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository;
 import com.holzyn.actor.domain.world.service.WorldClockService;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,6 +57,8 @@ class AiContextInjectorTest {
     private ActorConversationMemberRepository conversationMemberRepository;
     private ActorConversationRepository conversationRepository;
     private ActorMessageRepository messageRepository;
+    private ActorWorldEntityRepository worldEntityRepository;
+    private ActorWorldMacroEventRepository macroEventRepository;
     private AiContextInjector injector;
 
     private static final String PERSONA_SHARDS = """
@@ -71,6 +77,8 @@ class AiContextInjectorTest {
         conversationMemberRepository = Mockito.mock(ActorConversationMemberRepository.class);
         conversationRepository = Mockito.mock(ActorConversationRepository.class);
         messageRepository = Mockito.mock(ActorMessageRepository.class);
+        worldEntityRepository = Mockito.mock(ActorWorldEntityRepository.class);
+        macroEventRepository = Mockito.mock(ActorWorldMacroEventRepository.class);
         injector = new AiContextInjector(400, 300, 3);
         Reflection.set(injector, "characterRepository", characterRepository);
         Reflection.set(injector, "worldSettingRepository", worldSettingRepository);
@@ -82,6 +90,8 @@ class AiContextInjectorTest {
         Reflection.set(injector, "conversationMemberRepository", conversationMemberRepository);
         Reflection.set(injector, "conversationRepository", conversationRepository);
         Reflection.set(injector, "messageRepository", messageRepository);
+        Reflection.set(injector, "worldEntityRepository", worldEntityRepository);
+        Reflection.set(injector, "macroEventRepository", macroEventRepository);
     }
 
     private ActorWorldSetting world() {
@@ -578,6 +588,211 @@ class AiContextInjectorTest {
         assertFalse(prefix.contains("【当前状态】"));
     }
 
+    // ====================段2F【所处之地】（世界状态进入行动决策） ====================
+
+    /** 段2F 四行装配：地点现状 + 地点刚变 + 其它实体近变（排除自己）+ 宏观大动静。 */
+    @Test
+    void localitySegment_assemblesLocationChangesAndMacroEvent() {
+        long gs = 10L * 86400L; // 第 10 游戏日
+        ActorCharacter self = new ActorCharacter();
+        self.setId(3L);
+        self.setName("老吴");
+        self.setLocation("河埠头");
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(self));
+
+        ActorWorldEntity here = entity("location:河埠头", "location", "河埠头",
+                "石阶比往年早半个月露出水线", "有人把一只竹篮落在碾盘边，一直没人来取");
+        when(worldEntityRepository.findTopByProjectIdAndEntityKeyAndValidToGameDayIsNullOrderByIdDesc(
+                1L, "location:河埠头")).thenReturn(Optional.of(here));
+
+        ActorWorldEntity selfRow = entity("person:npc:3", "person", "老吴", "在铺子里", "炉子凉了三天");
+        ActorWorldEntity other = entity("person:阿福", "person", "阿福", "在渡口", "船队又没到，铁料还没影");
+        when(worldEntityRepository
+                .findTop20ByProjectIdAndValidToGameDayIsNullAndRecentChangeIsNotNullOrderByUpdatedAtDescIdDesc(1L))
+                .thenReturn(List.of(here, selfRow, other));
+
+        ActorWorldMacroEvent drought = new ActorWorldMacroEvent();
+        drought.setTitle("连月无雨田土裂");
+        drought.setNarrative("河埠头的石阶比往年早半个月露出水线，淘米的人要往下多走两级。");
+        drought.setSeverity(4);
+        when(macroEventRepository
+                .findByProjectIdAndGameDayBetweenAndSeverityGreaterThanEqualOrderByGameDayAsc(1L, 9L, 10L, 3))
+                .thenReturn(List.of(drought));
+
+        String seg = injector.localitySegment(1L, "npc:3", gs);
+
+        assertTrue(seg.startsWith("【所处之地】河埠头"), "段头应带地点名: " + seg);
+        assertTrue(seg.contains("这里眼下"), "应含地点现状: " + seg);
+        assertTrue(seg.contains("石阶比往年早半个月露出水线"));
+        assertTrue(seg.contains("刚刚的变化"), "应含地点近期变化: " + seg);
+        assertTrue(seg.contains("竹篮"));
+        assertTrue(seg.contains("四下里的动静"), "应含其它实体近变: " + seg);
+        assertTrue(seg.contains("阿福"), "旁证应带实体名: " + seg);
+        assertFalse(seg.contains("老吴："), "不应把角色自己当旁证: " + seg);
+        assertTrue(seg.contains("镇上的大动静"), "应含宏观事件行: " + seg);
+        assertTrue(seg.contains("连月无雨田土裂"), "宏观事件标题应进决策: " + seg);
+        assertTrue(seg.contains("你自己掂量"), "有当场的动静时应给行动提示: " + seg);
+    }
+
+    /** 未装配实体仓库 → 空串（单测直接 new 构造，零阻断）。 */
+    @Test
+    void localitySegment_emptyWhenRepositoryMissing() {
+        assertEquals("", injector.localitySegment(1L, "npc:3", 0L));
+    }
+
+    /**
+     * 复验缺陷（新-1）：同一条事件同时刷了地点与人物 → 「四下里的动静」不得把
+     * 「刚刚的变化」再说一遍（按 provenance+provenanceRef 判同源）。
+     */
+    @Test
+    void localitySegment_dedupesSideChangeFromSameEventSource() {
+        long gs = 10L * 86400L;
+        ActorCharacter self = new ActorCharacter();
+        self.setId(3L);
+        self.setName("老吴");
+        self.setLocation("河神庙");
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(self));
+
+        ActorWorldEntity here = entity("location:河神庙", "location", "河神庙",
+                "庙前老樟树下成了镇上人情纽带", "河神庙夜聚，众人信任加深");
+        here.setProvenance("event");
+        here.setProvenanceRef(88L);
+        when(worldEntityRepository.findTopByProjectIdAndEntityKeyAndValidToGameDayIsNullOrderByIdDesc(
+                1L, "location:河神庙")).thenReturn(Optional.of(here));
+
+        ActorWorldEntity sameEventPerson = entity("person:阿珍", "person", "阿珍",
+                "在庙前", "河神庙夜聚，众人信任加深");
+        sameEventPerson.setProvenance("event");
+        sameEventPerson.setProvenanceRef(88L);
+        when(worldEntityRepository
+                .findTop20ByProjectIdAndValidToGameDayIsNullAndRecentChangeIsNotNullOrderByUpdatedAtDescIdDesc(1L))
+                .thenReturn(List.of(here, sameEventPerson));
+
+        String seg = injector.localitySegment(1L, "npc:3", gs);
+
+        assertTrue(seg.contains("刚刚的变化"), "地点行保留: " + seg);
+        assertFalse(seg.contains("四下里的动静"), "同源事件不应再进旁证: " + seg);
+        assertEquals(1, countOccurrences(seg, "河神庙夜聚，众人信任加深"), "同一件事只说一遍: " + seg);
+    }
+
+    /**
+     * 复验缺陷（新-1 兜底）：来源不同但变化文本同一句（不同实体被同一描述刷过）→ 也只说一遍。
+     */
+    @Test
+    void localitySegment_dedupesSideChangeWithSameText() {
+        long gs = 10L * 86400L;
+        ActorCharacter self = new ActorCharacter();
+        self.setId(3L);
+        self.setName("老吴");
+        self.setLocation("河神庙");
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(self));
+
+        ActorWorldEntity here = entity("location:河神庙", "location", "河神庙",
+                "庙前有人夜谈", "河神庙夜聚，众人信任加深");
+        when(worldEntityRepository.findTopByProjectIdAndEntityKeyAndValidToGameDayIsNullOrderByIdDesc(
+                1L, "location:河神庙")).thenReturn(Optional.of(here));
+
+        ActorWorldEntity other = entity("person:周桂芬", "person", "周桂芬",
+                "在庙前", "河神庙夜聚，众人信任加深。");
+        when(worldEntityRepository
+                .findTop20ByProjectIdAndValidToGameDayIsNullAndRecentChangeIsNotNullOrderByUpdatedAtDescIdDesc(1L))
+                .thenReturn(List.of(here, other));
+
+        String seg = injector.localitySegment(1L, "npc:3", gs);
+
+        assertEquals(1, countOccurrences(seg, "河神庙夜聚"), "标点差异也应按同一句处理: " + seg);
+    }
+
+    /**
+     * 计数辅助（断言「同一件事只说一遍」）。
+     */
+    /** 无地点/无实体/无宏观事件 → 空串（不产出只有段头的空壳段）。 */
+    @Test
+    void localitySegment_emptyWhenNoData() {
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(new ActorCharacter()));
+        when(worldEntityRepository
+                .findTop20ByProjectIdAndValidToGameDayIsNullAndRecentChangeIsNotNullOrderByUpdatedAtDescIdDesc(1L))
+                .thenReturn(List.of());
+        when(macroEventRepository
+                .findByProjectIdAndGameDayBetweenAndSeverityGreaterThanEqualOrderByGameDayAsc(1L, 9L, 10L, 3))
+                .thenReturn(List.of());
+        assertEquals("", injector.localitySegment(1L, "npc:3", 10L * 86400L));
+    }
+
+    /** 精确键未命中 → 按显示名在地点域兜底匹配（键命名不统一时不至于整段丢失）。 */
+    @Test
+    void localitySegment_fallsBackToNameMatchWhenKeyMisses() {
+        ActorCharacter self = new ActorCharacter();
+        self.setId(3L);
+        self.setLocation("蚕桑地");
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(self));
+        when(worldEntityRepository.findTopByProjectIdAndEntityKeyAndValidToGameDayIsNullOrderByIdDesc(
+                1L, "location:蚕桑地")).thenReturn(Optional.empty());
+        ActorWorldEntity byName = entity("loc:蚕桑地", "location", "蚕桑地", "桑叶打卷发黄", null);
+        when(worldEntityRepository.findByProjectIdAndEntityTypeAndValidToGameDayIsNullOrderByIdDesc(1L, "location"))
+                .thenReturn(List.of(byName));
+
+        String seg = injector.localitySegment(1L, "npc:3", 10L * 86400L);
+
+        assertTrue(seg.startsWith("【所处之地】蚕桑地"), "兜底匹配应带上地点名: " + seg);
+        assertTrue(seg.contains("桑叶打卷发黄"), "兜底匹配应带出地点现状: " + seg);
+        // 只有背景、没有「当场的动静」→ 不加行动提示（避免每轮催角色找事做）
+        assertFalse(seg.contains("你自己掂量"), "纯背景不应加行动提示: " + seg);
+    }
+
+    /** 快判单行版：地点有近期变化时只给这一行（≤80 字，不带段头）。 */
+    @Test
+    void localityHint_prefersLocationRecentChange() {
+        ActorCharacter self = new ActorCharacter();
+        self.setId(3L);
+        self.setLocation("晒谷场");
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(self));
+        when(worldEntityRepository.findTopByProjectIdAndEntityKeyAndValidToGameDayIsNullOrderByIdDesc(
+                1L, "location:晒谷场"))
+                .thenReturn(Optional.of(entity("location:晒谷场", "location", "晒谷场",
+                        "谷堆用席子盖着", "老支书把竹篮落在碾盘边")));
+
+        String hint = injector.localityHint(1L, "npc:3", 10L * 86400L);
+
+        assertTrue(hint.startsWith("此地刚有变化："), "单行版应有前缀: " + hint);
+        assertTrue(hint.contains("竹篮"));
+        assertFalse(hint.contains("【所处之地】"), "单行版不带段头: " + hint);
+        assertTrue(hint.length() <= 80, "单行版须控制在 80 字内: " + hint.length());
+    }
+
+    /** decisionStatePrefix 末位追加 段2F（段2D → 段2E → 段2F 顺序）。 */
+    @Test
+    void decisionStatePrefix_appendsSegment2F() {
+        when(worldClockService.currentEngineGameSecond(1L)).thenReturn(10L * 86400L);
+        when(worldClockService.gameTimeTextOf(1L, 240L)).thenReturn("世界历 0001年01月10日 00时00分");
+        when(npcStateService.stateSegment(1L, "npc:3", 10L * 86400L))
+                .thenReturn("【当前状态】\n- 需求：饥饿 68/100（略饿）");
+        ActorCharacter self = new ActorCharacter();
+        self.setId(3L);
+        self.setLocation("米行");
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(self));
+        when(worldEntityRepository.findTopByProjectIdAndEntityKeyAndValidToGameDayIsNullOrderByIdDesc(
+                1L, "location:米行"))
+                .thenReturn(Optional.of(entity("location:米行", "location", "米行", "门口有人问新米几时收", null)));
+
+        String prefix = injector.decisionStatePrefix(1L, "npc:3", 10L * 86400L);
+
+        assertTrue(prefix.contains("【所处之地】米行"), "应含段2F: " + prefix);
+        assertTrue(prefix.indexOf("【当前状态】") < prefix.indexOf("【所处之地】"), "段2F 应在段2E 之后");
+    }
+
+    private static ActorWorldEntity entity(String key, String type, String name, String state, String change) {
+        ActorWorldEntity e = new ActorWorldEntity();
+        e.setProjectId(1L);
+        e.setEntityKey(key);
+        e.setEntityType(type);
+        e.setName(name);
+        e.setCurrentState(state);
+        e.setRecentChange(change);
+        e.setValidFromGameDay(10L);
+        return e;
+    }
+
     // ==================== V2.0 记忆与反思链：段1A+1C+2D+2E memoryChainContext（2026-10-10 批 4） ====================
 
     @Test
@@ -644,6 +859,9 @@ class AiContextInjectorTest {
         assertTrue(rail.contains("不替其他角色"));
         assertTrue(rail.contains("只回复这一轮"));
         assertTrue(rail.contains("不要跳出角色"));
+        // 认知边界（修：硬事实漂移，如把「手机」当成见过的旧物）
+        assertTrue(rail.contains("这个时代为限"));
+        assertTrue(rail.contains("没见过也没听过"));
     }
 
     /** 角色发言消息（含群聊契约 rawStream：动作 + 情绪）。 */

@@ -26,6 +26,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -369,6 +370,54 @@ class InfoDiffusionServiceTest {
         assertEquals(2, service.queryDiffusion(1L, null).size());
         assertEquals(86400L, service.queryDiffusion(1L, null).get(0).getReachedGameSecond(),
                 "按到达时刻升序");
+    }
+
+    // ====================信息包去重 ====================
+
+    /** 同一个包标识（内容/来源的确定性哈希）已存在 → 复用既有 id，不再落第二个副本。 */
+    @Test
+    void publishPacketReusesExistingPacketWithSameInfoId() {
+        ActorInfoPacket existing = new ActorInfoPacket();
+        existing.setId(77L);
+        when(packetRepository.findTopByProjectIdAndInfoId(any(), any())).thenReturn(Optional.of(existing));
+
+        Long id = service.publishPacket(1L, 88L, "邻镇有人开始收茧，价还给得高", "npc:3",
+                "location", 0.8, "集市", "rumor:cocoon", 86400L);
+
+        assertEquals(77L, id, "命中同标识包应复用");
+        verify(packetRepository, never()).save(any(ActorInfoPacket.class));
+    }
+
+    /** 同一事实 + 同一来源事件已有活跃包（正文措辞不同）→ 复用，不重复扩散。 */
+    @Test
+    void publishPacketReusesActivePacketForSameFactAndSource() {
+        ActorInfoPacket existing = new ActorInfoPacket();
+        existing.setId(88L);
+        existing.setSourceEventId(88L);
+        when(packetRepository.findByProjectIdAndFactKeyAndStatus(1L, "rumor:cocoon", "active"))
+                .thenReturn(List.of(existing));
+
+        Long id = service.publishPacket(1L, 88L, "还是收茧那件事，换了句话", "npc:3",
+                "location", 0.8, "集市", "rumor:cocoon", 86400L);
+
+        assertEquals(88L, id, "同源事实应复用活跃包");
+        verify(packetRepository, never()).save(any(ActorInfoPacket.class));
+    }
+
+    /** 没有重复 → 正常落库并返回新 id（去重不能把真消息也挡掉）。 */
+    @Test
+    void publishPacketSavesWhenNoDuplicate() {
+        when(packetRepository.save(any(ActorInfoPacket.class))).thenAnswer(inv -> {
+            ActorInfoPacket p = inv.getArgument(0);
+            p.setId(99L);
+            return p;
+        });
+
+        Long id = service.publishPacket(1L, 90L, "铁料还没到，炉子凉了三天", "npc:5",
+                "location", 0.9, "铁匠铺", "rumor:iron", 86400L);
+
+        assertEquals(99L, id);
+        verify(packetRepository).save(any(ActorInfoPacket.class));
     }
 
     // ==================== 辅助构造 ====================

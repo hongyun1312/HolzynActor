@@ -489,10 +489,13 @@ public class PromptService {
         // 段1C 角色核心卡=模板 {{persona_summary}}、段2D/2E=情境（STIMULUS 前置/periodic 感知漏斗），
         // 唯独 段1A 世界观此前缺失；未装配/无数据 → 原样返回（fail-open 零阻断）
         String worldBrief = aiContextInjector == null ? "" : aiContextInjector.worldBrief(projectId);
-        if (worldBrief == null || worldBrief.isBlank()) {
-            return rendered;
-        }
-        return "【世界观】\n" + worldBrief + "\n\n" + rendered;
+        String assembled = (worldBrief == null || worldBrief.isBlank())
+                ? rendered
+                : "【世界观】\n" + worldBrief + "\n\n" + rendered;
+        // 段装配去重：人设段与感知段会各自注入【当前环境】，事实段与感知段会各带一行
+        // [世界状态版本]（实跑 18/1215 命中双份）。两条链都该保留，冲突的只是「最终 prompt
+        // 只能有一份」——所以在唯一出口按段头去重一次（保留首次出现）。
+        return com.holzyn.actor.domain.agent.prompt.PromptSegments.dedupe(assembled);
     }
 
     /**

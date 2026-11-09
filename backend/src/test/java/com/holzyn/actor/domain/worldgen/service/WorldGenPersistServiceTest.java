@@ -208,6 +208,27 @@ class WorldGenPersistServiceTest {
         assertTrue(e.getMessage().contains("信息传播"));
     }
 
+    /**
+     * 历史任务（或关掉校验的旧产物）里 era 可能是长段落：预览出口必须按落库口径截断，
+     * 否则前端回填后保存会 400「时代背景最长 50 字符」，用户卡在第 2 步进不去第 3 步。
+     */
+    @Test
+    void previewClampsOverlongEraToColumnLimit() {
+        String longEra = "潮汐历纪元，技术处于蒸汽朋克前夜的齿轮与蒸汽时代。交通依赖帆船与运河，"
+                + "铁矿与雾晶是两种核心资源，城镇沿矿脉与航道分布，内陆仍有大片未测绘的雾林。";
+        attempts.removeIf(a -> a.getNodeId().equals("agent_spacetime"));
+        attempts.add(attempt("agent_spacetime", """
+                {"space_time":{"essence":"山海分层","world_layout":"九洲分立","key_locations":[],
+                 "ecology":"灵兽栖息","era":"%s","environment_texture":"晨雾弥漫"}}
+                """.formatted(longEra)));
+
+        WorldGenPreviewVO vo = service.preview(10L);
+        String era = vo.getSections().get("era");
+        assertTrue(era.length() <= WorldGenSchemaValidator.ERA_MAX_CHARS,
+                "预览里的 era 必须 ≤50 字符，实际 " + era.length());
+        assertTrue(longEra.startsWith(era), "应保留原文前缀");
+    }
+
     // ==================== 确认落库 ====================
 
     @Test

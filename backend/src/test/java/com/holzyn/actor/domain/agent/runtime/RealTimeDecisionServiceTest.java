@@ -190,6 +190,8 @@ class RealTimeDecisionServiceTest {
                 RealTimeDecisionService.eventStimulusType(newEvent(1L, "world", 4, null, null, null, null)));
         assertEquals(StimulusType.WORLD_EVENT,
                 RealTimeDecisionService.eventStimulusType(newEvent(1L, "evolution", 4, null, null, null, null)));
+        assertEquals(StimulusType.FACT_CHANGED,
+                RealTimeDecisionService.eventStimulusType(newEvent(1L, "fact", 3, null, null, null, null)));
     }
 
     @Test

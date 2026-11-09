@@ -104,6 +104,21 @@ public class WorldEventBusImpl implements WorldEventBus {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.growth.evolution.AccidentJudge accidentJudge;
 
+    /**
+     * 世界闭环配置：只用于读取因果链最大深度。
+     * <p>字段注入保持既有构造器签名不变（AGENTS §8.1.2）；未装配时回退常量 6。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.config.WorldLoopProperties worldLoopProperties;
+
+    /**
+     * 事件冷存储：滚动淘汰前把最旧事件搬进 {@code actor_event_archive}。
+     * <p>字段注入保持既有构造器签名不变（AGENTS §8.1.2）；未装配时退化为「只删不归档」并 WARN，
+     * 不阻断发布主流程。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.repository.ActorEventArchiveRepository eventArchiveRepository;
+
     @Override
     @Transactional
     public ActorEvent publish(Long userId, Long projectId, EventSpec spec) {
@@ -145,9 +160,18 @@ public class WorldEventBusImpl implements WorldEventBus {
         // P0-03 决策源可追溯：行动事件透传决策来源（kind=action 由行动决策打标）
         event.setDecisionSource(normalizeDecisionSource(spec.getDecisionSource()));
         event.setSourceKey(truncate(sourceKey, 100));
+        // 因果链：根事件 depth=0、correlation 由落库后的自身 id 回填；
+        // 子事件从父事件继承 correlation 并 depth+1。
+        applyCausality(projectId, event, spec);
         event.setCreatedAt(LocalDateTime.now());
         event.setUpdatedAt(LocalDateTime.now());
         event = eventRepository.save(event);
+        // 根事件的自引用 correlation：IDENTITY 主键要在 insert 后才知道，故落库后用自身 id 回填
+        // （事件不变量只允许 updated_at 例外，本次回填同一事务、不改变事件语义）。
+        if (event != null && event.getCorrelationId() == null && event.getId() != null) {
+            event.setCorrelationId(String.valueOf(event.getId()));
+            event = eventRepository.save(event);
+        }
 
         // ③ 滚动保护：每项目事件数超限清理最旧（路线图风险表「每项目最近 5000 条」保护）
         enforceRetention(projectId);
@@ -308,6 +332,66 @@ public class WorldEventBusImpl implements WorldEventBus {
         return com.holzyn.actor.common.ActorEventFields.normalizeKind(kind);
     }
 
+    /** 因果链缺省最大深度（depth ≤ 6；配置项 holzyn.actor.world-loop.causal.max-depth 可覆盖）。 */
+    private static final int DEFAULT_MAX_CAUSAL_DEPTH = 6;
+
+    /**
+     * 计算并写入因果字段。
+     *
+     * <p>根事件（无 causeEventId）：depth=spec.depth 或 0，correlation=spec.correlationId（通常为空，
+     * 由 publish 在落库后回填自身 id）。</p>
+     * <p>子事件：读父事件的 depth 与 correlation，深度 +1、链标识继承；父事件不存在时降级为根事件
+     * 并 WARN（世界不能因为一条因果引用写错就停摆）。</p>
+     *
+     * @param projectId 项目/世界 ID
+     *
+     * @param event     待落库事件
+     *
+     * @param spec      发布规格
+     */
+    private void applyCausality(Long projectId, ActorEvent event, EventSpec spec) {
+        Long causeId = spec.getCauseEventId();
+        Long resolvedCauseId = null;
+        int depth = spec.getDepth() == null ? 0 : Math.max(0, spec.getDepth());
+        String correlation = spec.getCorrelationId();
+        if (causeId != null) {
+            ActorEvent parent = eventRepository.findById(causeId).orElse(null);
+            if (parent != null && (parent.getProjectId() == null || parent.getProjectId().equals(projectId))) {
+                resolvedCauseId = causeId;
+                int parentDepth = parent.getDepth() == null ? 0 : parent.getDepth();
+                depth = parentDepth + 1;
+                if (parent.getCorrelationId() != null) {
+                    correlation = parent.getCorrelationId();
+                } else if (parent.getId() != null) {
+                    correlation = String.valueOf(parent.getId());
+                }
+            } else {
+                log.warn("[事件总线] 父事件不存在，降级为根事件：project={} causeEventId={}", projectId, causeId);
+            }
+        }
+        int maxDepth = maxCausalDepth();
+        if (depth > maxDepth) {
+            log.warn("[事件总线] 因果链超深，钳制到 {}：project={} 原始 depth={}", maxDepth, projectId, depth);
+            depth = maxDepth;
+        }
+        // 父事件缺失时不保留悬空引用（前端按 cause_event_id 展开，悬空会画出一根断链）
+        event.setCauseEventId(resolvedCauseId);
+        event.setCorrelationId(truncate(correlation, 40));
+        event.setDepth(depth);
+    }
+
+    /**
+     * 当前允许的最大因果深度（配置缺失时回退 6）。
+     *
+     * @return 最大深度（≥1）
+     */
+    private int maxCausalDepth() {
+        if (worldLoopProperties != null && worldLoopProperties.getCausal() != null) {
+            return Math.max(1, worldLoopProperties.getCausal().getMaxDepth());
+        }
+        return DEFAULT_MAX_CAUSAL_DEPTH;
+    }
+
     /**
      * source 归一化：空白/非法回退 manual（口径见 {@link com.holzyn.actor.common.ActorEventFields}）。
      */
@@ -397,7 +481,17 @@ public class WorldEventBusImpl implements WorldEventBus {
     }
 
     /**
-     * 滚动保护：每项目事件数超限清理最旧（eventsMaxPerProject<=0 不限制；单次最多清理 1000 防大事务）。
+     * 滚动保护：每项目事件数超限时<b>先归档再清理</b>最旧。
+     *
+     * <p><b>为什么先归档</b>：二日实跑里 {@code actor_event} 全程恒为 5000——每来一条新事件
+     * 就把最旧的一条物理删掉，叙事原料（编年史提炼、时间线回放、角色经历）与审计证据
+     * 两天就被冲刷一遍。热表继续按上限滚动（查询快），但被淘汰的行逐行搬进冷表
+     * {@code actor_event_archive}（同事务，{@code event_id}/{@code game_day} 可回捞）。</p>
+     *
+     * <p><b>失败即不删</b>：归档写失败时本轮放弃删除并 WARN——宁可热表胀一轮，
+     * 也不让「存档失败」变成「数据消失」。</p>
+     *
+     * @param projectId 项目 ID
      */
     private void enforceRetention(Long projectId) {
         if (eventsMaxPerProject <= 0) {
@@ -413,11 +507,75 @@ public class WorldEventBusImpl implements WorldEventBus {
         if (toDelete <= 0) {
             return;
         }
+        List<ActorEvent> victims = oldest.subList(0, toDelete);
+        if (!archiveBeforeDelete(projectId, victims)) {
+            log.warn("[事件总线] 归档失败，本轮不淘汰（宁可胀不丢）：project={} 待归档 {} 条",
+                    projectId, toDelete);
+            return;
+        }
         try {
-            eventRepository.deleteAll(oldest.subList(0, toDelete));
-            log.info("[事件总线] 滚动保护：project={} 超限 {} 条，清理最旧 {} 条", projectId, excess, toDelete);
+            eventRepository.deleteAll(victims);
+            log.info("[事件总线] 滚动保护：project={} 超限 {} 条，归档并清理最旧 {} 条", projectId, excess, toDelete);
         } catch (Exception e) {
             log.warn("[事件总线] 滚动保护清理失败：project={} : {}", projectId, e.getMessage());
+        }
+    }
+
+    /**
+     * 把待淘汰事件搬进冷表（同事务；空/未装配/异常返回 false=调用方不删除）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param victims  待淘汰事件（按时间升序）
+     *
+     * @return true=已全部归档（可以安全删除）
+     */
+    private boolean archiveBeforeDelete(Long projectId, List<ActorEvent> victims) {
+        if (victims == null || victims.isEmpty()) {
+            return true;
+        }
+        if (eventArchiveRepository == null) {
+            log.warn("[事件总线] 未装配事件冷存储仓库，淘汰事件将不可回捞：project={} 条数={}",
+                    projectId, victims.size());
+            return true;
+        }
+        try {
+            LocalDateTime now = LocalDateTime.now();
+            Long currentDay = resolveGameDay(projectId);
+            List<com.holzyn.actor.domain.world.entity.ActorEventArchive> rows = new ArrayList<>(victims.size());
+            for (ActorEvent e : victims) {
+                // 归档游戏日以「事件自己发生的日子」为准（game_hour 推导），未知才回退当前游戏日。
+                // 用归档时刻统一打标会把十年前的事件记到今天，按游戏日回捞就散了。
+                Long eventDay = e.getGameHour() == null ? currentDay
+                        : Math.floorDiv(e.getGameHour() * 3600L, 86400L);
+                com.holzyn.actor.domain.world.entity.ActorEventArchive row =
+                        com.holzyn.actor.domain.world.entity.ActorEventArchive.of(e, eventDay, now);
+                if (row != null) {
+                    rows.add(row);
+                }
+            }
+            eventArchiveRepository.saveAll(rows);
+            return true;
+        } catch (Exception e) {
+            log.warn("[事件总线] 事件归档写入失败（本轮不删除）：project={} 条数={} : {}",
+                    projectId, victims.size(), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 归档时的游戏日（取引擎推进位置；读不到返回 null，不影响归档）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @return 游戏日（可空）
+     */
+    private Long resolveGameDay(Long projectId) {
+        try {
+            Long gs = worldClockService.currentEngineGameSecond(projectId);
+            return gs == null || gs <= 0 ? null : Math.floorDiv(gs, 86400L);
+        } catch (Exception e) {
+            return null;
         }
     }
 

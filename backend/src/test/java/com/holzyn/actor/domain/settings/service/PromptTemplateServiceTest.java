@@ -62,7 +62,11 @@ class PromptTemplateServiceTest {
         // 世界地图生成管线 V1.3（第 82 次）：新增 world_map_brief 世界→地图契约（S0b）模板 → 94 → 95
         // 开局家族谱系（本轮）：新增 growth_family_profile_infer 成长档案精修模板 → 95 → 96
         // 世界初始化重构（本轮）：新增 world_meta_suggest 世界名与简介建议模板 → 96 → 97
-        assertEquals(97, builtins.size());
+        // 逐维建档（本轮）：新增 persona_dim_generate 逐维生成模板（前缀缓存友好）→ 97 → 98
+        // 时间性验证（本轮）：新增 temporal_probe 时间性探针模板 → 98 → 99
+        // 新增 dialog_digest 对话回写批量抽取模板 → 99 → 100
+        // 新增 action_adjudicate 行为裁决模板 → 100 → 101
+        assertEquals(101, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_CARD_GEN));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOG));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_GROUP));
@@ -92,6 +96,8 @@ class PromptTemplateServiceTest {
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_GOAL_GEN));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PLAN_DAY));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PLAN_REPLAN));
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_TEMPORAL_PROBE));
+        assertTrue(builtins.get(PromptTemplateService.CODE_TEMPORAL_PROBE).template().contains("{{evidence}}"));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_REFLECTION));
         // D4 F12（无玩家群聊轮）新增退场/收尾编排模板
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_AUTONOMOUS_CHAT_BEAT));
@@ -176,10 +182,14 @@ class PromptTemplateServiceTest {
         // 世界地图生成管线 V1.3（第 82 次）：新增 world_map_brief（S0b 契约）→ 94 → 95，
         // 开局家族谱系（本轮）：新增 growth_family_profile_infer 成长档案精修模板 → 95 → 96，
         // 世界初始化重构（本轮）：新增 world_meta_suggest 世界名与简介建议模板 → 96 → 97，
+        // 逐维建档（本轮）：新增 persona_dim_generate 逐维生成模板（前缀缓存友好）→ 97 → 98，
         // 此处的逐段计数断言与最终断言保持一致，避免历史注释计数误导。
-        assertEquals(97, builtins.size());
+        // 新增 dialog_digest 模板 → 99 → 100
+        // 新增 action_adjudicate 模板 → 100 → 101
+        assertEquals(101, builtins.size());
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_A));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_FILL_B));
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_PERSONA_DIM));
         // 世界常识摘要（2026-10-08）：world_common_knowledge 模板含世界观占位符 + 300-500 字要求
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_WORLD_COMMON_KNOWLEDGE));
         assertTrue(builtins.get(PromptTemplateService.CODE_WORLD_COMMON_KNOWLEDGE).template()
@@ -194,18 +204,21 @@ class PromptTemplateServiceTest {
                 .contains("6-14"));
         assertTrue(builtins.get(PromptTemplateService.CODE_WORLD_META_SUGGEST).template()
                 .contains("60-100"));
-        // 项目级 AI 助手（2026-10-10 第 50 次）：assistant_tool 含工具决策 JSON 契约；assistant_chat 含零 OOC 铁律
+        // 项目级 AI 助手（统一骨架后断言改为「只读不改世界」这条实质铁律）
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_ASSISTANT_TOOL));
         assertTrue(builtins.get(PromptTemplateService.CODE_ASSISTANT_TOOL).template().contains("tool_calls"));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_ASSISTANT_CHAT));
-        assertTrue(builtins.get(PromptTemplateService.CODE_ASSISTANT_CHAT).template().contains("零 OOC"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_ASSISTANT_CHAT).template().contains("只读查询"),
+                "助手只读、不得改世界状态");
+        assertTrue(builtins.get(PromptTemplateService.CODE_ASSISTANT_CHAT).template().contains("不编造"));
         // 对谈模式（2026-10-12 第 54 次 · M1）：dialogue_reply 含角色铁律/占位符；dialogue_greeting 含开场白契约
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOGUE_REPLY));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("{{character_name}}"));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("{{user_message}}"));
-        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("绝不能跳出角色"));
-        // 第 61 轮冒烟抓修：回复软约束（简短克制 ≤120 字）已入模板
-        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("回复克制"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("绝不跳出角色"));
+        // 第 61 轮冒烟抓修：回复软约束（简短克制 ≤120 字）已入模板；
+        // 统一骨架后措辞为「像真人聊天…约 60~120 字」，断言跟到现行措辞
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("像真人聊天"));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_REPLY).template().contains("120 字"));
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOGUE_GREETING));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GREETING).template().contains("开场白"));
@@ -220,7 +233,7 @@ class PromptTemplateServiceTest {
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("{{scene_context}}"));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("{{counterpart_context}}"));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("{{user_message}}"));
-        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("不要替其他角色"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_GROUP_REPLY).template().contains("不替其他角色"));
         // 对谈 M6（2026-10-13 第 59 次）：dialogue_consolidation 沉淀模板含角色清单/最近对话占位符 + JSON 契约
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION).template()
@@ -231,6 +244,29 @@ class PromptTemplateServiceTest {
                 .contains("\"relations\""));
         assertTrue(builtins.get(PromptTemplateService.CODE_DIALOGUE_CONSOLIDATION).template()
                 .contains("memory_points"));
+        // dialog_digest 含参与者/已知事实/最近对话占位符 + claims 契约
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_DIALOG_DIGEST));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOG_DIGEST).template()
+                .contains("{{known_facts}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOG_DIGEST).template()
+                .contains("{{recent_dialog}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOG_DIGEST).template()
+                .contains("claim_type"));
+        // 对接：dialog_digest 新增 GIFT 声明（对话里递东西要真的转移）
+        assertTrue(builtins.get(PromptTemplateService.CODE_DIALOG_DIGEST).template()
+                .contains("GIFT"), "dialog_digest 模板缺少 GIFT 声明契约");
+        // action_adjudicate 含规则提示 + 三态/效果契约
+        assertTrue(builtins.containsKey(PromptTemplateService.CODE_ACTION_ADJUDICATE));
+        assertTrue(builtins.get(PromptTemplateService.CODE_ACTION_ADJUDICATE).template()
+                .contains("{{rule_hint}}"));
+        assertTrue(builtins.get(PromptTemplateService.CODE_ACTION_ADJUDICATE).template()
+                .contains("SUCCESS"));
+        // 裁决模板新增【制作】段占位符（配方/材料/设施）
+        assertTrue(builtins.get(PromptTemplateService.CODE_ACTION_ADJUDICATE).template()
+                .contains("{{craft}}"));
+        // 裁决模板新增【装备】段占位符（手上拿着什么/成色）
+        assertTrue(builtins.get(PromptTemplateService.CODE_ACTION_ADJUDICATE).template()
+                .contains("{{wear}}"));
         // 新用户引导（2026-10-16 第 71 次第二批）：player_profile_gen 玩家档案 AI 补充生成模板
         // 含自我介绍占位符 + persona 六维 JSON 契约
         assertTrue(builtins.containsKey(PromptTemplateService.CODE_PLAYER_PROFILE_GEN));

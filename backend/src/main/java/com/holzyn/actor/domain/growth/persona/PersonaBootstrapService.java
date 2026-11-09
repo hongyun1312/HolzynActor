@@ -38,8 +38,10 @@ import com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository;
 import com.holzyn.actor.domain.world.repository.WorldLocationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -168,6 +170,14 @@ public class PersonaBootstrapService {
     /** 建档幂等配置（默认 true=非 force 路径复用既有档案，基线还原不再重跑 43 次引导） */
     private final GrowthPersonaProperties growthPersonaProperties;
 
+    /**
+     * 逐维建档开关（默认 true）：把 11 维拆成 11 次单维调用以复用超长静态前缀（缓存命中）+ 规避单次超时。
+     * <p>用字段注入而非构造器参数：直接 {@code new} 构造的测试里保持 {@code false}（走原两段式路径），
+     * 既有 {@code PersonaBootstrapIdempotentTest} 的"两次 AI 调用"断言因此不受影响。</p>
+     */
+    @Value("${holzyn.actor.growth.persona.dim-batch:true}")
+    private boolean dimBatchEnabled;
+
     //
     // 公开 API
     //
@@ -217,6 +227,11 @@ public class PersonaBootstrapService {
             log.warn("[AI建档] 参数非法（profileId 为空），已跳过");
             return null;
         }
+        // 逐维路径（m00508）：11 次单维调用，共享超长静态前缀以获得高前缀缓存命中，
+        // 单次输出只有 1 维 → 十几秒完成，彻底规避"一次产 11 维 → 300s 上游超时"。
+        if (dimBatchEnabled) {
+            return bootstrapByDims(projectId, profileId, anchorText, force);
+        }
         long start = System.currentTimeMillis();
         PersonaProfile afterA = fillSegment(projectId, profileId, anchorText, true, force, Set.of(), SOURCE_GENERATED);
         if (afterA == null) {
@@ -235,6 +250,311 @@ public class PersonaBootstrapService {
                 profileId, result.getPersonaVersion(),
                 personaService.validate(profileId).getCoveredDimCount(), System.currentTimeMillis() - start);
         return result;
+    }
+
+    // ==================== 逐维建档（前缀缓存友好：静态段前置 + 逐维单次调用） ====================
+
+    /** 逐维建档场景码（= Prompt 模板编码 = PromptSpecRegistry 登记码 = AiCallTrace scene） */
+    public static final String SCENE_DIM = "persona_dim_generate";
+
+    /** 前序维度回灌上限（控 Prompt 体量；① 在最前，超长时优先保留被引用最多的早期维度） */
+    private static final int PERSONA_SO_FAR_MAX = 12000;
+
+    /** 11 维中文名（仅任务段的可读提示；字段契约仍以模板第二节为准） */
+    private static final Map<String, String> DIM_LABELS = Map.ofEntries(
+            Map.entry(PersonaSchema.Dims.IDENTITY, "身份与社会"),
+            Map.entry(PersonaSchema.Dims.APPEARANCE, "外貌与体质"),
+            Map.entry(PersonaSchema.Dims.PHYSIO, "生理基线"),
+            Map.entry(PersonaSchema.Dims.PERSONALITY, "气质与人格"),
+            Map.entry(PersonaSchema.Dims.VALUES, "价值观与动机"),
+            Map.entry(PersonaSchema.Dims.ABILITY, "能力与知识"),
+            Map.entry(PersonaSchema.Dims.VOICE, "语言与表达"),
+            Map.entry(PersonaSchema.Dims.HABITS, "习惯与日常"),
+            Map.entry(PersonaSchema.Dims.EXPERIENCE, "经历与创伤"),
+            Map.entry(PersonaSchema.Dims.DEVELOPMENT, "发育·遗传·谱系"),
+            Map.entry(PersonaSchema.Dims.MASK, "社会面具"));
+
+    /**
+     * 逐维建档（前缀缓存友好版）：同一角色的 11 次调用共用一段逐字节一致的静态前缀。
+     * <p><b>为什么按维拆</b>：网关（llama.cpp）命中量 ≈ 相同前缀 token 数 − 512 的批重算地板，
+     * 与 prompt 总长无关；一次产 11 维时输出 5k+ token 要 75~115 秒、两段叠加逼近 300s 上游超时，
+     * 且每段都要整段重算前缀。拆成"一次一维"后单次输出小、耗时十几秒，同时让静态段
+     * （世界观 + 11 维契约与示例）在 11 次调用里逐字节复用。</p>
+     * <p><b>段落顺序</b>严格按："[世界观] + [11 维通用要求/格式约束/示例] + [角色基础原始信息]
+     * → [已生成的第 1~N-1 维] → [现在生成第 N 维]"：静态段全部前置，最易变的"本次任务"放最后。</p>
+     * <p><b>落库</b>：11 维先在内存累加成一份完整档案再<b>一次性</b> {@code savePersona}——
+     * 该入口按 {@code _sources} 分派且整体覆盖 {@code persona_json}，逐维落库会抹掉未给的维度。</p>
+     * <p><b>零阻断</b>：单维失败重试 {@link #MAX_RETRY} 次后跳过继续，已得维度照常落库；
+     * 11 维全败则不落库、返回 {@code null}（不抛异常）。</p>
+     *
+     * @param projectId 项目 ID（可空；为空时以角色行自身的 {@code project_id} 为准）
+     *
+     * @param profileId actor_profile.id
+     *
+     * @param anchorText 锚定文本（可空，回退 {@code actor_profile.detail}）
+     *
+     * @param force true=强制重跑（忽略幂等跳过）；false=11 维已覆盖则复用既有档案
+     *
+     * @return 落库后的档案（回读态）；11 维全败时返回 {@code null}
+     */
+    public PersonaProfile bootstrapByDims(Long projectId, Long profileId, String anchorText, boolean force) {
+        if (profileId == null) {
+            log.warn("[AI建档-逐维] 参数非法（profileId 为空），已跳过");
+            return null;
+        }
+        ActorCharacter ch = characterRepository.findById(profileId).orElse(null);
+        if (ch == null || (ch.getDeleted() != null && ch.getDeleted() != 0)) {
+            log.warn("[AI建档-逐维] 角色行不存在或已删除，已跳过：profileId={}", profileId);
+            return null;
+        }
+        Long pid = ch.getProjectId();
+        if (projectId != null && pid != null && !projectId.equals(pid)) {
+            log.warn("[AI建档-逐维] 传入 projectId={} 与角色行归属 {} 不一致，以角色行为准：profileId={}",
+                    projectId, pid, profileId);
+        }
+        PersonaProfile existing = personaService.profileOrEmpty(profileId);
+        // 幂等跳过：非 force、开关打开、11 维全覆盖 → 复用既有档案，零 AI 调用
+        if (!force && growthPersonaProperties.isBootstrapIdempotent()
+                && ch.getPersonaVersion() != null && ch.getPersonaVersion() >= 1
+                && segmentFullyCovered(profileId, PersonaSchema.ALL_DIMS)) {
+            log.info("[AI建档-逐维] 幂等跳过：11 维已全覆盖（复用既有档案，零 AI 调用）：profileId={} version={}",
+                    profileId, ch.getPersonaVersion());
+            return existing;
+        }
+        String anchorRaw = resolveAnchorRaw(ch, anchorText);
+        String anchorForPrompt = anchorRaw == null ? ANCHOR_MISSING_HINT : truncate(anchorRaw, ANCHOR_MAX);
+        Long uid = currentUserProvider.currentUserId();
+        String world = renderWorld(pid);
+        // 角色基础原始信息：项目级（地点/关系）在前、角色级（骨架/锚定）在后 —— 让同项目其它角色也能复用更长前缀
+        String characterBase = renderDimCharacterBase(ch, anchorForPrompt, pid, profileId);
+        String systemMessage = promptTemplateService.systemMessage(uid, pid, SCENE_DIM, null);
+        if (systemMessage.isBlank()) {
+            systemMessage = "你只输出严格的 JSON，不输出任何其他文字。DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON.";
+        }
+        // 累加器：{"schema_version":2,"dims":{...}}（逐维写入，最后一次落库）
+        ObjectNode root = PersonaJson.mapper().createObjectNode();
+        root.put("schema_version", PersonaSchema.SCHEMA_VERSION);
+        ObjectNode dimsNode = root.putObject("dims");
+        long start = System.currentTimeMillis();
+        int done = 0;
+        log.info("[AI建档-逐维] 任务开始：profileId={} 姓名={} 目标=11 维（逐维单次调用，静态前缀复用）{}",
+                profileId, ch.getName(), force ? "（强制重生成）" : "");
+        for (int i = 0; i < PersonaSchema.ALL_DIMS.size(); i++) {
+            String dim = PersonaSchema.ALL_DIMS.get(i);
+            String soFar = dimsNode.size() == 0
+                    ? "（本次是第 1 维，暂无前序维度：请完全依据第一节世界观与第三节角色基础信息生成）"
+                    : truncate(dimsNode.toString(), PERSONA_SO_FAR_MAX);
+            Map<String, Object> ph = new LinkedHashMap<>();
+            ph.put("world_setting", world);
+            ph.put("character_base", characterBase);
+            ph.put("persona_so_far", soFar);
+            ph.put("dim_task", renderDimTask(i, dim));
+            String prompt = promptTemplateService.render(uid, pid, PromptTemplateService.CODE_PERSONA_DIM, ph);
+            boolean ok = false;
+            for (int attempt = 1; attempt <= MAX_RETRY && !ok; attempt++) {
+                long attemptStart = System.currentTimeMillis();
+                try {
+                    AiChatRequest req = new AiChatRequest(null, List.of(
+                            new AiChatRequest.ChatMessage("system", systemMessage),
+                            new AiChatRequest.ChatMessage("user", prompt)),
+                            PromptSpecRegistry.temperatureOf(SCENE_DIM),
+                            PromptSpecRegistry.maxOutputTokensOf(SCENE_DIM),
+                            true);
+                    AiChatResult result = AiCallContext.run(SCENE_DIM, profileId, attempt, () ->
+                            aiChatGateway.chatCompletion(uid, pid, null, req));
+                    // 用量入账：AI 已真实消耗 token，落账失败只告警、不参与成败判定（观测不得反噬业务）
+                    try {
+                        usageLogService.record(uid, pid, profileId, result.providerId(), result.model(), SCENE_DIM,
+                                result.promptTokens(), result.completionTokens(),
+                                result.cacheHitTokens(), result.cacheMissTokens(),
+                                (int) (System.currentTimeMillis() - attemptStart));
+                    } catch (Exception usageError) {
+                        log.warn("[AI建档-逐维] 用量入账失败（已忽略）：profileId={} 原因={}",
+                                profileId, usageError.getMessage());
+                    }
+                    JsonNode dimValue = extractDimNode(result.content(), dim);
+                    if (dimValue == null) {
+                        log.warn("[AI建档-逐维] 第 {}/11 维 {} 第 {} 次：输出解析不出该维（记原文前 {} 字符，重试）："
+                                        + "profileId={} 原文={}",
+                                i + 1, dim, attempt, RAW_LOG_LIMIT, profileId,
+                                truncate(result.content(), RAW_LOG_LIMIT));
+                        continue;
+                    }
+                    dimsNode.set(dim, dimValue);
+                    ok = true;
+                    log.info("[AI建档-逐维] 第 {}/11 维 {} 完成：profileId={} 耗时={}ms prompt={} cached={}",
+                            i + 1, dim, profileId, System.currentTimeMillis() - attemptStart,
+                            result.promptTokens(), result.cacheHitTokens());
+                } catch (Exception e) {
+                    log.warn("[AI建档-逐维] 第 {}/11 维 {} 第 {} 次调用失败（零阻断）：profileId={} 原因={}",
+                            i + 1, dim, attempt, profileId, e.getMessage());
+                }
+            }
+            if (!ok) {
+                log.warn("[AI建档-逐维] 第 {}/11 维 {} 重试 {} 次后仍失败，跳过该维继续（已得 {} 维保留）：profileId={}",
+                        i + 1, dim, MAX_RETRY, done, profileId);
+            } else {
+                done++;
+            }
+        }
+        if (done == 0) {
+            log.warn("[AI建档-逐维] 11 维全部失败，本次不落库：profileId={} 耗时={}ms",
+                    profileId, System.currentTimeMillis() - start);
+            return null;
+        }
+        PersonaProfile parsed = PersonaJson.readQuietly(root.toString());
+        if (parsed == null) {
+            // 逐维拼接后整体反序列化失败（模型某一维给出错类型，如用字符串写数字）时，
+            // 逐维抢救：能解析的维照常落库，解析不了的那一维丢弃并记原文，避免"11 维全白跑"。
+            parsed = salvageDims(profileId, dimsNode);
+            if (parsed == null) {
+                log.warn("[AI建档-逐维] 累加结果无法解析为 11 维档案（11 维均不可解析，不落库）：profileId={}",
+                        profileId);
+                return null;
+            }
+        }
+        // 顶层契约（版本/来源声明/审计）一律由程序补齐——AI 只负责 dims 内容
+        normalizeTopLevel(parsed, pid, profileId, SCENE_DIM, ch,
+                anchorRaw == null ? null : truncate(anchorRaw, ANCHOR_MAX));
+        // 非 force：把既有维度并进来（本次只覆盖真正产出的维，不抹掉档案里已有的内容）
+        PersonaProfile merged = force ? parsed : mergeDims(existing, parsed);
+        int expected = expectedVersion(ch, 1);
+        int version = personaService.savePersona(profileId, merged, SOURCE_GENERATED);
+        if (version <= 0) {
+            log.warn("[AI建档-逐维] 档案未落库（savePersona 返回 {}）：profileId={}", version, profileId);
+            return null;
+        }
+        if (version != expected) {
+            log.warn("[AI建档-逐维] 版本预估 {} 与实际 {} 不一致（并发写入？）：profileId={}",
+                    expected, version, profileId);
+        }
+        PersonaProfile stored = personaService.profileOf(profileId);
+        PersonaProfile result = stored == null ? merged : stored;
+        log.info("[AI建档-逐维] 完成：profileId={} version={} 本批有内容维度={}/11 档案覆盖={}/11 耗时={}ms",
+                profileId, version, done,
+                personaService.validate(profileId).getCoveredDimCount(),
+                System.currentTimeMillis() - start);
+        return result;
+    }
+
+    /**
+     * 逐维抢救：整体反序列化失败时，按维单独试解析，保留能解析的维、丢弃错类型的维。
+     * <p>为什么需要：模型偶尔会把数字写成字符串（{@code "0.7"}）或把数组写成对象，
+     * Jackson 遇到就整份档案解析失败——但其它 10 维是好的，不该一起作废。</p>
+     *
+     * @param profileId 角色 ID（仅用于日志）
+     *
+     * @param dimsNode 已累加的 11 维节点
+     *
+     * @return 抢救出的档案（可能只含部分维）；一维都解析不出时返回 {@code null}
+     */
+    private PersonaProfile salvageDims(Long profileId, ObjectNode dimsNode) {
+        ObjectNode rescued = PersonaJson.mapper().createObjectNode();
+        rescued.put("schema_version", PersonaSchema.SCHEMA_VERSION);
+        ObjectNode rescuedDims = rescued.putObject("dims");
+        int kept = 0;
+        for (String dim : PersonaSchema.ALL_DIMS) {
+            JsonNode value = dimsNode.get(dim);
+            if (value == null) {
+                continue;
+            }
+            ObjectNode single = PersonaJson.mapper().createObjectNode();
+            single.put("schema_version", PersonaSchema.SCHEMA_VERSION);
+            single.putObject("dims").set(dim, value);
+            if (PersonaJson.readQuietly(single.toString()) == null) {
+                log.warn("[AI建档-逐维] 第 {} 维解析失败，已丢弃该维（其余维照常落库）：profileId={} 原文={}",
+                        dim, profileId, truncate(value.toString(), RAW_LOG_LIMIT));
+                continue;
+            }
+            rescuedDims.set(dim, value);
+            kept++;
+        }
+        if (kept == 0) {
+            return null;
+        }
+        log.warn("[AI建档-逐维] 整体解析失败，已按维抢救 {}/11 维并继续落库：profileId={}", kept, profileId);
+        return PersonaJson.readQuietly(rescued.toString());
+    }
+
+    /**
+     * 逐维建档的"角色基础原始信息"段：项目级材料（地点、关系）在前，角色级材料（骨架、锚定）在后。
+     * <p>顺序是缓存策略的一部分：同项目内所有角色共享"地点 + 关系"这段，排在最前能让后建的角色
+     * 复用前一个角色已经预填过的更长的前缀。</p>
+     *
+     * @param ch 角色行
+     *
+     * @param anchorForPrompt 进 Prompt 的锚定文本（已兜底占位）
+     *
+     * @param projectId 项目 ID
+     *
+     * @param profileId 本角色 ID
+     *
+     * @return 角色基础原始信息文本
+     */
+    private String renderDimCharacterBase(ActorCharacter ch, String anchorForPrompt, Long projectId, Long profileId) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("【项目背景·已有地点清单】\n").append(renderLocations(projectId)).append("\n\n");
+        sb.append("【项目背景·本角色已有关系】\n").append(renderRelations(projectId, profileId)).append("\n\n");
+        sb.append("【本角色骨架（结构列，权威数据，不可更改，只能与之相容）】\n").append(buildSkeleton(ch)).append("\n\n");
+        sb.append("【本角色锚定文本（开发者已写内容，必须完整保留其事实）】\n").append(anchorForPrompt);
+        return sb.toString();
+    }
+
+    /**
+     * 本次任务段（固定放 Prompt 最后一段，避免把易变内容前置破坏前缀缓存）。
+     *
+     * @param index 维度序号（0 基）
+     *
+     * @param dim 维度键名
+     *
+     * @return 任务文本
+     */
+    private String renderDimTask(int index, String dim) {
+        String label = DIM_LABELS.getOrDefault(dim, dim);
+        return "现在只生成第 " + (index + 1) + "/11 维：" + dim + "（" + label + "）。\n"
+                + "要求：严格照抄第二节该维的字段契约与示例结构；只输出形如 "
+                + "{\"dims\":{\"" + dim + "\":{ ... }}} 的 JSON；"
+                + "不要输出其它维度、不要输出 schema_version/_sources/generated_by 等顶层键、不要输出任何解释文字。";
+    }
+
+    /**
+     * 从单维输出里取出该维节点（零阻断：解析不出返回 {@code null}，由调用方重试）。
+     * <p>容错三种模型常见走形：正常 {@code {"dims":{"<dim>":{...}}}}、只给 {@code {"<dim>":{...}}}、
+     * 以及直接把本维对象当顶层返回。</p>
+     *
+     * @param content AI 原始输出
+     *
+     * @param dim 维度键名
+     *
+     * @return 该维 JSON 节点；无法识别返回 {@code null}
+     */
+    private JsonNode extractDimNode(String content, String dim) {
+        String json = extractJson(content);
+        if (json == null) {
+            return null;
+        }
+        try {
+            JsonNode root = PersonaJson.mapper().readTree(json);
+            if (root == null || !root.isObject()) {
+                return null;
+            }
+            JsonNode wrapped = root.path("dims").path(dim);
+            if (wrapped.isObject() && wrapped.size() > 0) {
+                return wrapped;
+            }
+            JsonNode named = root.path(dim);
+            if (named.isObject() && named.size() > 0) {
+                return named;
+            }
+            // 兜底：模型直接把本维对象当顶层返回（既无 dims 包裹、也无维名键）
+            boolean hasWrapper = root.path("dims").isObject() && root.path("dims").size() > 0;
+            if (!hasWrapper && !root.has("schema_version") && root.size() > 0) {
+                return root;
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**

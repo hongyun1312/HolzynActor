@@ -145,6 +145,9 @@ export function buildCanvasData(input) {
 export function createNodeStyle(ctx) {
   const theme = ctx.theme
   const visibleLabel = ctx.visibleLabel || (() => true)
+  /** 星海模式：亮核 + 同色光晕（无芒角、无硬边），见 topologyTheme.skyPalette */
+  const sky = !!ctx.sky
+  const s = theme.sky
   return function nodeStyle(datum) {
     const d = datum.data || {}
     const node = d.node || {}
@@ -178,6 +181,48 @@ export function createNodeStyle(ctx) {
         padding: [1, 3]
       })
     }
+    if (sky) {
+      // 星海：节点是一颗「发光粒子」——
+      //   小而亮的核（往白里提到接近白）+ 一圈贴身的同色光晕（halo）+ 真正模糊的柔光（shadowBlur）。
+      // 三个尺寸分开调，是因为「像星辰」的观感几乎全在这里：
+      //   · 核太大 → 变成贴纸；核不亮 → 变成彩色圆点；
+      //   · 光晕太宽 → 变成气泡；没有 shadow → 边缘是硬的（用户明确不要硬边）。
+      // 绘制尺寸比结构图小一圈（0.86）：星海靠「疏」显空，圆一大就挤成葡萄串；
+      // 命中区域与布局间距仍按原尺寸算，所以点击手感不变、标签也不会互相压住。
+      const glow = ghost ? s.ghostRing : s.nodeGlow(color)
+      const dot = Math.max(8, size * 0.86)
+      return {
+        size: dot,
+        fill: ghost ? s.ghostFill : s.nodeFill(color),
+        stroke: ghost ? s.ghostRing : s.nodeRing(color),
+        lineWidth: ghost ? 1 : 0.8,
+        lineDash: ghost ? [3, 3] : null,
+        shadowColor: glow,
+        shadowBlur: Math.max(7, dot * 0.8),
+        shadowOffsetX: 0,
+        shadowOffsetY: 0,
+        // 光晕不再画成环：环会留下一道看得见的边（正是「像星辰」的靶心感），
+        // 真正的柔光交给 shadowBlur，衰减交给填充渐变。
+        halo: false,
+        haloStroke: glow,
+        haloLineWidth: 0,
+        haloOpacity: 0,
+        zIndex: node.isProtagonist ? 2 : 1,
+        labelText: showLabel ? (node.name || '') : '',
+        labelPlacement: 'bottom',
+        labelOffsetY: Math.round(dot / 2) + 3,
+        labelFontSize: isCrowd ? 10 : 11,
+        labelFontWeight: node.isProtagonist ? 600 : 500,
+        labelFill: ghost ? s.ghostRing : s.label,
+        labelBackground: true,
+        labelBackgroundFill: s.labelBg,
+        labelBackgroundRadius: 6,
+        labelPadding: [1, 5],
+        opacity: 1,
+        labelOpacity: 1,
+        badges
+      }
+    }
     return {
       size,
       fill: ghost ? theme.ghostFill : theme.nodeFill(color),
@@ -205,6 +250,13 @@ export function createNodeStyle(ctx) {
       // 只存在于状态样式里的属性在状态清除后不会回退，会残留在元素 attributes 上）
       opacity: 1,
       labelOpacity: 1,
+      // ⚠ 同一缺陷的另一面：星海样式里有 shadowColor/shadowBlur/lineDash 这类
+      // 「别的布局根本没有」的键，切回普通布局时新样式里没有它们，就会原样留在元素上——
+      // 实测表现为「从星海切到圈子分区后，节点还在发光」。所以在普通布局里显式归零。
+      shadowColor: 'transparent',
+      shadowBlur: 0,
+      shadowOffsetX: 0,
+      shadowOffsetY: 0,
       badges
     }
   }
@@ -227,11 +279,42 @@ export function createEdgeStyle(ctx) {
   const theme = ctx.theme
   const showLabel = ctx.showLabel || (() => false)
   const nowMs = ctx.nowMs || Date.now()
+  /** 星海模式：关系是一条极淡的光丝（箭头收小，靠位置读方向） */
+  const sky = !!ctx.sky
+  const s = theme.sky
   return function edgeStyle(datum) {
     const d = datum.data || {}
     const edge = d.edge || {}
     const color = d.color || theme.accent
     const label = showLabel(datum.id)
+    if (sky) {
+      const baseWidth = edge.width || edgeWidthOf(edge.affinity, edge.trust)
+      const fresh = edge.opacity == null ? freshnessOpacity(edge.lastInteractionAt, nowMs) : edge.opacity
+      return {
+        stroke: s.edge(color),
+        lineWidth: Math.max(0.6, baseWidth * 0.55),
+        opacity: Math.min(1, fresh * 0.95),
+        lineDash: null,
+        // 箭头：星海里方向不是主角，但完全去掉会让「谁对谁」读不出来 —— 收小到 4 保留语义
+        startArrow: !!edge.bidirectional,
+        startArrowSize: 4,
+        endArrow: true,
+        endArrowSize: 4,
+        zIndex: 0,
+        labelText: label ? (edge.relationType || '') : '',
+        labelFontSize: 10,
+        labelFill: s.label,
+        labelFontWeight: 500,
+        labelBackground: true,
+        labelBackgroundFill: s.edgeLabelBg,
+        labelBackgroundRadius: 4,
+        labelPadding: [1.5, 5],
+        labelPlacement: 'center',
+        labelAutoRotate: false,
+        labelOffsetX: 0,
+        labelOffsetY: 0
+      }
+    }
     return {
       stroke: color,
       lineWidth: edge.width || edgeWidthOf(edge.affinity, edge.trust),
@@ -262,14 +345,66 @@ export function createEdgeStyle(ctx) {
   }
 }
 
+/** 星海选中/悬停光环的基础粗细（px）：状态样式在此之上按倍数放大 */
+function skyHaloWidth() {
+  return 14
+}
+
 /**
  * 节点状态样式（选中/悬停/弱化）。
  *
  * @param {object} theme 主题包
  *
+ * @param {boolean} [sky] 星海模式（选中变成「光变亮」，弱化变成「星光退后」）
+ *
  * @returns {object} G6 state 配置
  */
-export function nodeStateStyles(theme) {
+export function nodeStateStyles(theme, sky = false) {
+  if (sky) {
+    // 星海：选中/悬停靠「光变亮」表达，弱化靠「星光退到背景里」（降 opacity 而不是换灰填充，
+    // 因为这一档节点本来就是亮核发光，换灰反而像坏掉的图钉）。
+    return {
+      selected: {
+        halo: true,
+        haloStroke: theme.sky.nodeCore(theme.accent),
+        haloLineWidth: Math.round(skyHaloWidth() * 1.9),
+        haloOpacity: 0.42,
+        stroke: theme.sky.nodeCore(theme.accent),
+        lineWidth: 1.4,
+        opacity: 1,
+        labelOpacity: 1,
+        zIndex: 3
+      },
+      active: {
+        halo: true,
+        haloStroke: theme.sky.nodeCore(theme.accent),
+        haloLineWidth: Math.round(skyHaloWidth() * 1.4),
+        haloOpacity: 0.30,
+        stroke: theme.sky.nodeCore(theme.accent),
+        lineWidth: 1.2,
+        opacity: 1,
+        labelOpacity: 1
+      },
+      inactive: {
+        // 0.16 在夜空里等于「整张图消失」——只剩被拖的那一团亮着，用户会突然失去方位；
+        // 0.42 是「星空退到背景里、仍看得见轮廓」的实测值，配合 0.4 的标签透明度。
+        opacity: 0.42,
+        labelOpacity: 0.4,
+        zIndex: 0
+      },
+      highlight: {
+        halo: true,
+        haloStroke: '#fbbf24',
+        haloLineWidth: Math.round(skyHaloWidth() * 1.6),
+        haloOpacity: 0.55,
+        stroke: '#fbbf24',
+        lineWidth: 1.4,
+        opacity: 1,
+        labelOpacity: 1,
+        zIndex: 3
+      }
+    }
+  }
   return {
     selected: {
       halo: true,
@@ -323,9 +458,40 @@ export function nodeStateStyles(theme) {
  *
  * @param {object} theme 主题包
  *
+ * @param {boolean} [sky] 星海模式
+ *
  * @returns {object} G6 state 配置
  */
-export function edgeStateStyles(theme) {
+export function edgeStateStyles(theme, sky = false) {
+  if (sky) {
+    // 星海：关系本来是淡光丝，选中/悬停要「亮起来」而不是「变粗成一根柱子」
+    return {
+      selected: {
+        lineWidth: 2.2,
+        opacity: 1,
+        halo: true,
+        haloStroke: theme.sky.nodeCore(theme.accent),
+        haloLineWidth: 7,
+        haloOpacity: 0.30,
+        zIndex: 2,
+        labelFontSize: 11,
+        labelBackgroundFill: theme.sky.edgeLabelBg
+      },
+      active: { lineWidth: 1.6, opacity: 0.95, labelFontSize: 10 },
+      inactive: { opacity: 0.06, labelText: '' },
+      highlight: { lineWidth: 1.8, opacity: 1, halo: true, haloStroke: '#fbbf24', haloLineWidth: 6, haloOpacity: 0.26 },
+      pulse: {
+        lineWidth: 2.4,
+        opacity: 1,
+        halo: true,
+        haloStroke: '#fbbf24',
+        haloLineWidth: 12,
+        haloOpacity: 0.55,
+        zIndex: 3,
+        labelFontSize: 11
+      }
+    }
+  }
   return {
     selected: {
       lineWidth: 3.5,

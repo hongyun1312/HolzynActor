@@ -25,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
@@ -49,6 +50,9 @@ public class WorldMapActorController {
 
     private final NpcActorQueryService actorQueryService;
 
+    /** 三方对账探针服务（权威渲染注入三腿同屏） */
+    private final com.holzyn.actor.domain.mapnav.service.SpatialAuditService spatialAuditService;
+
     /**
      * 角色快照（含在途轨迹与世界时钟）。
      *
@@ -63,5 +67,23 @@ public class WorldMapActorController {
         out.put("actors", actors);
         out.put("count", actors.size());
         return R.ok(out);
+    }
+
+    /**
+     * 三方对账探针：同一 {@code gameSecond} 上把三条腿摊开逐位比较。
+     *
+     * <p><b>为什么放在这个控制器</b>：它和 {@code /actors} 是同一个「空间快照」语义的两面——
+     * 一个给前端画，一个给验收断言。放在一起，才不会出现「渲染换了口径、探针还在比旧口径」。</p>
+     *
+     * @param projectId  项目 ID
+     *
+     * @param gameSecond 对账时刻（可空=引擎推进秒）
+     *
+     * @return {@code {gameSecond, tickSeconds, summary, actors}}
+     */
+    @GetMapping("/spatial-audit")
+    public R<Map<String, Object>> spatialAudit(@PathVariable Long projectId,
+                                               @RequestParam(required = false) Long gameSecond) {
+        return R.ok(spatialAuditService.audit(projectId, gameSecond));
     }
 }

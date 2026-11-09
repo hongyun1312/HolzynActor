@@ -67,11 +67,25 @@ public class RealtimeDecisionProperties {
     /**
      * 即时决策防重入重试次数（默认 20：多角色并发刺激被 AgentRuntime 全局防重入拦截时，
      * 即时通道自动重试保证每个刺激最终完成「决策→行动→恢复」闭环；0=不重试[被拦截即跳过]）
+     *
+     * <p>⚠️实跑事故后默认收敛到 3：20 次 × 3s = 单刺激最长 60s 忙等，
+     * 与决策模型超时叠加会形成重试风暴（5 分钟 6908 次防重入重试）。</p>
      */
-    private int stimulusRetryMaxAttempts = 20;
+    private int stimulusRetryMaxAttempts = 3;
 
     /** 即时决策防重入重试间隔（毫秒，默认 3000：每次重试前等待，让在途决策循环释放全局锁） */
     private long stimulusRetryWaitMs = 3000;
+
+    /**
+     * 同时在途的即时决策流水线上限（默认 3）。
+     *
+     * <p><b>为什么需要</b>：一次状态扫描可以对 12 个角色同时发刺激，每个流水线还会派生
+     * 探针/空间决策/微决策多次模型调用；决策模型单进程吞吐约 1 req/s，无上限时请求全部
+     * 堆进服务端队列，尾部延迟超过超时阈值 → 整批失败（实跑事故）。
+     * 超限的刺激直接降级跳过（角色保持当前计划），下一 tick 若仍然紧急会再次触发。</p>
+     */
+    private int maxConcurrentDecisions = 3;
+
 
     /**
      * 个性注入 + 社交差异化（，domain/agent/runtime PersonalityInjectionService）：

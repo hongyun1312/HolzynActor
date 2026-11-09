@@ -129,6 +129,11 @@ public class WorldSandboxStateService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.agent.runtime.RealTimeDecisionService realtimeDecisionService;
 
+    /** 主动性 NPC 真实到达回调（@Lazy 破环；null=未装配跳过）。 */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.agent.initiative.service.NpcInitiativeService initiativeService;
+
     // ==================== 静态纯逻辑（可单测） ====================
 
     /**
@@ -404,6 +409,14 @@ public class WorldSandboxStateService {
             }
         } catch (Exception e) {
             log.warn("[沙盘状态] 他角色靠近刺激挂钩失败（不影响落库）: ref={} : {}", npcRef, e.getMessage());
+        }
+        // 主动性 NPC 真实到达 → 玩家可见的「来找你」事件（与 authority 路径二选一，服务内去重）。
+        try {
+            if (initiativeService != null) {
+                initiativeService.onNpcArrived(projectId, npcRef, locationName, gameSecond);
+            }
+        } catch (Exception e) {
+            log.warn("[沙盘状态] 主动性到达回调失败（不影响落库）: ref={} : {}", npcRef, e.getMessage());
         }
     }
 

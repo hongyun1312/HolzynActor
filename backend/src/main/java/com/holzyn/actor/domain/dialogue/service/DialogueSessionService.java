@@ -71,6 +71,11 @@ public class DialogueSessionService {
     @Autowired(required = false)
     private DialogueFreezeService freezeService;
 
+    /** 世界回写（关闭会话补推时间 + 最后一次抽取；开关关时 no-op） */
+    @Lazy
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.dialog.service.DialogWorldService dialogWorldService;
+
     /** 默认标题截断长度（字符） */
     private static final int TITLE_MAX = 40;
 
@@ -193,6 +198,15 @@ public class DialogueSessionService {
         s.setStatus("closed");
         s.setUpdatedAt(LocalDateTime.now());
         sessionRepository.save(s);
+        // 关闭时补推冻结态时间成本 + 最后一次批量抽取（开关关时 no-op）
+        if (dialogWorldService != null) {
+            try {
+                dialogWorldService.onSessionClosed(projectId, "dialogue", sessionId, s.getUserId(),
+                        s.getFrozenGameSecond() != null);
+            } catch (Exception e) {
+                log.warn("[对谈] 关闭会话世界回写失败（fail-open）: session={} : {}", sessionId, e.getMessage());
+            }
+        }
     }
 
     /**

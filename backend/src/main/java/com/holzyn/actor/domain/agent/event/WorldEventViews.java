@@ -67,6 +67,10 @@ public final class WorldEventViews {
         m.put("payloadJson", e.getPayloadJson());
         m.put("sourceKey", e.getSourceKey());
         m.put("importance", e.getImportance());
+        // 因果抽屉/实时浮层：前端按 causeEventId 懒加载父链，按 depth 控制缩进
+        m.put("causeEventId", e.getCauseEventId());
+        m.put("correlationId", e.getCorrelationId());
+        m.put("depth", e.getDepth());
         m.put("gameHour", e.getGameHour());
         if (worldClockService != null) {
             m.put("gameTimeText", worldClockService.gameTimeTextOf(e.getProjectId(), e.getGameHour()));

@@ -100,6 +100,10 @@ public class AgentRuntime {
     private final DecisionService decisionService;
     private final AgentActionService agentActionService;
     private final LearningService learningService;
+
+    /** 行动裁决入口（字段注入保持构造器不变；null/关闭时透传旧执行） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.adjudicate.service.ActionAdjudicationService actionAdjudicationService;
     private final BudgetGuard budgetGuard;
     private final BrainProfileService brainProfileService;
     private final ActorCharacterRepository characterRepository;
@@ -202,6 +206,10 @@ public class AgentRuntime {
     /** 世界时钟服务 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.world.service.WorldClockService worldClockService;
+
+    /** 轮末对话情境缓冲（after_dialog 注入本轮摘要/事实/在场者） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.dialog.service.DialogSituationBuffer dialogSituationBuffer;
 
     /**
      * 决策循环防重入。
@@ -399,7 +407,7 @@ public class AgentRuntime {
                     return plan;
                 }
                 // 立即执行（AgentActionService 内部完成 executing→done 全生命周期持久化）
-                agentActionService.execute(plan);
+                agentAdjudicatedExecute(plan);
                 return plan;
             });
         } finally {
@@ -422,8 +430,9 @@ public class AgentRuntime {
             return results;
         }
         // 长跑抓修：全角色决策入口排除已故角色
+        // 玩家同构进 actor_profile，但不参与 NPC 自主决策
         List<ActorCharacter> characters = characterRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0)
-                .stream().filter(ch -> ch != null && !ch.isDeceased()).toList();
+                .stream().filter(ch -> ch != null && !ch.isDeceased() && !ch.isPlayer()).toList();
         for (ActorCharacter ch : characters) {
             results.add(trigger(AgentTrigger.ENGINE_TICK, com.holzyn.actor.common.NpcRefs.of(ch.getId()),
                     DecisionContext.builder().projectId(projectId).build()));
@@ -514,7 +523,7 @@ public class AgentRuntime {
      * <p>包内可见（供异步包装调用与同包单测确定性验证）。</p>
      */
     void evaluateMembers(Long conversationId, Long userId, String triggerType) {
-        List<ActorConversationMember> members = memberRepository.findByConversationId(conversationId);
+        List<ActorConversationMember> members = memberRepository.findActiveByConversationId(conversationId);
         for (ActorConversationMember m : members) {
             ActorCharacter ch = characterRepository.findById(m.getCharacterId()).orElse(null);
             // 迁移修正：旧 ActionEngine 用 Integer.valueOf(0).equals(deleted) 把「未删除（deleted=0）」
@@ -522,11 +531,32 @@ public class AgentRuntime {
             if (ch == null || Integer.valueOf(1).equals(ch.getDeleted())) {
                 continue;
             }
+            // 玩家不做 after_dialog/event 的自动行动评估（玩家行动由人驱动）
+            if (ch.isPlayer()) {
+                continue;
+            }
             if (ch.getImportance() == null || ch.getImportance() < 3) {
                 continue;
             }
             try {
-                triggerAction(ch.getId(), userId, triggerType, conversationId, null, null, null);
+                // after_dialog 情境前置「本轮对话摘要 + 已知事实 Top-8 + 在场者」，
+                // 再拼既有状态情境（时间/地点/状态段不丢）。
+                String situation = null;
+                if ("after_dialog".equals(triggerType) && dialogSituationBuffer != null) {
+                    try {
+                        Long gs = worldClockService == null ? null
+                                : worldClockService.currentEngineGameSecond(ch.getProjectId());
+                        String extra = dialogSituationBuffer.situationFor(ch.getProjectId(),
+                                com.holzyn.actor.common.NpcRefs.of(ch.getId()), conversationId, gs);
+                        if (extra != null && !extra.isBlank()) {
+                            String base = decisionService.buildSituation(ch);
+                            situation = base == null || base.isBlank() ? extra : extra + "\n\n" + base;
+                        }
+                    } catch (Exception e) {
+                        log.debug("[AgentRuntime] 轮末情境组装失败（回退默认）: {}", e.getMessage());
+                    }
+                }
+                triggerAction(ch.getId(), userId, triggerType, conversationId, null, null, situation);
             } catch (Exception e) {
                 log.warn("[AgentRuntime] 角色行动评估失败: char={} : {}", ch.getId(), e.getMessage());
             }
@@ -702,7 +732,7 @@ public class AgentRuntime {
                     log.info("[AgentRuntime] 等待类计划已排期（到点重新决策）: plan={} ref={} 到点={}",
                             plan.getId(), characterRef, waitUntil);
                 } else {
-                    agentActionService.execute(plan);
+                    agentAdjudicatedExecute(plan);
                     if (waitPlanService != null) {
                         try {
                             waitPlanService.noteActionExecuted(projectId, characterRef);
@@ -947,9 +977,67 @@ public class AgentRuntime {
         }
     }
 
+    /** 有裁决入口时走裁决（规则/AI 事务外），否则透传旧执行。 */
+    private void agentAdjudicatedExecute(com.holzyn.actor.domain.npc.goal.entity.ActorActionPlan plan) {
+        if (actionAdjudicationService != null) {
+            actionAdjudicationService.executeGated(plan);
+        } else {
+            agentActionService.execute(plan);
+        }
+    }
+
+    /**
+     * 延迟生成计划（{@code schedule.plan} 效果）。
+     *
+     * <p>写入 {@code planned_game_second} 而非真实时间：由 {@code WaitPlanService}
+     * 在世界游戏时刻到点时标记原计划 done 并触发一次重新决策，避免真实时间定时器
+     * 抢先执行（与时间感行动同一条路径）。</p>
+     *
+     * @param projectId    项目 ID
+     * @param actorRef     角色 ref
+     * @param actionJson   计划动作 JSON
+     * @param delayMinutes 延迟游戏分钟（1~10080）
+     * @param gameSecond   当前游戏秒（空=读时钟）
+     * @param eventId      来源事件 ID（可空；写入计划 event_id 便于追溯）
+     * @return 计划 ID；角色/时钟不可用时 null
+     */
+    public Long planLater(Long projectId, String actorRef, String actionJson,
+                          int delayMinutes, Long gameSecond, Long eventId) {
+        if (projectId == null || actorRef == null || actorRef.isBlank()
+                || actionJson == null || actionJson.isBlank()) {
+            return null;
+        }
+        Long actorId = NpcRefs.idOf(actorRef);
+        if (actorId == null) {
+            return null;
+        }
+        ActorCharacter ch = characterRepository.findById(actorId).orElse(null);
+        if (ch == null || !projectId.equals(ch.getProjectId())) {
+            return null;
+        }
+        Long base = gameSecond;
+        if (base == null && worldClockService != null) {
+            base = worldClockService.currentEngineGameSecond(projectId);
+        }
+        if (base == null) {
+            return null;
+        }
+        int minutes = Math.max(1, Math.min(10080, delayMinutes));
+        ActorActionPlan plan = new ActorActionPlan();
+        plan.setCharacterId(actorId);
+        plan.setTriggerType("effect");
+        plan.setActionJson(actionJson);
+        plan.setStatus("planned");
+        plan.setPlannedGameSecond(base + minutes * 60L);
+        plan.setEventId(eventId);
+        plan = planRepository.save(plan);
+        log.info("[AgentRuntime] 延迟计划已生成（效果 schedule.plan）：plan={} ref={} delay={}min 到点={}",
+                plan.getId(), actorRef, minutes, plan.getPlannedGameSecond());
+        return plan.getId();
+    }
+
     /** 解析计划时间（支持 ISO 或 yyyy-MM-dd HH:mm；解析失败返回 null，迁移自旧 ActionEngine） */
-    private static LocalDateTime parseTime(String raw) {
-        if (raw == null) {
+    private static LocalDateTime parseTime(String raw) {        if (raw == null) {
             return null;
         }
         String s = raw.trim();

@@ -22,6 +22,7 @@ import com.holzyn.actor.common.BizException;
 import com.holzyn.actor.common.R;
 import com.holzyn.actor.domain.account.CurrentUserProvider;
 import com.holzyn.actor.domain.agent.event.EventQuery;
+import com.holzyn.actor.domain.agent.event.WorldCausalityService;
 import com.holzyn.actor.domain.agent.event.WorldEventBus;
 import com.holzyn.actor.domain.agent.event.WorldEventSseHub;
 import com.holzyn.actor.domain.agent.event.WorldEventViews;
@@ -59,6 +60,7 @@ public class WorldEventController {
     private final ActorProjectRepository projectRepository;
     private final CurrentUserProvider currentUserProvider;
     private final WorldClockService worldClockService;
+    private final WorldCausalityService worldCausalityService;
 
     /**
      * 项目世界事件流（SSE，实时推送）。
@@ -109,6 +111,28 @@ public class WorldEventController {
                 .map(e -> WorldEventViews.toMap(e, worldClockService))
                 .toList();
         return R.ok(rows);
+    }
+
+    /**
+     * 单条事件的因果树（因果抽屉）：父链 + 一层直接子事件。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param eventId 选中事件 ID
+     *
+     * @param upDepth 向上回溯层数（默认 6，钳制 0..12）
+     *
+     * @param childLimit 子事件条数（默认 20，钳制 1..50）
+     *
+     * @return {event, ancestors, children, truncatedUp, truncatedDown, cycle}
+     */
+    @GetMapping("/{eventId}/causality")
+    public R<Map<String, Object>> causality(@PathVariable("projectId") Long projectId,
+                                            @PathVariable("eventId") Long eventId,
+                                            @RequestParam(name = "upDepth", defaultValue = "6") int upDepth,
+                                            @RequestParam(name = "childLimit", defaultValue = "20") int childLimit) {
+        requireProject(projectId);
+        return R.ok(worldCausalityService.causality(projectId, eventId, upDepth, childLimit));
     }
 
     /**

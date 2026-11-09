@@ -63,14 +63,15 @@ import java.util.Set;
 
 /**
  * 世界初始化工作流服务（新建项目解析重构配套）。
- * <p>职责：按 7 步自动初始化一个已落库的世界（全部程序运行同时输出后端终端日志 + 工作流回调日志）：
+ * <p>职责：按 {@link WorldInitStep} 定义的固定顺序逐步初始化一个已落库的世界（全部程序运行同时输出后端终端日志 + 工作流回调日志）：
  * ① 根据世界观地理设定生成结构化地点（复用地点 AI 提取 + 全量/合并入库）；
- * ② 生成角色结构化角色卡及其 Prompt（复用角色卡生成，默认跳过已生成 / 重建时全量）；
- * ③ 生成普通型 NPC 字段字典，再生成 5 个普通 NPC（复用字段字典拟定保存 + 居民生成入库）；
- * ④ 生成全局关系拓扑（复用关系生成预览 + 批量入库）；
- * ⑤ 生成世界地图 + 角色住所（AI 地图生成 + 同居共宅分组，机制兜底）；
- * ⑥ 根据世界观信息（历史脉络/时代背景）由 AI 推断当前世界历时间点并设置（不从零开始）；
- * ⑦ 将知识库中的世界观文件尝试向量化。</p>
+ * ② 按世界观设定由 AI 生成核心角色阵容（复用 character 工作流；角色卡的前置，缺了必卡角色卡）；
+ * ③ 生成角色结构化角色卡及其 Prompt（复用角色卡生成，默认跳过已生成 / 重建时全量）；
+ * ④ 生成普通型 NPC 字段字典，再生成 5 个普通 NPC（复用字段字典拟定保存 + 居民生成入库）；
+ * ⑤ 生成全局关系拓扑（复用关系生成预览 + 批量入库）；
+ * ⑥ 生成世界地图 + 角色住所（AI 地图生成 + 同居共宅分组，机制兜底）；
+ * ⑦ 根据世界观信息（历史脉络/时代背景）由 AI 推断当前世界历时间点并设置（不从零开始）；
+ * ⑧ 将知识库中的世界观文件尝试向量化。</p>
  * <p>执行策略：全自动一次跑完；任一步骤失败不阻断后续（记录日志后跳过继续）。
  * rebuild=false 时对已生成数据采取幂等跳过（地点合并新增/角色卡补缺/字段字典与居民已存在则跳过/关系补充模式/已向量化跳过）；
  * rebuild=true 时全量重建（地点整表替换/角色卡全量重生成/字段字典与居民重建/关系重建模式/世界时间覆盖/向量化重跑）。</p>
@@ -82,6 +83,48 @@ public class WorldInitService {
 
     /** 初始化生成的普通型 NPC 数量（默认 5 个） */
     static final int INIT_NPC_COUNT = 5;
+
+    /** 第 ③ 步等待 character 工作流落库的最长秒数（超时按未成功处理，可在向导里重跑该步） */
+    static final int CAST_WAIT_SECONDS = 900;
+
+    /**
+     * 正在执行初始化的世界（值 = 该次执行的开始时间戳）。
+     *
+     * <p>用途：步骤落库的状态是 RUNNING 时，只有这里登记过才算「真的在跑」。应用被关闭、后端重启或
+     * 执行线程异常死亡时不会有 markFailed 调用，存档里的 RUNNING 会永久停留，前端只能显示
+     * 「正在执行…」且重试按钮不可用——这正是「初始化卡在角色卡」的第二种成因，因此读状态时用本表
+     * 把孤儿 RUNNING 判为可重试的失败态。</p>
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<Long, Long> RUNNING_PROJECTS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** RUNNING 状态超过该时长仍无结果，视为执行线程已死（单步最长 CAST 等待 900s，留足余量） */
+    static final long RUNNING_STALE_MILLIS = 90L * 60L * 1000L;
+
+    /**
+     * 某世界此刻是否真有初始化步骤在跑。
+     *
+     * <p>状态判定用它区分「真的在执行」与「存档里的孤儿 RUNNING」：后者只可能来自进程退出、后端重启或
+     * 执行线程死亡，必须呈现为可重试的失败态，否则界面会永远停在「正在执行…」。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @return true = 有登记且未超时
+     */
+    public static boolean isInitRunning(Long projectId) {
+        if (projectId == null) {
+            return false;
+        }
+        Long since = RUNNING_PROJECTS.get(projectId);
+        if (since == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() - since > RUNNING_STALE_MILLIS) {
+            RUNNING_PROJECTS.remove(projectId);
+            return false;
+        }
+        return true;
+    }
 
     /** AI 世界时间推断最大输出 token */
     private static final int TIME_MAX_TOKENS = 1024;
@@ -114,6 +157,30 @@ public class WorldInitService {
     private final com.holzyn.actor.domain.worldmap.service.WorldMapGenerationService worldMapGenerationService;
 
     /**
+     * 真实地图管线（–，写 actor_world_map / actor_map_feature / actor_npc_routine）。
+     *
+     * <p>字段注入（{@code required=false}）而不是构造器参数：AGENTS §8.1.2 禁止改既有构造器签名。
+     * 未装配时初始化照常完成，只是不会自动产出真实地图（退化为「页面点生成地图」的旧行为）。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapgen.service.MapGenOrchestrator mapGenOrchestrator;
+
+    /** 地图仓储（判断是否已有真实地图，避免重复生成）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapgen.repository.ActorWorldMapRepository actorMapRepository;
+
+    /**
+     * 开局供给（对接）：初始化末尾给新世界的角色发随身家伙、给地点铺货。
+     *
+     * <p><b>为什么必须在初始化末尾补一次</b>：供给原本只挂在「打开世界」上，而新建世界的
+     * 真实顺序是「建空世界 → 立刻自动打开（此时一个人都没有）→ 初始化才把角色和地点造出来」。
+     * 只挂打开时，整世界第一次跑起来时所有人都是赤手空拳，直到用户关掉再打开一次才补上。
+     * 供给本身按 {@code provision:{holder}:{item}:{bag|worn}} 幂等，重复调用是 no-op。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.item.provision.ItemProvisionService itemProvisionService;
+
+    /**
      * 开局家族与基因建档（第 ⑤ 步）。
      *
      * <p>字段注入（{@code required=false}）而不是构造器参数：本类构造器由
@@ -143,6 +210,30 @@ public class WorldInitService {
     @org.springframework.context.annotation.Lazy
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.world.service.WorldToneService worldToneService;
+
+    /**
+     * 创意发散工作流服务（第 ③ 步「生成角色」复用它现成的 character 工作流）。
+     *
+     * <p>为什么不另写一套角色生成：{@code worldgen_character_v1} 已有「角色阵容 + 逐角色深度档案
+     * + 落库幂等」的完整链路，再写一份 AI 提示词就是第二个角色生成入口（AGENTS §8.1.3 明令禁止）。
+     * 这里只负责创建任务并等它跑到终态。</p>
+     *
+     * <p>{@code @Lazy} + 字段注入：worldgen 域反过来依赖 project 域的服务，直接构造器注入必成环
+     * （AGENTS §8.1.5）；未装配时该步退化为「按现有角色数判定」，不影响其余步骤。</p>
+     */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldgen.service.WorldGenTaskService worldGenTaskService;
+
+    /**
+     * 玩家同构（§4.4.3）：初始化末尾幂等创建 {@code controller='player'} 的
+     * {@code actor_profile} 行。
+     *
+     * <p>字段注入 {@code required=false}：不装配（旧单测/关闭态）时跳过；服务内部还受
+     * {@code holzyn.actor.world-loop.enabled} 门控，默认关闭时行为与基线一致。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.npc.player.PlayerCharacterService playerCharacterService;
 
     /**
      * 世界初始化主入口：按 {@link WorldInitStep} 定义的固定顺序逐步执行。
@@ -191,9 +282,70 @@ public class WorldInitService {
                         + "」是必需步骤且执行失败：后续步骤不再执行（修复后可从本步继续）");
             }
         }
+        if (!aborted) {
+            ensurePlayerCharacter(projectId, userId, wf);
+            provisionOpeningItems(projectId, wf);
+        }
         info(wf, "[世界初始化] 任务结束：耗时 " + (System.currentTimeMillis() - taskStart) + "ms，" + acc.summary());
-        return new WorldInitResultVO(projectId, acc.locations, acc.cards, acc.npcs, acc.relations,
+        return new WorldInitResultVO(projectId, acc.locations, acc.cast, acc.cards, acc.npcs, acc.relations,
                 acc.gameTimeText == null ? "未设置" : acc.gameTimeText, acc.vectorized);
+    }
+
+    /**
+     * 初始化末尾确保玩家角色存在（失败不阻断世界初始化）。
+     *
+     * @param projectId 项目 ID
+     *
+     * @param userId    玩家账号 ID
+     *
+     * @param wf        工作流日志（可空）
+     */
+    private void ensurePlayerCharacter(Long projectId, Long userId, WorkflowLog wf) {
+        if (playerCharacterService == null) {
+            return;
+        }
+        try {
+            com.holzyn.actor.domain.npc.profile.entity.ActorCharacter player =
+                    playerCharacterService.ensurePlayerCharacter(projectId, userId);
+            if (player != null) {
+                info(wf, "[世界初始化] 玩家角色就绪：" + player.getName() + "（" + player.npcRef() + "）");
+            }
+        } catch (Exception e) {
+            log.warn("[世界初始化] 玩家角色创建失败（不影响世界初始化，下次对话入口重试）: project={} : {}",
+                    projectId, e.getMessage());
+            info(wf, "[世界初始化] 玩家角色创建失败（可继续，进入对话时会重试）：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 初始化末尾补一次开局供给（对接；失败不阻断世界初始化）。
+     *
+     * <p>与 {@link #ensurePlayerCharacter} 同口径：这是「世界刚有居民」的那一刻，
+     * 不在这里发，第一批居民就要赤手空拳地活到用户下一次关开世界。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param wf        工作流日志（可空）
+     */
+    private void provisionOpeningItems(Long projectId, WorkflowLog wf) {
+        if (itemProvisionService == null) {
+            return;
+        }
+        try {
+            com.holzyn.actor.domain.item.provision.ItemProvisionService.ProvisionReport report =
+                    itemProvisionService.provision(projectId, 0L);
+            if (report == null || report.noop()) {
+                return;
+            }
+            String line = "[世界初始化] 开局供给：角色 " + report.characters() + " 位 / 地点 "
+                    + report.locations() + " 处 / 发放 " + report.grants() + " 笔 / 上身 "
+                    + report.worn() + " 件";
+            log.info("{}", line);
+            info(wf, line);
+        } catch (Exception e) {
+            log.warn("[世界初始化] 开局供给失败（不影响世界初始化，下次打开世界会补）: project={} : {}",
+                    projectId, e.getMessage());
+        }
     }
 
     /**
@@ -230,7 +382,7 @@ public class WorldInitService {
             throw new BizException(400, "第 " + step.index() + " 步「" + step.label() + "」执行失败："
                     + outcome.message());
         }
-        return new WorldInitResultVO(projectId, acc.locations, acc.cards, acc.npcs, acc.relations,
+        return new WorldInitResultVO(projectId, acc.locations, acc.cast, acc.cards, acc.npcs, acc.relations,
                 acc.gameTimeText == null ? "未设置" : acc.gameTimeText, acc.vectorized);
     }
 
@@ -327,6 +479,7 @@ public class WorldInitService {
     private StepOutcome executeStep(Long userId, Long projectId, WorldInitStep step, boolean rebuild,
                                     WorkflowLog wf, RunAccumulator acc) {
         WorldInitStatusService state = worldInitStatusService;
+        RUNNING_PROJECTS.put(projectId, System.currentTimeMillis());
         if (state != null) {
             state.markRunning(projectId, step);
         }
@@ -350,6 +503,15 @@ public class WorldInitService {
                     ok = n > 0 || liveSatisfied(projectId, step);
                     message = ok ? "已生成世界观地点 " + n + " 个"
                             : "未生成任何地点：请先补全世界观「地理设定」（为空或 AI 未返回有效结果）";
+                    break;
+                }
+                case CAST: {
+                    int n = initCastCharacters(userId, projectId, rebuild, wf);
+                    acc.cast = n;
+                    count = n;
+                    ok = n > 0 || liveSatisfied(projectId, step);
+                    message = ok ? "已生成核心角色 " + n + " 位"
+                            : "未能生成角色：请确认已配置文本模型、且世界观设定已保存（第 1 步）";
                     break;
                 }
                 case CHARACTERS: {
@@ -486,6 +648,7 @@ public class WorldInitService {
                 state.markFailed(projectId, step, message);
             }
         }
+        RUNNING_PROJECTS.remove(projectId);
         log.info("[世界初始化] 第 {}/{} 步「{}」{}：{}（{}ms）", step.index(), WorldInitStep.total(),
                 step.label(), ok ? "完成" : "失败", message, cost);
         info(wf, "[世界初始化] 第 " + step.index() + "/" + WorldInitStep.total() + " 步「" + step.label()
@@ -507,6 +670,9 @@ public class WorldInitService {
 
         /** 本次入库地点数 */
         int locations;
+
+        /** 本次由 AI 生成的核心角色数（第 ③ 步；已有角色时为 0） */
+        int cast;
 
         /** 本次生成角色卡数 */
         int cards;
@@ -541,7 +707,7 @@ public class WorldInitService {
             String familyText = family == null ? "0 簇（婚姻 0 条 / 亲子 0 条 / 基因 0 份）"
                     : family.families() + " 簇（婚姻 " + family.marriages() + " 条 / 亲子 "
                     + family.parentEdges() + " 条 / 基因 " + family.genomes() + " 份）";
-            return "地点 " + locations + " 个 / 角色卡 " + cards + " 张 / 普通 NPC " + npcs + " 个 / 关系 "
+            return "地点 " + locations + " 个 / 核心角色 " + cast + " 位 / 角色卡 " + cards + " 张 / 普通 NPC " + npcs + " 个 / 关系 "
                     + relations + " 条 / 家族 " + familyText + " / 世界地图 " + m[0] + " 个区域·" + m[1]
                     + " 间住所（" + m[2] + " 人入住，" + (m[3] == 1 ? "AI" : "机制") + "） / 世界时间 "
                     + (gameTimeText == null ? "未设置" : gameTimeText) + " / 知识卡 " + knowledgeCards
@@ -637,6 +803,137 @@ public class WorldInitService {
     }
 
     // ==================== ② 角色卡 ====================
+
+    // ==================== ③ 生成角色（角色卡的前置） ====================
+
+    /**
+     * 第 3 步：按世界观设定由 AI 生成核心角色阵容（复用 character 工作流，不另写提示词）。
+     *
+     * <p><b>为什么必须在角色卡之前</b>：character 工作流产出的就是角色行 + 逐角色深度档案；
+     * 而角色卡步骤（第 4 步）只处理「项目内已存在的角色」，没有角色时它必然返回 0，
+     * 但它又是必需步——于是初始化永远卡在角色卡（用户实测现象）。</p>
+     *
+     * <p><b>幂等</b>：已有角色且非重建 → 直接跳过，绝不覆盖用户手工建的角色；
+     * 重建时也只「补生成」（工作流内部按同项目同名幂等跳过），不删既有角色。</p>
+     *
+     * @param userId    归属用户 ID（日志用）
+     *
+     * @param projectId 项目 ID
+     *
+     * @param rebuild   是否全量重建
+     *
+     * @param wf        日志回调
+     *
+     * @return 本次新增角色数
+     */
+    private int initCastCharacters(Long userId, Long projectId, boolean rebuild, WorkflowLog wf) {
+        int before = countSpecialCharacters(projectId);
+        if (before > 0 && !rebuild) {
+            info(wf, "[世界初始化-生成角色] 项目内已有角色 " + before + " 位，跳过生成（需要重造请切「全量重建」）");
+            return 0;
+        }
+        com.holzyn.actor.domain.worldgen.service.WorldGenTaskService taskService = worldGenTaskService;
+        if (taskService == null) {
+            info(wf, "[世界初始化-生成角色] 工作流服务未装配，跳过生成（已有角色 " + before + " 位）");
+            return 0;
+        }
+        info(wf, "[世界初始化-生成角色] AI 读取世界观设定，生成核心角色阵容与逐角色深度档案…");
+        Long taskId;
+        try {
+            taskId = taskService.createTask(new com.holzyn.actor.domain.worldgen.dto.CreateWorldGenTaskRequest(
+                    projectId,
+                    com.holzyn.actor.domain.worldgen.service.WorldGenWorkflowSeeder.CODE_CHARACTER_V1,
+                    java.util.Map.of(),
+                    com.holzyn.actor.domain.worldgen.dto.CreateWorldGenTaskRequest.MODE_WORLDVIEW_ONLY));
+        } catch (Exception e) {
+            log.warn("[世界初始化-生成角色] 工作流任务创建失败（跳过继续）：{}", e.getMessage());
+            info(wf, "[世界初始化-生成角色] 工作流任务创建失败（跳过继续）：" + e.getMessage());
+            return 0;
+        }
+        if (taskId == null) {
+            info(wf, "[世界初始化-生成角色] 工作流任务未返回 ID，跳过生成");
+            return 0;
+        }
+        info(wf, "[世界初始化-生成角色] 工作流任务 #" + taskId + " 已启动，等待执行完成…");
+        boolean ok = awaitCastTask(taskService, taskId, wf);
+        int after = countSpecialCharacters(projectId);
+        int created = Math.max(0, after - before);
+        info(wf, "[世界初始化-生成角色] " + (ok ? "完成" : "未成功")
+                + "：新增角色 " + created + " 位（现共 " + after + " 位）");
+        return created;
+    }
+
+    /**
+     * 等 character 工作流跑到终态（每 2s 查一次，最长 {@link #CAST_WAIT_SECONDS} 秒）。
+     *
+     * <p>为什么必须阻塞等：初始化是严格顺序流程，角色没落库就跑角色卡只会生成 0 张；
+     * 但也不能无限等——超时按未成功处理，用户可在向导里单独重跑该步。</p>
+     *
+     * @param taskService 工作流任务服务
+     *
+     * @param taskId      任务 ID
+     *
+     * @param wf          日志回调
+     *
+     * @return true=任务成功结束
+     */
+    private boolean awaitCastTask(com.holzyn.actor.domain.worldgen.service.WorldGenTaskService taskService,
+                                  Long taskId, WorkflowLog wf) {
+        int lastDone = -1;
+        for (int tick = 0; tick < CAST_WAIT_SECONDS / 2; tick++) {
+            com.holzyn.actor.domain.worldgen.vo.WorldGenTaskVO task = null;
+            try {
+                task = taskService.getTask(taskId);
+            } catch (Exception e) {
+                // 世界库瞬时不可读等偶发问题不该判死：继续下一轮
+                log.debug("[世界初始化-生成角色] 任务状态查询失败（继续等待）：{}", e.getMessage());
+            }
+            if (task != null) {
+                String status = task.getStatus();
+                List<com.holzyn.actor.domain.worldgen.vo.WorldGenNodeVO> nodes = task.getNodes();
+                int done = 0;
+                String lastLabel = null;
+                if (nodes != null) {
+                    for (com.holzyn.actor.domain.worldgen.vo.WorldGenNodeVO node : nodes) {
+                        if ("succeeded".equals(node.getStatus())) {
+                            done++;
+                            lastLabel = node.getLabel();
+                        }
+                    }
+                }
+                if (done != lastDone && lastLabel != null) {
+                    lastDone = done;
+                    info(wf, "[世界初始化-生成角色] 工作流进度：" + lastLabel + " 完成（" + done
+                            + (nodes == null ? "" : "/" + nodes.size()) + "）");
+                }
+                if ("succeeded".equals(status)) {
+                    return true;
+                }
+                if ("failed".equals(status) || "canceled".equals(status)) {
+                    info(wf, "[世界初始化-生成角色] 工作流任务 #" + taskId + " 结束状态：" + status);
+                    return false;
+                }
+            }
+            try {
+                Thread.sleep(2000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        info(wf, "[世界初始化-生成角色] 等待超时（" + CAST_WAIT_SECONDS + " 秒），任务可能仍在后台执行");
+        return false;
+    }
+
+    /** 项目内特殊角色数（手建 + AI 生成同口径） */
+    private int countSpecialCharacters(Long projectId) {
+        try {
+            return (int) characterRepository.countByProjectIdAndTypeAndDeleted(projectId,
+                    com.holzyn.actor.common.NpcRefs.TYPE_SPECIAL, 0);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
 
     /**
      * 第 2 步：生成角色结构化角色卡及其 Prompt。
@@ -868,6 +1165,13 @@ public class WorldInitService {
             info(wf, "[世界初始化-地图] 完成：来源=" + ("ai".equals(vo.getSource()) ? "AI" : "机制")
                     + "，区域 " + vo.getRegionCount() + " 个 / 道路 " + vo.getRoadCount() + " 条 / 摆放 "
                     + vo.getPlacementCount() + " 个 / 住所 " + vo.getHomeCount() + " 间（" + vo.getMemberCount() + " 人入住）");
+            // 语义大纲落库 ≠ 真实地图落库：本步只产出「区域/道路/摆放/住所」的语义账本，
+            // 真正的地形·路网·建筑·日程（–，写 actor_world_map / actor_map_feature /
+            // actor_map_road / actor_npc_routine）过去只在页面点「生成地图」时才会跑。
+            // 结果：不点按钮的世界 actor_world_map=0、actor_npc_position=0，空间审计 12/12 回退沙盘，
+            // 角色在物理空间里等于不存在。这里补上"初始化就绪即后台启动真实地图"，
+            // 让"世界能跑"不再依赖一次人工点击。
+            kickOffRealMap(projectId, wf);
             return new int[]{vo.getRegionCount(), vo.getHomeCount(), vo.getMemberCount(),
                     "ai".equals(vo.getSource()) ? 1 : 0};
         } catch (Exception e) {
@@ -877,8 +1181,40 @@ public class WorldInitService {
         }
     }
 
-    // ==================== ⑥ 世界时间 ====================
+    /**
+     * 后台启动真实地图生成（地形 →资产 →路网 →落位 →合成落库）。
+     *
+     * <p><b>为什么必须在这里做</b>：初始化只写「语义大纲」（区域/道路/摆放/住所 + actor_npc_home），
+     * 真正给角色坐标的 {@code actor_world_map / actor_map_feature / actor_npc_routine} 由地图管线产出。
+     * 过去这一步只有页面点「生成地图」才会触发，于是新建世界在没人点按钮时：
+     * 空间审计 {@code sandboxFallback=12/12}、{@code actor_npc_position=0}、12 个角色同一坐标——
+     * 角色在物理空间里等于不存在。</p>
+     *
+     * <p>失败隔离：地图管线是异步的，启动失败只记日志，不阻断初始化；已有地图时不重复生成。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param wf 日志回调
+     */
+    private void kickOffRealMap(Long projectId, WorkflowLog wf) {
+        if (mapGenOrchestrator == null || actorMapRepository == null) {
+            return;
+        }
+        try {
+            if (actorMapRepository.findFirstByProjectIdOrderByIdDesc(projectId).isPresent()) {
+                info(wf, "[世界初始化-地图] 已存在真实地图，跳过后台生成");
+                return;
+            }
+            Long mapId = mapGenOrchestrator.generate(projectId, null, false);
+            info(wf, "[世界初始化-地图] 已后台启动真实地图生成（mapId=" + mapId
+                    + "，S1–S5，约数分钟）；完成前角色坐标为空、空间审计会回退沙盘，属预期中间态");
+        } catch (Exception e) {
+            log.warn("[世界初始化-地图] 后台启动真实地图失败（不影响初始化）：{}", e.getMessage());
+            info(wf, "[世界初始化-地图] 后台启动真实地图失败（不影响初始化）：" + e.getMessage());
+        }
+    }
 
+    // ==================== ⑥ 世界时间 ====================
     /**
      * 第 5 步：根据世界观信息（历史脉络/时代背景）由 AI 推断当前世界历时间点并设置
      * （不从零开始计算）。换算为 gameSecond 后设置起始游戏时刻（worldStartGameHour）与真实锚点

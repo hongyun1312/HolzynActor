@@ -171,7 +171,10 @@ public final class PersonaSchema {
             // 新生儿建档：遗传谱系为主（约 400 token）
             Map.entry("growth_newborn_persona", List.of(Shards.S9)),
             // 人群归属级批量决策：与实时决策同口径
-            Map.entry("npc_crowd_decision", List.of(Shards.S1, Shards.S2, Shards.S4, Shards.S6, Shards.S8)));
+            Map.entry("npc_crowd_decision", List.of(Shards.S1, Shards.S2, Shards.S4, Shards.S6, Shards.S8)),
+            // 决策模型精简判定（0.6B 判定层）：只取身份锚定+人格价值，供「特质摘要」一行——
+            // 实跑事故：全量 5 分片 1049 字符 × 12 states 把单请求撑到 20KB，模型 120s 不返回
+            Map.entry("decision_compact", List.of(Shards.S1, Shards.S2)));
 
     /** 未登记场景的回退分片组合（身份+人格价值；最小可用、信息密度最高）。 */
     public static final List<String> DEFAULT_SCENE_SHARDS = List.of(Shards.S1, Shards.S2);

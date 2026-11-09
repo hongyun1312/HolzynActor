@@ -110,6 +110,21 @@ class AiCallContextTest {
     }
 
     /**
+     * recordStep 带 characterId（复验缺陷修复）：{@code state_version} 快照行必须能按角色聚合，
+     * 否则取证只能靠 prompt 里的姓名反查，重名角色就串了。
+     */
+    @Test
+    void recordStepCarriesCharacterId() {
+        AiCallContext.recordStep(100L, 42L, "agent_decision", "state_version",
+                "[世界状态版本 gs62287774161/v7] 决策输入字数=10685 char=42", 0L, "情境快照");
+        assertEquals(1, submitted.size());
+        AiCallTrace step = submitted.get(0);
+        assertEquals(42L, step.getCharacterId(), "快照行必须带角色 ID");
+        assertEquals("state_version", step.getStepType());
+        assertEquals("情境快照", step.getUserPrompt());
+    }
+
+    /**
      * markDegraded：run 块内 AI 失败后调用方做程序化兜底 → 该条 trace 落库为 degraded。
      */
     @Test

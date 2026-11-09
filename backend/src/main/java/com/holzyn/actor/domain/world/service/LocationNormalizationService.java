@@ -85,6 +85,32 @@ public class LocationNormalizationService {
     }
 
     /**
+     * 严格归一：<b>只接受能落到地点表的位置</b>（未命中返回 {@code null}）。
+     *
+     * <p><b>为什么需要「严格」这一档（整世界长跑实测）</b>：运行期的位置写入方
+     * 拿到的是模型写的 {@code target} 或从动作文本里剥出来的目的地，实测出现
+     * 「椅背」「肩上拉了拉」「灶上烧水」「院子翻晒笋」——这些都不是地点，而是动作片段。
+     * 一旦写进 {@code actor_character.location}，所有<b>按地名比对</b>的联动都会静默落空：
+     * 事实可见性（{@code FactPerceptionSubscriber}）、同地点自主对话
+     * （{@code AutonomousChatService}）、交易柜台（{@code ActionAdjudicationService}）、
+     * 制作设施（{@code CraftService}）。而且它不会报错，只会让世界「看起来正常但什么都没发生」。</p>
+     *
+     * <p>所以运行期改写位置必须走这一档：命中地点表 → 返回规范名；归不上 → 调用方
+     * <b>保持原位置不变</b>（绝不把动作片段当地名写库）。创建期的 {@link #normalize} 仍保留
+     * 自由文本兜底，避免把人工录入的旧世界数据判成脏数据。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param freeText 自由文本位置（可空）
+     *
+     * @return 命中地点表的归一结果；未命中/入参空返回 null
+     */
+    public LocationRef canonical(Long projectId, String freeText) {
+        LocationRef ref = normalize(projectId, freeText);
+        return ref == null || !ref.matched() ? null : ref;
+    }
+
+    /**
      * 归一后应持久化的位置名称（命中=地点表规范名；未命中=自由文本原样；入参空=null）。
      *
      * @param projectId 项目 ID

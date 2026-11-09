@@ -35,11 +35,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 移动引擎：把「日程段」变成「沿路的轨迹」，并按世界时钟推进坐标。
@@ -78,6 +81,12 @@ public class NpcMovementService {
     /** 轨迹状态：被打断 */
     public static final String ABORTED = "aborted";
 
+    /**
+     * 权威行允许的滞后上限（游戏秒）。超过它就说明这一行被漏更新了，{@link #healUntouchedPositions}
+     * 会把它重锚回当前日程落点。取 2 个引擎 tick（300 × 2），给「上一帧刚写过、这一帧还没轮到」留一格余量。
+     */
+    private static final long STALE_GRACE_GAME_SECONDS = 600L;
+
     /** 起因：日程 */
     public static final String REASON_ROUTINE = "routine";
 
@@ -88,6 +97,22 @@ public class NpcMovementService {
     private final NpcNavigationService navigationService;
     private final NpcPositionService positionService;
     private final MapNavProperties props;
+
+    /**
+     * AI 意图驻留锁：窗口内日程不抢人。字段注入保持构造器不变；
+     * null=未装配[单测]时行为与旧版一致（日程照常推进）。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private NpcIntentLock intentLock;
+
+    /**
+     * 途中遭遇（迁移到权威坐标）：沙盘移动不再承载权威世界，遭遇检测必须在
+     * 权威轨迹上做，否则「单一移动引擎」等于把途中交互一起删掉。
+     * {@code @Lazy}：MoveEncounterService → 沙盘 Hub → MovementService，避免 Bean 环。
+     */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.worldmap.service.MoveEncounterService moveEncounterService;
 
     /**
      * 推进一个世界 tick（挂在 {@code WorldEngine} 的感知周期里）。
@@ -137,45 +162,148 @@ public class NpcMovementService {
         }
         int minute = (int) Math.floorMod(gameSecond / 60, 1440);
         List<ActorNpcPosition> dirty = new ArrayList<>();
+        Set<String> touched = new HashSet<>();
         for (Map.Entry<String, List<ActorNpcRoutine>> e : byRef.entrySet()) {
             String ref = e.getKey();
             List<ActorNpcRoutine> segs = e.getValue();
+            try {
+                ActorNpcRoutine seg = segmentAt(segs, minute);
+                if (seg == null) {
+                    continue;
+                }
+                ActorNpcPosition pos = positions.get(ref);
+                double[] target = spotOf(seg, features);
+                if (pos == null) {
+                    // 首次进世界：直接落位到本段落点，不让所有人从 (0,0) 走过来
+                    pos = positionService.upsert(projectId, map.getId(), ref, seg.getNpcName(),
+                            target[0], target[1], 0, seg.getIndoor() != null && seg.getIndoor() == 1,
+                            seg.getActivity(), seg.getFeatureCode(), "static", gameSecond);
+                    positions.put(ref, pos);
+                    touched.add(ref);
+                    continue;
+                }
+                touched.add(ref);
+                ActorNpcPath path = walking.get(ref);
+                if (path != null) {
+                    advance(map, pos, path, gameSecond, seg, target, dirty);
+                    // （单一移动引擎）：权威轨迹上的途中遭遇。沙盘那条路已不再由
+                    // AI 行动发起，遭遇检测必须跟着权威走，否则「统一移动」会把途中交互一并弄丢。
+                    maybeEncounterAuthority(projectId, ref, pos, positions, gameSecond);
+                    continue;
+                }
+                // （意图 vs 日程）：AI 让人去哪、到站后留一个驻留窗口。
+                // 窗口内日程不抢人——否则「他为什么来这儿」这件事在世界上根本留不下痕迹。
+                if (intentLock != null) {
+                    NpcIntentLock.Hold hold = intentLock.holding(projectId, ref, gameSecond);
+                    if (hold != null) {
+                        long remainMin = Math.max(0L, hold.remaining(gameSecond)) / 60L;
+                        log.info("[mapnav] 日程让位于 AI 意图：ref={} 意图={}（{}）还可驻留 {} 游戏分钟",
+                                ref, hold.action() == null ? "前往目的地" : hold.action(),
+                                hold.featureCode(), remainMin);
+                        pos.setGameSecond(gameSecond);
+                        dirty.add(pos);
+                        continue;
+                    }
+                }
+                double dist = Math.hypot(target[0] - pos.getX(), target[1] - pos.getZ());
+                if (dist > props.getArriveToleranceMeters()) {
+                    startRoute(projectId, map.getId(), pos, seg, target, gameSecond, REASON_ROUTINE);
+                    positions.put(ref, pos);
+                    dirty.add(pos);
+                } else if (!segStateMatches(pos, seg)) {
+                    // 原地不动，但「活动/室内」变了（比如进屋睡觉）：只改状态，不生成轨迹
+                    pos.setActivity(seg.getActivity());
+                    pos.setIndoor(seg.getIndoor() != null && seg.getIndoor() == 1 ? 1 : 0);
+                    pos.setFeatureCode(seg.getFeatureCode());
+                    pos.setStatus("static");
+                    pos.setGameSecond(gameSecond);
+                    dirty.add(pos);
+                } else {
+                    // 心跳：人没动、状态也没变，权威行同样要体现「这个 tick 我看过他，他就在这」。
+                    // 不写这一笔，一行静止坐标会永远停在上次写入的秒数上——实测对账里那 26 条
+                    // 滞后 4500 秒的「分歧」全部来自这里（人一直坐在自家院子里，坐标没错，只是没心跳）。
+                    pos.setGameSecond(gameSecond);
+                    dirty.add(pos);
+                }
+            } catch (Exception ex) {
+                // 单个角色算路/推进失败必须就地隔离：否则整个 tick 中断，之后全场角色都停在旧坐标，
+                // 权威行比世界时钟落后几十分钟（实测 lag 达 6900 游戏秒），三方对账随即全红。
+                log.warn("[mapnav] 角色推进失败（隔离继续）：project={} ref={} gameSecond={} : {}",
+                        projectId, ref, gameSecond, ex.toString());
+            }
+        }
+        healUntouchedPositions(gameSecond, positions.values(), touched, byRef, walking,
+                minute, features, dirty);
+        if (!dirty.isEmpty()) {
+            positionService.saveAll(dirty);
+        }
+    }
+
+    /**
+     * 权威行自愈：本 tick 未被日程循环刷新、且行内游戏秒落后当前时钟超过 2 个 tick 的角色，
+     * 直接重锚到「当前时段该在的落点」，并把残留的在途轨迹收尾。
+     *
+     * <p><b>为什么需要它</b>：世界引擎在积压时会丢弃一段时间（{@code tick 队列溢出}），
+     * 或者某个角色因数据异常被 {@code continue} 跳过；这两种情况下权威行会停在旧秒数上，
+     * 而权威-渲染-注入三方对账的口径是「滞后不得超过 1 个 tick」。
+     * 与其去追每一种漏更新的根因，不如在这里立一条不变量：
+     * <b>任何角色的权威行都不会落后当前时钟超过 2 个 tick（600 游戏秒）</b>。</p>
+     *
+     * <p>重锚是「按日程瞬移」而不是插值补间：世界时间已经跳过这段了，
+     * 补间只会生成一段从未真实发生过的轨迹。</p>
+     */    private void healUntouchedPositions(long gameSecond, Collection<ActorNpcPosition> rows,
+                                        Set<String> touched,
+                                        Map<String, List<ActorNpcRoutine>> byRef,
+                                        Map<String, ActorNpcPath> walking, int minute,
+                                        Map<String, ActorMapFeature> features,
+                                        List<ActorNpcPosition> dirty) {
+        int healed = 0;
+        long maxLag = 0;
+        for (ActorNpcPosition pos : rows) {
+            if (pos == null || pos.getNpcRef() == null || touched.contains(pos.getNpcRef())) {
+                continue;
+            }
+            long rowSecond = pos.getGameSecond();
+            long lag = gameSecond - rowSecond;
+            if (lag <= STALE_GRACE_GAME_SECONDS) {
+                continue;
+            }
+            List<ActorNpcRoutine> segs = byRef.get(pos.getNpcRef());
+            if (segs == null || segs.isEmpty()) {
+                // 没有日程的角色（路人/临时角色）不能重锚（不知道该去哪），但可以心跳：
+                // 坐标原样保留，只把秒数推到当前，否则对账永远把他算成滞后。
+                pos.setGameSecond(gameSecond);
+                dirty.add(pos);
+                log.debug("[mapnav] 权威行滞后且无日程，仅心跳：ref={} lag={}s", pos.getNpcRef(), lag);
+                continue;
+            }
             ActorNpcRoutine seg = segmentAt(segs, minute);
             if (seg == null) {
                 continue;
             }
-            ActorNpcPosition pos = positions.get(ref);
             double[] target = spotOf(seg, features);
-            if (pos == null) {
-                // 首次进世界：直接落位到本段落点，不让所有人从 (0,0) 走过来
-                pos = positionService.upsert(projectId, map.getId(), ref, seg.getNpcName(),
-                        target[0], target[1], 0, seg.getIndoor() != null && seg.getIndoor() == 1,
-                        seg.getActivity(), seg.getFeatureCode(), "static", gameSecond);
-                positions.put(ref, pos);
-                continue;
-            }
-            ActorNpcPath path = walking.get(ref);
+            ActorNpcPath path = walking.get(pos.getNpcRef());
             if (path != null) {
-                advance(map, pos, path, gameSecond, seg, target, dirty);
-                continue;
+                // 旧轨迹还在途：直接作废，避免下一帧按旧折线把人拉回过去的路上
+                path.setStatus(ABORTED);
+                pathRepository.save(path);
             }
-            double dist = Math.hypot(target[0] - pos.getX(), target[1] - pos.getZ());
-            if (dist > props.getArriveToleranceMeters()) {
-                startRoute(projectId, map.getId(), pos, seg, target, gameSecond, REASON_ROUTINE);
-                positions.put(ref, pos);
-                dirty.add(pos);
-            } else if (!segStateMatches(pos, seg)) {
-                // 原地不动，但「活动/室内」变了（比如进屋睡觉）：只改状态，不生成轨迹
-                pos.setActivity(seg.getActivity());
-                pos.setIndoor(seg.getIndoor() != null && seg.getIndoor() == 1 ? 1 : 0);
-                pos.setFeatureCode(seg.getFeatureCode());
-                pos.setStatus("static");
-                pos.setGameSecond(gameSecond);
-                dirty.add(pos);
-            }
+            pos.setX(target[0]);
+            pos.setZ(target[1]);
+            pos.setActivity(seg.getActivity());
+            pos.setIndoor(seg.getIndoor() != null && seg.getIndoor() == 1 ? 1 : 0);
+            pos.setFeatureCode(seg.getFeatureCode());
+            pos.setStatus("static");
+            pos.setGameSecond(gameSecond);
+            dirty.add(pos);
+            healed++;
+            maxLag = Math.max(maxLag, lag);
+            log.debug("[mapnav] 权威行滞后自愈：ref={} 行={}s 时钟={}s 滞后={}s → ({}, {})",
+                    pos.getNpcRef(), rowSecond, gameSecond, lag, target[0], target[1]);
         }
-        if (!dirty.isEmpty()) {
-            positionService.saveAll(dirty);
+        if (healed > 0) {
+            log.warn("[mapnav] 权威坐标滞后自愈 {} 个角色（最大滞后 {} 游戏秒），已重锚到当前日程落点",
+                    healed, maxLag);
         }
     }
 
@@ -239,13 +367,27 @@ public class NpcMovementService {
         double fromX = pos.getX();
         double fromZ = pos.getZ();
         NavPath nav = navigationService.route(projectId, fromX, fromZ, target[0], target[1]);
+        if (!nav.reachable()) {
+            // 起点或终点落在建筑/水里（覆盖层改过门、或人本来就站在占位格里）：
+            // 先把两端挪到最近的可站格再试一次，比直接直线穿墙可信得多。
+            double[] from = navigationService.nearestWalkable(projectId, fromX, fromZ, 6);
+            double[] to = navigationService.nearestWalkable(projectId, target[0], target[1], 6);
+            if (from != null && to != null
+                    && (Math.hypot(from[0] - fromX, from[1] - fromZ) > 1e-6
+                    || Math.hypot(to[0] - target[0], to[1] - target[1]) > 1e-6)) {
+                NavPath retry = navigationService.route(projectId, from[0], from[1], to[0], to[1]);
+                if (retry.reachable()) {
+                    nav = retry;
+                }
+            }
+        }
         List<double[]> points;
         double length;
         if (nav.reachable()) {
             points = nav.points();
             length = nav.lengthM();
         } else {
-            // 无导航数据 / 被围死：直线兜底，但要留痕——这类移动在验收里是「异常项」
+            // 真的走不过去（被围死 / 无导航数据）：直线兜底，但要留痕——这类移动在验收里是「异常项」
             points = List.of(new double[]{fromX, fromZ}, new double[]{target[0], target[1]});
             length = Math.hypot(target[0] - fromX, target[1] - fromZ);
             log.warn("[mapnav] 无可用路径，退化为直线：project={} ref={} → ({},{})",
@@ -261,6 +403,12 @@ public class NpcMovementService {
             pos.setFeatureCode(seg.getFeatureCode());
             return null;
         }
+        // 三方对账 · 同源归一化：轨迹落库时折线会被 round2 压成两位小数，
+        // 而前端归一化用的是「它读到的折线」的长度。若这里沿用寻路器在**未压精度**折线上量出的
+        // 长度，两侧的归一化因子就不同源——同一条轨迹上权威点与渲染点会按比例偏开，轨迹越长偏得越多。
+        // 所以长度一律「按落库折线重算」，让 lengthM == 前端 polylineLength(points) 逐位相等。
+        String pointsJson = toJson(points);
+        length = polylineLength(parse(pointsJson));
         double speed = Math.max(1.0, props.getWalkSpeed());
         double minutes = clamp(length / speed, props.getMinTravelMinutes(), props.getMaxTravelMinutes());
         long depart = gameSecond;
@@ -269,7 +417,7 @@ public class NpcMovementService {
         path.setProjectId(projectId);
         path.setMapId(mapId);
         path.setNpcRef(pos.getNpcRef());
-        path.setPointsJson(toJson(points));
+        path.setPointsJson(pointsJson);
         path.setLengthM(length);
         path.setDepartGameSecond(depart);
         path.setArriveGameSecond(arrive);
@@ -323,18 +471,61 @@ public class NpcMovementService {
             pos.setZ(last[1]);
             pos.setStatus("static");
             pos.setIndoor(seg.getIndoor() != null && seg.getIndoor() == 1 ? 1 : 0);
-            // 落点与日程不一致时以日程为准（覆盖层改了门，轨迹可能停在新门口外侧）
-            if (Math.hypot(last[0] - target[0], last[1] - target[1]) > 0.5) {
-                pos.setX(last[0]);
-                pos.setZ(last[1]);
-            }
+            // 到点坐标一律取轨迹终点，不取日程落点：AI 主动发起的移动终点常常不是本段落点，
+            // 若在这里按 target 吸附，人会被凭空拉回日程地点（旧代码写过这个分支，等于把人瞬移）。
             path.setStatus(ARRIVED);
             pathRepository.save(path);
         }
     }
 
-    /** 本段落点：建筑优先用门口坐标（人能真的走到门里，而不是走到房子中心）。 */
-    private double[] spotOf(ActorNpcRoutine seg, Map<String, ActorMapFeature> features) {
+    /**
+     * 权威轨迹上的途中遭遇。
+     *
+     * <p>沙盘移动不再由 AI 行动发起，遭遇检测必须跟着权威轨迹走；否则「统一移动引擎」的
+     * 代价是把途中交互整条能力删掉。半径按米给（沙盘旧口径 30 格 ≈ 6 米）。</p>
+     *
+     * <p>零阻塞：本方法只做「找出附近有谁 + 交给异步判定」，AI 判定在虚拟线程里跑；
+     * 任何异常就地吞掉，绝不中断 tick。</p>
+     */
+    private void maybeEncounterAuthority(Long projectId, String moverRef, ActorNpcPosition pos,
+                                         Map<String, ActorNpcPosition> positions, long gameSecond) {
+        if (moveEncounterService == null || pos == null || moverRef == null) {
+            return;
+        }
+        try {
+            double r = props.getEncounterRadiusMeters() > 0 ? props.getEncounterRadiusMeters() : 6.0;
+            double x = pos.getX() == null ? 0d : pos.getX();
+            double z = pos.getZ() == null ? 0d : pos.getZ();
+            List<String> nearby = new ArrayList<>();
+            for (ActorNpcPosition other : positions.values()) {
+                if (other == null || other.getNpcRef() == null || moverRef.equals(other.getNpcRef())) {
+                    continue;
+                }
+                if (other.getX() == null || other.getZ() == null) {
+                    continue;
+                }
+                if (Math.hypot(other.getX() - x, other.getZ() - z) <= r) {
+                    nearby.add(other.getNpcRef());
+                }
+            }
+            if (nearby.isEmpty()) {
+                return;
+            }
+            moveEncounterService.maybeEncounterWith(projectId, moverRef, nearby, gameSecond);
+        } catch (Exception e) {
+            log.warn("[mapnav] 途中交互触发失败（隔离继续）：project={} ref={} : {}",
+                    projectId, moverRef, e.getMessage());        }
+    }
+
+    /**
+     * AI 意图驻留窗口（游戏分钟）。{@code AgentActionService} 用它算「到站后还能待多久」；
+     * 0 = 关闭驻留（日程立刻可以抢人，退回之前的旧口径）。
+     */
+    public long intentDwellGameMinutes() {
+        return Math.max(0, props.getIntentDwellGameMinutes());
+    }
+
+    /** 本段落点：建筑优先用门口坐标（人能真的走到门里，而不是走到房子中心）。 */    private double[] spotOf(ActorNpcRoutine seg, Map<String, ActorMapFeature> features) {
         if (seg.getFeatureCode() != null) {
             ActorMapFeature f = features.get(seg.getFeatureCode());
             if (f != null && f.getDoorX() != null && f.getDoorZ() != null) {
@@ -383,8 +574,7 @@ public class NpcMovementService {
     }
 
     /** 折线 → JSON（保留 2 位小数，文件小且够用）。 */
-    private static String toJson(List<double[]> pts) {
-        StringBuilder sb = new StringBuilder(pts.size() * 18 + 4);
+    private static String toJson(List<double[]> pts) {        StringBuilder sb = new StringBuilder(pts.size() * 18 + 4);
         sb.append('[');
         for (int i = 0; i < pts.size(); i++) {
             if (i > 0) {
@@ -397,8 +587,7 @@ public class NpcMovementService {
     }
 
     /** JSON → 折线。 */
-    private static List<double[]> parse(String json) {
-        List<double[]> pts = new ArrayList<>();
+    private static List<double[]> parse(String json) {        List<double[]> pts = new ArrayList<>();
         if (json == null || json.isBlank()) {
             return pts;
         }
@@ -411,6 +600,31 @@ public class NpcMovementService {
             log.debug("[mapnav] 轨迹解析失败：{}", e.getMessage());
         }
         return pts;
+    }
+
+    /**
+     * 折线长度（米）。
+     *
+     * <p><b>为什么要在这里重算</b>：{@link #toJson} 会把每个顶点压到两位小数，压完之后折线总长
+     * 与寻路器在原始精度上量出的长度**不再相等**。前端归一化用的是「读到的那条折线」的长度，
+     * 因此权威侧也必须用同一条（已压精度的）折线来量——否则两侧的归一化因子不同源，
+     * 权威点与渲染点会沿轨迹按比例偏开。三方对账把这条定为硬约束。</p>
+     *
+     * @param pts 折线
+     *
+     * @return 长度（米；不足两点返回 0）
+     */
+    static double polylineLength(List<double[]> pts) {
+        if (pts == null || pts.size() < 2) {
+            return 0;
+        }
+        double sum = 0;
+        for (int i = 1; i < pts.size(); i++) {
+            double[] a = pts.get(i - 1);
+            double[] b = pts.get(i);
+            sum += Math.hypot(b[0] - a[0], b[1] - a[1]);
+        }
+        return sum;
     }
 
     /** 朝向（度，0=北，顺时针）。 */

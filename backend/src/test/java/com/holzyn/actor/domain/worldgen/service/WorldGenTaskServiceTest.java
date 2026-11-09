@@ -132,6 +132,58 @@ class WorldGenTaskServiceTest {
         assertEquals(3, vos.get(0).getNodeCount());
     }
 
+    @Test
+    void listWorkflowsIncludesOrderedNodeDefinitions() {
+        when(workflowRepository.findByEnabledOrderByIdAsc(1)).thenReturn(List.of(workflow));
+        var vo = service.listWorkflows().get(0);
+        // 节点定义随列表下发：前端靠它给「尚未执行」的占位节点显示真实阶段名
+        assertEquals(3, vo.getNodes().size());
+        assertEquals("agent_a", vo.getNodes().get(0).nodeId());
+        assertEquals("维度A", vo.getNodes().get(0).label());
+        assertEquals("agent", vo.getNodes().get(0).stepType());
+        // 顺序=执行顺序（与 tasks 的节点顺序一致），不是 nodesJson 数组序
+        assertEquals("script_x", vo.getNodes().get(1).nodeId());
+        assertEquals("agent_b", vo.getNodes().get(2).nodeId());
+    }
+
+    @Test
+    void createCharacterTaskRejectedWhenWorldSettingMissing() {
+        // 角色工作流：没有世界观设定就没有锚点，必须提前 400（不能等几分钟后节点失败）
+        workflow.setCode(WorldGenCharacterService.CODE_CHARACTER_V1);
+        workflow.setName("角色生成");
+        when(workflowRepository.findByCode(WorldGenCharacterService.CODE_CHARACTER_V1)).thenReturn(Optional.of(workflow));
+        com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository settingRepo =
+                Mockito.mock(com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository.class);
+        when(settingRepo.findTopByProjectIdOrderByVersionDesc(5L)).thenReturn(Optional.empty());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "worldSettingRepository", settingRepo);
+
+        BizException ex = assertThrows(BizException.class, () -> service.createTask(
+                new CreateWorldGenTaskRequest(5L, WorldGenCharacterService.CODE_CHARACTER_V1, Map.of())));
+        assertEquals(400, ex.getCode());
+        assertTrue(ex.getMessage().contains("世界观设定"));
+    }
+
+    @Test
+    void createCharacterTaskAllowedWhenWorldSettingHasContent() {
+        workflow.setCode(WorldGenCharacterService.CODE_CHARACTER_V1);
+        workflow.setName("角色生成");
+        when(workflowRepository.findByCode(WorldGenCharacterService.CODE_CHARACTER_V1)).thenReturn(Optional.of(workflow));
+        com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository settingRepo =
+                Mockito.mock(com.holzyn.actor.domain.world.repository.ActorWorldSettingRepository.class);
+        com.holzyn.actor.domain.world.entity.ActorWorldSetting setting =
+                new com.holzyn.actor.domain.world.entity.ActorWorldSetting();
+        setting.setName("雾锁铁谷");
+        setting.setGeography("一条锈蚀的峡谷贯穿大陆");
+        when(settingRepo.findTopByProjectIdOrderByVersionDesc(5L)).thenReturn(Optional.of(setting));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "worldSettingRepository", settingRepo);
+
+        // 有设定 → 不拦（本测试用 build 工作流的变量表，故补上必填输入）
+        Long id = service.createTask(new CreateWorldGenTaskRequest(5L,
+                WorldGenCharacterService.CODE_CHARACTER_V1, Map.of("premise", "废土之上", "genre", "科幻末世")));
+        assertEquals(10L, id);
+        verify(taskRunner).runAsync(10L);
+    }
+
     // ==================== 创建任务 ====================
 
     @Test

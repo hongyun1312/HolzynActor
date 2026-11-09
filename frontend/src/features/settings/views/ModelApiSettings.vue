@@ -301,6 +301,15 @@ const props = defineProps({
   compact: { type: Boolean, default: false }
 })
 
+/**
+ * 列表重载后通知外层（changed）。
+ *
+ * <p>为什么需要：首启引导把本组件整页内嵌进「连接模型」步，外层要据此刷新
+ * 「已配置 N 个供应商」与「AI 补充生成」的可用状态；不加这个事件，用户刚设好供应商
+ * 外层还显示「未配置」，会以为没保存成功。</p>
+ */
+const emit = defineEmits(['changed'])
+
 /** 是否项目空间模式（projectId 非空）：合并展示项目级 + 用户级 */
 const projectMode = computed(() => props.projectId != null && String(props.projectId) !== '')
 
@@ -555,6 +564,7 @@ async function loadList() {
       list.value = (await fetchModelApis(null)) || []
     }
     syncCtxDrafts()
+    emit('changed')
   } catch (e) {
     ElMessage.error(e.message || '加载失败')
   } finally {

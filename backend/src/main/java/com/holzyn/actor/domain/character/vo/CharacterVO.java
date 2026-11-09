@@ -42,6 +42,8 @@ public record CharacterVO(
         /** 统一身份引用 {@code npc:{id}}（谱系/基因/记忆等接口的入参） */
         String npcRef,
         String type,
+        /** 控制方：npc=自主 NPC，player=玩家同构角色（关系图高亮） */
+        String controller,
         String name,
         String title,
         String detail,
@@ -69,7 +71,8 @@ public record CharacterVO(
      * @return VO 对象
      */
     public static CharacterVO of(ActorCharacter c, Boolean hasCard) {
-        return new CharacterVO(c.getId(), c.getProjectId(), c.npcRef(), c.getType(), c.getName(), c.getTitle(),
+        return new CharacterVO(c.getId(), c.getProjectId(), c.npcRef(), c.getType(), c.getController(),
+                c.getName(), c.getTitle(),
                 c.getDetail(), c.getAvatarUrl(), c.getIsProtagonist(), c.getImportance(), c.getStatus(),
                 c.getStage(), c.getAge(), hasCard, c.getLocation(), c.getLocationId(),
                 c.getCreatedAt(), c.getUpdatedAt());

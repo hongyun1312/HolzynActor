@@ -146,6 +146,35 @@ public class MoveEncounterService {
             if (nearby.isEmpty()) {
                 return;
             }
+            maybeEncounterWith(projectId, moverRef, nearby, gameSecond);
+        } catch (Exception e) {
+            log.warn("[途中交互] 触发失败（fail-open 继续走）: ref={} : {}", moverRef, e.getMessage());
+        }
+    }
+
+    /**
+     * 途中遭遇（拆分）：<b>调用方已经知道附近有谁</b>时直接走这里。
+     *
+     * <p>为什么要拆：沙盘移动不再是权威世界的主通道，权威轨迹（{@code actor_npc_path}）
+     * 的推进方（{@code NpcMovementService}）自己就能算出「附近有谁」——那是米制坐标，
+     * 与沙盘 0..500 完全不同的空间。把「找附近」和「判定是否搭话」分开，
+     * 两套移动引擎才能共用同一段冷却/预算/异步判定逻辑，而不是各写一份。</p>
+     *
+     * @param nearby 附近角色 ref（已排除自身；空=不触发）
+     */
+    public void maybeEncounterWith(Long projectId, String moverRef, List<String> nearby,
+                                   Long gameSecond) {
+        if (projectId == null || moverRef == null || moverRef.isBlank()
+                || !properties.isEncounterEnabled()) {
+            return;
+        }
+        if (!com.holzyn.actor.common.NpcRefs.isNpcRef(moverRef)) {
+            return;
+        }
+        if (nearby == null || nearby.isEmpty()) {
+            return;
+        }
+        try {
             // 冷却检查（每角色每游戏小时 ≤N 次；同刻/冷却期内跳过）
             Long hour = currentGameHour(projectId, gameSecond);
             String key = cooldownKey(projectId, moverRef);

@@ -243,16 +243,63 @@ public final class AiCallContext {
      * @param durationMs 环节耗时（毫秒，<=0 记 0）
      */
     public static void recordStep(Long projectId, String scene, String stepType, String content, long durationMs) {
+        recordStep(projectId, scene, stepType, content, durationMs, null);
+    }
+
+    /**
+     * 记录一个非 AI 环节，并附带决策输入快照（供 state_version 行直接核对 prompt 事实）。
+     *
+     * @param projectId 项目 ID（可空）
+     *
+     * @param scene 调用场景
+     *
+     * @param stepType 环节类型
+     *
+     * @param content 环节摘要
+     *
+     * @param durationMs 环节耗时（毫秒）
+     *
+     * @param userPrompt 决策输入快照（可空；null=不写 prompt）
+     */
+    public static void recordStep(Long projectId, String scene, String stepType, String content,
+                                  long durationMs, String userPrompt) {
+        recordStep(projectId, null, scene, stepType, content, durationMs, userPrompt);
+    }
+
+    /**
+     * 记录一个非 AI 环节，并显式带上所属角色。
+     *
+     * <p><b>为什么补 characterId</b>：复验时发现 {@code state_version} 快照行的
+     * {@code character_id} 恒为 null——取证只能靠 prompt 里的姓名反查，换个重名角色就串了。
+     * 决策链路的每一步本来就属于某个角色，这个维度不该丢。</p>
+     *
+     * @param projectId   项目 ID（可空）
+     *
+     * @param characterId 角色 ID（可空=不归属具体角色，如项目级维护步骤）
+     *
+     * @param scene       调用场景
+     *
+     * @param stepType    环节类型
+     *
+     * @param content     环节摘要
+     *
+     * @param durationMs  环节耗时（毫秒）
+     *
+     * @param userPrompt  决策输入快照（可空；null=不写 prompt）
+     */
+    public static void recordStep(Long projectId, Long characterId, String scene, String stepType,
+                                  String content, long durationMs, String userPrompt) {
         Consumer<AiCallTrace> sink = SINK;
         if (sink == null) {
             return;
         }
-        AiCallTrace trace = new AiCallTrace(scene == null || scene.isBlank() ? "step" : scene, null);
+        AiCallTrace trace = new AiCallTrace(scene == null || scene.isBlank() ? "step" : scene, characterId);
         trace.setProjectId(projectId);
         trace.setTraceId(TRACE_ID.get());
         trace.setStepType(stepType);
         trace.setContent(content == null || content.isBlank() ? null : content);
         trace.setDurationMs((int) Math.max(0, Math.min(Integer.MAX_VALUE, durationMs)));
+        trace.setUserPrompt(userPrompt);
         // ：感知组装环节同步把当前累积数据源记入 trace 行（供数据流回溯）
         java.util.List<String> ds = takeDataSources();
         if (ds != null) {

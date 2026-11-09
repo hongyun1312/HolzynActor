@@ -121,25 +121,34 @@ onMounted(() => {
 
 <style scoped>
 /*
-  宽度必须显式声明为 `--shell-side-w`。
-  为什么不能省：`.domain-sidebar` 的宽度写在 DomainSidebar.vue 的 scoped 样式里
+  宽度与「悬浮岛」外观都必须在本组件复刻一遍。
+  为什么不能省：`.domain-sidebar` 的宽度/背景/圆角写在 DomainSidebar.vue 的 scoped 样式里
   （`.domain-sidebar[data-v-xxx]`），而 scoped 属性只作用于该组件自己的模板，
-  本组件的 <aside> 拿不到那条规则——于是外壳 `.shell-sidebar-slot`（按内容定宽）
-  把侧栏宽度交给 max-content 决定：域名叫「AI 调用与 Prompt」的那一页比别的页
-  宽 4px，切页时整个内容列跟着左右跳 4px，正是用户明令禁止的抖动。
-  这里复刻同一条令牌，宽度就与主应用侧栏完全同源，且不随文案长度变化。
+  本组件的 <aside> 拿不到那些规则——于是：
+  ① 外壳 `.shell-sidebar-slot`（按内容定宽）把宽度交给 max-content：「AI 调用与 Prompt」
+     这一页比别的页宽 4px，切页时内容列左右跳 4px；
+  ② 侧栏没有卡片底与描边，四边留白一加就变成「一块透明的浮空区」。
+  这里复刻同一组令牌，观感与宽度就与主应用侧栏完全同源。
 */
 .dev-sidebar {
-  width: var(--shell-side-w, 210px);
+  width: var(--shell-side-w, 232px);
   flex: 0 0 auto;
   min-width: 0;
+  margin: var(--shell-side-margin, 12px);
+  background: var(--bg-nav);
+  border: 1px solid var(--border-l1);
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: var(--shadow-lv1);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
 }
 
 .dev-side-foot {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 0 10px 4px;
 }
 .dev-side-world {
   display: flex;

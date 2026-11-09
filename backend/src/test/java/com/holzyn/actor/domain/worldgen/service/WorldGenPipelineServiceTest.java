@@ -69,7 +69,7 @@ class WorldGenPipelineServiceTest {
         when(characterService.persistCharacters(anyLong()))
                 .thenReturn(Map.of("created", 5, "skipped", 0));
         when(worldInitService.runInit(anyLong(), anyLong(), anyBoolean(), any()))
-                .thenReturn(new WorldInitResultVO(5L, 8, 5, 5, 15, "星历 1050 年", 7));
+                .thenReturn(new WorldInitResultVO(5L, 8, 7, 5, 5, 15, "星历 1050 年", 7));
         ActorWorldSetting ws = new ActorWorldSetting();
         ws.setName("青禾村");
         when(worldSettingRepository.findTopByProjectIdOrderByVersionDesc(anyLong())).thenReturn(Optional.of(ws));

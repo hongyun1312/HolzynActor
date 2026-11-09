@@ -327,6 +327,8 @@ const projectId = ref(null)
 const projectName = ref('')
 const workflowName = ref('')
 const workflowNodeCount = ref(0)
+/** 工作流节点定义（顺序=执行顺序；来自 GET /api/worldgen/workflows 的 nodes 字段） */
+const workflowNodes = ref([])
 const task = ref(null)         // 最近一次轮询到的任务 VO
 const busy = ref(false)        // 节点操作进行中（防连点）
 const taskDone = ref(false)    // 任务成功 → 展示预览区
@@ -362,12 +364,36 @@ const SECTION_LABELS = {
 // ==================== 计算属性 ====================
 const canSubmit = computed(() => !!(form.premise.trim() && form.genre.trim()) && !submitting.value)
 
-/** 控制台节点列表：已有节点 + 未开始节点占位（总数 = 工作流 nodeCount） */
+/**
+ * 控制台节点列表：已执行节点取任务产物，未执行节点按工作流定义补占位。
+ *
+ * <p>为什么用定义补而不是空占位：空占位只能显示「等待执行」，用户看不出接下来会发生什么；
+ * 有定义就能显示真实阶段名（记录策划/世界骨架/时空/…）。定义缺失（老数据/解析失败）时
+ * 退回旧行为——按 nodeCount 补空占位。</p>
+ */
 const displayNodes = computed(() => {
-  const list = (task.value?.nodes || []).slice()
-  const total = workflowNodeCount.value || list.length
-  for (let i = list.length; i < total; i++) {
-    list.push({ nodeId: '', label: '', status: 'pending' })
+  const nodes = task.value?.nodes || []
+  const defs = workflowNodes.value || []
+  if (!defs.length) {
+    const list = nodes.slice()
+    const total = workflowNodeCount.value || list.length
+    for (let i = list.length; i < total; i++) {
+      list.push({ nodeId: '', label: '', status: 'pending' })
+    }
+    return list
+  }
+  const list = []
+  for (const def of defs) {
+    const hit = nodes.find((n) => n.nodeId && n.nodeId === def.nodeId)
+    if (hit) {
+      list.push({ ...hit, label: hit.label || def.label })
+    } else {
+      list.push({ nodeId: def.nodeId, label: def.label, stepType: def.stepType, status: 'pending' })
+    }
+  }
+  // 定义里没有、任务里却有的节点（老定义/后加节点）：追加在末尾，绝不丢执行记录
+  for (const n of nodes) {
+    if (!defs.some((d) => d.nodeId === n.nodeId)) list.push(n)
   }
   return list
 })
@@ -508,6 +534,7 @@ async function doSubmit() {
     const wf = workflows.value.find((w) => w.code === form.workflowCode)
     workflowName.value = wf?.name || form.workflowCode
     workflowNodeCount.value = wf?.nodeCount || 0
+    workflowNodes.value = wf?.nodes || []
     // ③ 切控制台并开始（SSE + 轮询）
     mode.value = 'console'
     await nextTick()

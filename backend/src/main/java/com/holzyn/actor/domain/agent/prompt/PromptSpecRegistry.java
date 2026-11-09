@@ -108,6 +108,10 @@ public class PromptSpecRegistry {
         // 世界观+角色核心卡+当前世界动态+当前状态）
         register("plan_day", 2, PromptContractType.SCHEMA_JSON, 400, 0.4);
         register("plan_replan", 2, PromptContractType.SCHEMA_JSON, 400, 0.4);
+        // 时间性探针（temporal_probe，时间性验证）：以角色身份回答否定状态/时间回溯/
+        // 因果账本问题。0.3 / 400——判定题要稳（高温会让模型顺着问题编），输出是
+        // {current_location, assumptions[], answer, confidence} 短 JSON，400 token 足够。
+        register("temporal_probe", 1, PromptContractType.SCHEMA_JSON, 400, 0.3);
         // v2（2026-10-10 批 5 世界与叙事）：目标生成前置 段1A+1C+2D+2E（memoryChainContext）
         register("goal_gen", 2, PromptContractType.SCHEMA_JSON, 1024, 0.5);
         // v2（2026-10-10 批 4 记忆与反思链）：反思输入前置 段1A+1C+2D+2E（段 2F 对齐）
@@ -187,6 +191,9 @@ public class PromptSpecRegistry {
         // 单段产出 5-6 维并要求"具体到可感知细节"，1600 会把细节压回去。
         register("persona_bootstrap_fill_a", 1, PromptContractType.SCHEMA_JSON, 1800, 0.4);
         register("persona_bootstrap_fill_b", 1, PromptContractType.SCHEMA_JSON, 1800, 0.5);
+        // 逐维建档（缓存友好版）：一次只产 1 维，输出量约为整段的 1/5~1/6，上限 1200 足够写满一维；
+        // 温度 0.45 取两段之间的中值，兼顾耦合维的锚定与非耦合维的个体化。
+        register("persona_dim_generate", 1, PromptContractType.SCHEMA_JSON, 2000, 0.45);
 
         // 玩家 persona 六维 AI 补充生成（player_profile_gen，新用户引导「我的形象」页）：
         // 输入=一段自我介绍，输出={identity,background,personality,voice,goals,ability} 六维 JSON
@@ -374,6 +381,13 @@ public class PromptSpecRegistry {
         // 篇幅收敛（512=多角色各 1~3 条要点足够）。SCHEMA_JSON（jsonMode=true）只输出 relations 数组；
         // 运行时由 DialogueConsolidationService 组装（会话角色清单 + 当前关系 + 最近对话窗）。
         register("dialogue_consolidation", 1, PromptContractType.SCHEMA_JSON, 512, 0.3);
+        // dialog_digest（对话回写）：一次调用双输出——关系/记忆 + 强声明（claims）。
+        // 低温（0.2）压发散；800 覆盖多角色 memory_points + ≤3 条 claims。运行时由
+        // DialogDigestService 组装（参与者 + 已知事实清单 + 最近 40 条对话），jsonMode=true。
+        register("dialog_digest", 1, PromptContractType.SCHEMA_JSON, 800, 0.2);
+        // action_adjudicate（行为裁决）：规则 UNSURE 时的一次闭集裁决（三态 + ≤4 效果草稿）。
+        // 温度 0：同一上下文必须可复现；500 覆盖 observedText + effects，jsonMode=true。
+        register("action_adjudicate", 1, PromptContractType.SCHEMA_JSON, 500, 0.0);
     }
 
     /** 登记一条场景规格（version=1）。 */

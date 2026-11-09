@@ -335,10 +335,15 @@ class WorldOutlookServiceTest {
         assertNull(service.outlookSegment(100L), "关 → 段 null");
     }
 
-    /** 世界时钟不可用（null）→ 不缓存，每次重算（多次调用均有效）。 */
+    /**
+     * 世界时钟不可用（null）→ 按 FALLBACK_TTL_MS（300s）兜底缓存，TTL 内复用、不重复烧 AI。
+     * <p>：修复 world_outlook 风暴——旧实现 gameDay 为 null 时每个角色每个 tick 都重生成
+     * 同一段"未来一天世界走向"，实测 4 分钟 105 次；现改为单飞 + TTL 兜底复用，
+     * 需要强制重建走 {@link WorldOutlookService#clearCache()}。</p>
+     */
     @Test
-    void outlookSegmentWithoutClockRebuildsEachTime() throws Exception {
-        // 不注入 worldClockService（null）→ gameDay() 返回 null → 不缓存
+    void outlookSegmentWithoutClockReusesWithinTtl() throws Exception {
+        // 不注入 worldClockService（null）→ gameDay() 返回 null → 走 TTL 兜底缓存
         when(repo.findByProjectIdOrderByGameDayDescTickTypeAsc(100L)).thenReturn(List.of(
                 snapshot(6L, "daily", stateJson(6L, 88.0, 52.0, 34.0, "天地异象", 0.6)),
                 snapshot(5L, "daily", stateJson(5L, 80.0, 45.0, 30.0, "天地异象", 0.5))));
@@ -359,6 +364,13 @@ class WorldOutlookServiceTest {
         service.outlookSegment(100L);
         service.outlookSegment(100L);
 
+        // TTL 内两次调用只烧一次 AI（旧语义是每 tick 重算 2 次，正是风暴根因）
+        verify(gateway, times(1)).chatCompletion(anyLong(), anyLong(), any(), any());
+
+        service.clearCache();
+        service.outlookSegment(100L);
+
+        // clearCache 后强制重建 → 
         verify(gateway, times(2)).chatCompletion(anyLong(), anyLong(), any(), any());
     }
 

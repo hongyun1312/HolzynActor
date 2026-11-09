@@ -26,9 +26,11 @@ import { nodeSizeOf } from './relationPalette.js'
  * 本模块用<b>固定种子 + 固定迭代次数</b>自己算位置，同一份数据（同项目、同布局、同节点集合）
  * 必然得到同一张图；再配合调用方的 localStorage 缓存，跨会话也稳定。</p>
  *
- * <p>五种布局各司其职（对应五类观察意图）：</p>
+ * <p>六种布局各司其职（对应六类观察意图）：</p>
  * <ul>
- *   <li><b>community</b>（默认）：圈子分区总览——各圈领地按成员数铺成整齐网格，圈内用黄金角
+ *   <li><b>nebula</b>（默认·星海）：每个圈子是一小团星云，星点散落其中；唯一支持
+ *       「拖一颗星、两跳内的邻居跟着晃」的布局（见 TopologyCanvas 的「星海牵引」一节）；</li>
+ *   <li><b>community</b>：圈子分区总览——各圈领地按成员数铺成整齐网格，圈内用黄金角
  *       螺旋排列 + 重叠松弛；一眼看出「分成了哪几拨人、哪拨人多」；</li>
  *   <li><b>force</b>：种子化力导向（社区引力加权），看整体亲疏结构；</li>
  *   <li><b>concentric</b>：按重要度同心圆，看「这个世界的权力/关注度分布」；</li>
@@ -38,13 +40,16 @@ import { nodeSizeOf } from './relationPalette.js'
  *
  * <p>注意：<b>只有 community / force / lanes 画圈子外框有意义</b>——concentric 与 radial
  * 是按「重要度 / 跳数」重排的，同一个圈子的人会被打散到不同环上，外框只会变成几个穿过整张图的
- * 大椭圆（实测就是这样，圈名还会叠在一起）。哪个布局支持外框见 {@link HULL_LAYOUTS}。</p>
+ * 大椭圆（实测就是这样，圈名还会叠在一起）；nebula 的星云本身就是「圈子」的形状，
+ * 再套一圈虚线外框会把散落的星切成一块块规整的领地，反而毁了星海的观感。
+ * 哪个布局支持外框见 {@link HULL_LAYOUTS}。</p>
  *
  * <p>纯函数（无 DOM、无 G6、无随机源），可在 Node 里直接断言「同输入 → 逐像素同输出」。</p>
  */
 
 /** 布局 ID → 中文名（工具栏切换与缓存键展示用） */
 export const LAYOUT_LABEL = {
+  nebula: '星海',
   community: '圈子分区',
   force: '关系力导',
   concentric: '重要度同心',
@@ -52,8 +57,14 @@ export const LAYOUT_LABEL = {
   lanes: '圈子泳道'
 }
 
-/** 全部布局 ID（顺序即工具栏顺序） */
-export const LAYOUT_IDS = ['community', 'force', 'concentric', 'radial', 'lanes']
+/**
+ * 全部布局 ID（顺序即工具栏顺序）。
+ *
+ * <p>nebula（星海）排第一个并默认选中：它是唯一带「拖拽牵引」的一档，
+ * 也是这个页面最想给人的第一印象——一村子的人散成几团星云，碰一颗星，
+ * 它附近的星会跟着晃。其余五档保持原有的整齐排版（看结构用）。</p>
+ */
+export const LAYOUT_IDS = ['nebula', 'community', 'force', 'concentric', 'radial', 'lanes']
 
 /**
  * 会画圈子外框的布局。
@@ -139,6 +150,9 @@ export function computeLayout({ nodes = [], edges = [], clusters = [], layout = 
 
   let positions
   switch (layout) {
+    case 'nebula':
+      positions = nebulaLayout(nodes, clusters, { rand, gap, sizeOf })
+      break
     case 'force':
       positions = forceLayout(nodes, edges, clusters, { rand, gap, sizeOf })
       break
@@ -212,6 +226,72 @@ function communityLayout(nodes, clusters, ctx) {
     const center = centers[i]
     disc.offsets.forEach(o => {
       positions[o.id] = { x: center.x + o.x, y: center.y + o.y }
+    })
+  })
+  return positions
+}
+
+/**
+ * 星海布局（默认）：每个圈子一小团星云，星点散落其中。
+ *
+ * <p>它和「圈子分区」用的是同一份圈子结构，差别全在<b>质感</b>：分区布局要的是
+ * 「一眼能数清哪几拨人」，所以圈内是黄金角螺旋（整齐的同心排列）；星海要的是
+ * 「一村子的人各自散落在夜空里」，所以圈内改成<b>按面积的随机散布</b>——
+ * 半径按 sqrt(t) 分布（中心密、边缘疏，像真实星团），角度叠一个种子抖动，
+ * 团心也从网格里再抖一下，避免看起来像九宫格。</p>
+ *
+ * <p>约定位移：团心仍走 {@link gridCenters}（网格比圆环紧凑，缩放不会被压得太小），
+ * 抖动幅度只有 0.16 个格距——再大就会把相邻两团推到一起，被 relaxOverlaps 拉开后
+ * 反而变成一条歪歪扭扭的链，既不像星云也不像分区。</p>
+ *
+ * <p>节点顺序里主角/高重要度排在前面 → 落在更靠团心的位置；这与「重要人物是团里的亮星」
+ * 的直觉一致，也让缩小时最先被看到的仍是他们。</p>
+ *
+ * @param {Array} nodes 节点
+ *
+ * @param {Array} clusters 圈子
+ *
+ * @param {object} ctx 上下文（rand/gap/sizeOf）
+ *
+ * @returns {Object} 位置表
+ */
+function nebulaLayout(nodes, clusters, ctx) {
+  const { rand, gap, sizeOf } = ctx
+  const positions = {}
+  const nodeById = new Map(nodes.map(n => [n.id, n]))
+  const list = clusters.length ? clusters : [{ id: 'all', members: nodes.map(n => n.id) }]
+
+  // ① 每团星云的半径：按「成员平均占地 × 成员数」折成等面积圆，
+  //    人多的团自然更大；系数 1.05 让边缘的星不至于顶到领地边上。
+  const discs = list.map(cluster => {
+    const members = cluster.members.map(id => nodeById.get(id)).filter(Boolean)
+    const step = members.length
+      ? members.reduce((s, n) => s + sizeOf(n) + gap, 0) / members.length
+      : gap
+    return {
+      id: cluster.id,
+      members,
+      radius: Math.max(52, step * Math.sqrt(members.length) * 1.05)
+    }
+  })
+
+  // ② 团心：网格铺开 + 种子抖动（抖动幅度 0.16 个格距，见上方说明）
+  const cell = 2 * Math.max(...discs.map(d => d.radius), 0) + gap * 1.8
+  const centers = gridCenters(discs.map(d => d.radius), gap * 1.8)
+  discs.forEach((disc, ci) => {
+    const base = centers[ci] || { x: 0, y: 0 }
+    const cx = base.x + (rand() - 0.5) * cell * 0.16
+    const cy = base.y + (rand() - 0.5) * cell * 0.16
+    const order = disc.members.slice().sort((a, b) => (b.isProtagonist ? 1 : 0) - (a.isProtagonist ? 1 : 0)
+      || (b.importance || 0) - (a.importance || 0)
+      || String(a.id).localeCompare(String(b.id)))
+    // ③ 团内散布：半径 sqrt 分布 + 独立抖动，角度叠黄金角与抖动（确定性）
+    order.forEach((n, k) => {
+      const t = order.length === 1 ? 0.2 : (k + 0.4) / order.length
+      const rr = disc.radius * Math.sqrt(t) * (0.66 + rand() * 0.52)
+      const aa = k * GOLDEN_ANGLE + (rand() - 0.5) * 1.2
+      // 纵向压 0.92：画布是横向的，正圆散布会先撞上下边距
+      positions[n.id] = { x: cx + Math.cos(aa) * rr, y: cy + Math.sin(aa) * rr * 0.92 }
     })
   })
   return positions

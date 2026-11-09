@@ -15,11 +15,12 @@
   <div class="world-memory-page">
     <!-- 标题 + 操作（统一页头：图标 + 标题 + 说明 + 右侧操作） -->
     <PageHeader icon="Notebook">
-      <template #default>项目记忆（世界编年史 · 实体状态）</template>
+      <template #default>项目记忆（世界编年史 · 实体状态 · 世界事实 · 物品与装备）</template>
       <template #desc>
         项目记忆 = 世界视角公共记忆（双系统并列）：<b>编年史 L2</b> 记录「世界发生了什么」
         （重要事件即时提炼 + 游戏日 01:00 每日批量提炼 + 巩固补漏）；<b>实体状态 L3</b> 记录
-        地点/人物/势力当前状态（Zep 式失效更新，可查历史版本链）。所有角色经【世界近闻】【世界动态】注入知晓。
+        地点/人物/势力当前状态（Zep 式失效更新，可查历史版本链）；<b>世界事实</b>记录契约、路线、设施、
+        声望等可结算的世界状态（大脑/引擎双权威，可按版本追溯）。所有角色经【世界近闻】【世界动态】注入知晓。
       </template>
       <template #actions>
         <el-button size="small" type="primary" plain @click="openAddChronicle">
@@ -165,6 +166,16 @@
           </div>
         </div>
       </el-tab-pane>
+
+      <!-- ==================== 世界事实 ==================== -->
+      <el-tab-pane label="世界事实" name="fact" lazy>
+        <WorldFactLedgerTab :project-id="projectId" />
+      </el-tab-pane>
+
+      <!-- ==================== 物品与装备（对接） ==================== -->
+      <el-tab-pane label="物品与装备" name="item" lazy>
+        <ItemLedgerTab :project-id="projectId" />
+      </el-tab-pane>
     </PageTabs>
 
     <!-- 编年史详情抽屉 -->
@@ -250,6 +261,8 @@ import {
 } from '@/shared/api'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 import PageTabs from '@/shared/layout/PageTabs.vue'
+import WorldFactLedgerTab from '@/features/worldmemory/components/WorldFactLedgerTab.vue'
+import ItemLedgerTab from '@/features/worldmemory/components/ItemLedgerTab.vue'
 
 const route = useRoute()
 const projectId = Number(route.params.id)

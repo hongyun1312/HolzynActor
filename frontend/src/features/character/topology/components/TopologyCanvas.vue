@@ -28,7 +28,19 @@
     ⑤ 缩放/平移/拖动/右键/悬停全部走 G6 内建行为，事件统一 emit 给工作台。
 -->
 <template>
-  <div ref="rootRef" class="topo-canvas" :class="[variant, { 'is-empty': !hasNodes }]">
+  <div
+    ref="rootRef"
+    class="topo-canvas"
+    :class="[variant, { 'is-empty': !hasNodes, 'is-sky': sky }]"
+    :style="sky ? { background: theme.sky.base } : null"
+  >
+    <!--
+      星海底图（nebula 布局专用）：夜空渐变 + 星云柔光 + 星尘，画在 G6 画布**之下**。
+      为什么单独一层 canvas 而不是 CSS 背景：
+        ① 星云要跟着图的相机走（团心是世界坐标），CSS 做不到；
+        ② 导出 PNG 时可以把「夜空 + 图」叠成一张，CSS 背景进不了 canvas.toDataURL。
+    -->
+    <canvas v-show="sky && hasNodes" ref="skyRef" class="topo-canvas__sky" aria-hidden="true"></canvas>
     <div ref="stageRef" class="topo-canvas__stage"></div>
 
     <!--
@@ -62,6 +74,8 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Graph } from '@antv/g6'
 import { buildCanvasData, createNodeStyle, createEdgeStyle, nodeStateStyles, edgeStateStyles, shouldShowAllEdgeLabels, labelSetOf, tooltipOf } from '../lib/g6Adapter.js'
 import { nodeSizeOf } from '../lib/relationPalette.js'
+import { seededRandom, hashString } from '../lib/deterministicLayout.js'
+import { alphaColor } from '../lib/topologyTheme.js'
 
 const props = defineProps({
   /** 可见节点（已过筛选；normalizeGraph 形状） */
@@ -114,7 +128,19 @@ const props = defineProps({
    * 设下限后默认视图至少放大到该倍数（超出视野的内容靠平移/滚轮查看），
    * 而「自适应视野（回到全图）」走 fitAll()，显式忽略下限真正看全。</p>
    */
-  minFitZoom: { type: Number, default: 0 }
+  minFitZoom: { type: Number, default: 0 },
+  /**
+   * 星海模式（nebula 布局）。
+   *
+   * <p>开启后：夜空底图 + 发光粒子节点 + 「拖一颗星、两跳内的邻居跟着摆」的牵引动效。
+   * 其余布局一律为 false —— 它们要的是干净的结构图，星尘与牵引只会干扰读图。</p>
+   */
+  sky: { type: Boolean, default: false },
+  /**
+   * 星云团（星海底图用）：世界坐标下的团心与半径
+   * `[{ id, x, y, radius, color }]`，由布局结果的 clusters 提供。
+   */
+  clouds: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits([
@@ -164,7 +190,8 @@ function nodeStyleFn() {
   return createNodeStyle({
     theme: props.theme,
     degree: props.degree,
-    visibleLabel: (id) => labelSet.has(id)
+    visibleLabel: (id) => labelSet.has(id),
+    sky: props.sky
   })
 }
 
@@ -173,7 +200,8 @@ function edgeStyleFn() {
   const all = showAllEdgeLabels()
   return createEdgeStyle({
     theme: props.theme,
-    showLabel: () => all
+    showLabel: () => all,
+    sky: props.sky
   })
 }
 
@@ -182,7 +210,7 @@ function nodeOptions() {
   return {
     type: 'circle',
     style: nodeStyleFn(),
-    state: nodeStateStyles(props.theme)
+    state: nodeStateStyles(props.theme, props.sky)
   }
 }
 
@@ -191,7 +219,7 @@ function edgeOptions() {
   return {
     type: 'line',
     style: edgeStyleFn(),
-    state: edgeStateStyles(props.theme)
+    state: edgeStateStyles(props.theme, props.sky)
   }
 }
 
@@ -325,8 +353,11 @@ function createGraph(data) {
     behaviors: [
       'drag-canvas',
       'zoom-canvas',
-      // 自由拖动按需开启：默认关闭，避免用户误拖破坏确定性布局
-      ...(props.draggable ? [{ type: 'drag-element' }] : []),
+      // 自由拖动：星海档必开（拖一颗星带动邻居），其余档跟随「显示选项」的开关。
+      // ⚠ 用 enable 谓词而不是在 behaviors 数组里增删：增删会重建整个画布实例，
+      // 切布局时既掉帧，又会让 G6 插件的延迟回调（小地图的 renderMinimap）打到
+      // 已销毁的实例上抛 "Cannot read properties of undefined (reading 'getData')"。
+      { type: 'drag-element', enable: () => props.sky || props.draggable },
       { type: 'hover-activate', degree: 1, state: 'active', inactiveState: 'inactive' }
     ],
     plugins: allPlugins(data.hulls),
@@ -372,8 +403,16 @@ function bindEvents(g) {
       // 视野档位变化才重算 LOD 标签（避免每次平移都重排标签）
       void applyStyleOptions()
     }
+    // 星海：星云团跟着相机走（合并到下一帧，平移时不会每个事件都重画一次）
+    if (props.sky) scheduleSky()
     emit('viewport-change', { zoom: z, position: g.getPosition() })
   })
+  // 星海牵引：drag-element 负责挪被拖的那颗，这里只登记「谁被拖了/拖完松手了」。
+  // ⚠ 必须无条件注册：画布实例只在主题变化时重建，若按「当前是否星海」决定注册，
+  // 从别的布局切到星海（例如角色页 Tab 默认圈子分区）后就没有牵引，只有节点自己在动。
+  // 两个回调内部都按 props.sky 提前返回，非星海档不会有任何副作用。
+  g.on('node:dragstart', onPullStart)
+  g.on('node:dragend', onPullEnd)
 }
 
 /**
@@ -464,6 +503,15 @@ function signatureOf(list) {
 }
 
 /**
+ * 同步串行化。
+ *
+ * <p>同一 tick 里可能连着发好几次同步：切到星海时「星海开关」和「位置表」两个 watcher
+ * 都会各叫一次，前后两次都去 setData / translate / draw 的话，中间那次的位置与样式会被
+ * 后一次覆盖，画面上就是一次抖动或者停在半路。这里排成队列，后一次永远等前一次收尾。</p>
+ */
+let syncChain = Promise.resolve()
+
+/**
  * 同步数据（自动选择「重建」还是「位移动画」）。
  *
  * @param {object} [opts] 选项
@@ -474,7 +522,22 @@ function signatureOf(list) {
  *
  * @returns {Promise<void>} 完成
  */
-async function sync(opts = {}) {
+function sync(opts = {}) {
+  syncChain = syncChain.then(() => syncNow(opts)).catch((err) => {
+    // 画布被销毁、数据中途换掉都会让 G6 抛错 —— 记一笔即可，不让一次失败卡死后面的同步
+    if (import.meta.env.DEV) console.error('[topology] sync failed', err)
+  })
+  return syncChain
+}
+
+/**
+ * 同步的真实实现（由 {@link sync} 串行调用，不直接对外）。
+ *
+ * @param {object} [opts] 同 sync
+ *
+ * @returns {Promise<void>} 完成
+ */
+async function syncNow(opts = {}) {
   if (!hasNodes.value) {
     destroyGraph()
     return
@@ -490,7 +553,7 @@ async function sync(opts = {}) {
     theme: props.theme
   })
 
-    if (!graph || graph.destroyed) {
+  if (!graph || graph.destroyed) {
     graph = createGraph(data)
     if (!graph) return
     pluginSig = pluginSignature(data.hulls)
@@ -501,6 +564,7 @@ async function sync(opts = {}) {
     // 开发期调试钩子（生产构建下 import.meta.env.DEV 为 false，整段被摇树掉）：
     // 现场验收脚本需要读取真实缩放/元素包围盒来判断"图有没有真的铺满画布"
     if (import.meta.env.DEV) window.__holzynTopo = graph
+    syncSky()
     emit('ready')
     return
   }
@@ -527,8 +591,6 @@ async function sync(opts = {}) {
   } else {
     // 节点集合没变：只更新边与样式（保留用户当前视野，不打断观察）
     graph.setData({ nodes: data.nodes, edges: data.edges })
-    graph.setEdge(edgeOptions())
-    graph.setNode(nodeOptions())
     if (opts.animate) {
       // ⚠ G6 v5 的 Point 类型是 [x, y] 数组（不是 {x,y} 对象）：传对象会在
       // translateNodeTo 里解构失败并抛 "position is not iterable"，动画与后续同步一起中断。
@@ -539,6 +601,13 @@ async function sync(opts = {}) {
       }
       await graph.translateElementTo(moved, true)
     }
+    // ⚠ 样式选项必须在位移动画**之后**再设：setNode/setEdge 内部走 model.refreshData()，
+    // 把全部元素标成「已更新」，而 translateElementTo 的绘制阶段是 stage='translate'
+    // （只认 x/y/z，样式一律忽略）。先设样式的话这批更新会被位移动画消费掉，
+    // 等到 draw() 时变更已空 —— 实测表现就是「切到下一档后节点还是上一档的样式」。
+    // translateElementTo 会等动画结束才 resolve，所以这里设样式不会打断滑动过渡。
+    graph.setEdge(edgeOptions())
+    graph.setNode(nodeOptions())
     await graph.draw()
     // 新装的圈子外框要等一次完整渲染才会画出来（AFTER_RENDER）
     if (pluginChanged) await graph.render()
@@ -548,15 +617,364 @@ async function sync(opts = {}) {
 
   if (opts.fit) await fitView(true)
   await applyStates()
+  // 星海底图跟着「这一轮到底显示谁」重画一次（星云团心来自布局，节点数变了也要换星尘密度）
+  syncSky()
 }
 
-/** 画布尺寸与容器同步 */
+/**
+ * 画布尺寸与容器同步
+ */
 function syncSize() {
   if (!graph || graph.destroyed || !stageRef.value) return
   const w = stageRef.value.clientWidth
   const h = stageRef.value.clientHeight
   if (w < 20 || h < 20) return
   graph.setSize(w, h)
+}
+
+// ==================== 星海底图（nebula 布局专用） ====================
+
+const skyRef = ref(null)
+
+/** 星尘种子：同一张图每次进来星位一致（星空可以很安静，但不该每次眨眼都换位置） */
+const skySeed = computed(() => hashString(props.nodes.map(n => n.id).sort().join('|') + '#' + props.clouds.length))
+
+/** 上次绘制时的「尺寸 + 主题 + 星云」指纹（只在这些真变了的时候整块重画） */
+let skySig = ''
+/** 视口变化时的合并重绘句柄（拖动/缩放一帧最多画一次） */
+let skyRaf = 0
+
+/**
+ * 画星海底图：夜空渐变 → 远处星云 → 团内星云（跟相机）→ 星尘 → 暗角。
+ *
+ * <p>三层各司其职：渐变给「天」，远处星云给色温层次，<b>团内星云</b>才是数据——
+ * 它的圆心来自布局给出的圈子几何，会随缩放/平移跟着图一起走，于是「同一拨人」
+ * 在视觉上真的坐在同一团光里；星尘只负责让大面积深色不显得脏。</p>
+ */
+function paintSky() {
+  const cv = skyRef.value
+  const el = stageRef.value
+  if (!cv || !el) return
+  const w = el.clientWidth || 0
+  const h = el.clientHeight || 0
+  if (w < 20 || h < 20) return
+  const dpr = Math.min(2, window.devicePixelRatio || 1)
+  const pw = Math.round(w * dpr)
+  const ph = Math.round(h * dpr)
+  if (cv.width !== pw || cv.height !== ph) {
+    cv.width = pw
+    cv.height = ph
+  }
+  cv.style.width = `${w}px`
+  cv.style.height = `${h}px`
+  const ctx = cv.getContext('2d')
+  if (!ctx) return
+  const s = props.theme.sky
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+
+  // ① 夜空：斜向渐变（上浅下深），单靠纯色会像一块黑板
+  const base = ctx.createLinearGradient(0, 0, w * 0.12, h)
+  base.addColorStop(0, s.top)
+  base.addColorStop(0.58, s.base)
+  base.addColorStop(1, s.bottom)
+  ctx.fillStyle = base
+  ctx.fillRect(0, 0, w, h)
+
+  const rand = seededRandom(skySeed.value)
+
+  // ② 远处星云（屏幕固定）：只给色温层次，不表达数据
+  for (let i = 0; i < 3; i++) {
+    const cx = w * (0.14 + rand() * 0.72)
+    const cy = h * (0.12 + rand() * 0.72)
+    const r = Math.max(w, h) * (0.34 + rand() * 0.26)
+    const tone = s.clouds[i % s.clouds.length]
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
+    g.addColorStop(0, `rgba(${tone}, ${s.cloudAlpha})`)
+    g.addColorStop(0.55, `rgba(${tone}, ${s.cloudAlpha * 0.34})`)
+    g.addColorStop(1, `rgba(${tone}, 0)`)
+    ctx.fillStyle = g
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2)
+  }
+
+  // ③ 团内星云：世界坐标 → 舞台像素，跟着相机走（这是「圈子」在星海里的化身）
+  if (graph && !graph.destroyed && props.clouds.length) {
+    const zoom = graph.getZoom()
+    const pos = graph.getPosition()
+    for (const c of props.clouds) {
+      if (!c || !c.color) continue
+      const [px, py] = worldToStage({ x: c.x || 0, y: c.y || 0 }, zoom, pos)
+      const r = Math.max(28, (c.radius || 60) * zoom * 1.55)
+      if (px + r < -60 || px - r > w + 60 || py + r < -60 || py - r > h + 60) continue
+      const g = ctx.createRadialGradient(px, py, 0, px, py, r)
+      g.addColorStop(0, alphaColor(c.color, props.theme.isDark ? 0.24 : 0.19))
+      g.addColorStop(0.5, alphaColor(c.color, props.theme.isDark ? 0.12 : 0.09))
+      g.addColorStop(1, alphaColor(c.color, 0))
+      ctx.fillStyle = g
+      ctx.fillRect(px - r, py - r, r * 2, r * 2)
+    }
+  }
+
+  // ④ 星尘：密度按面积给（大画布不空、小画布不乱），大小/亮度遵循幂律——
+  //    真实星空就是这样：绝大多数是暗点，只有极少数亮星。
+  const count = Math.max(40, Math.min(260, Math.round((w * h) / 5200)))
+  for (let i = 0; i < count; i++) {
+    const x = rand() * w
+    const y = rand() * h
+    const t = rand()
+    const r = 0.35 + t * t * 1.5
+    const a = (0.14 + rand() * 0.62) * s.dustAlpha
+    ctx.beginPath()
+    ctx.fillStyle = `rgba(${s.dust}, ${a.toFixed(3)})`
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // ⑤ 暗角：把注意力收回中间（浅色主题反过来压一点灰，避免整块发白）
+  const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.32, w / 2, h / 2, Math.max(w, h) * 0.8)
+  vg.addColorStop(0, 'rgba(0,0,0,0)')
+  vg.addColorStop(1, props.theme.isDark ? 'rgba(0,0,0,.46)' : 'rgba(120,140,170,.16)')
+  ctx.fillStyle = vg
+  ctx.fillRect(0, 0, w, h)
+}
+
+/** 尺寸/主题/星云变化 → 重画（不变则跳过） */
+function syncSky() {
+  if (!props.sky) return
+  const el = stageRef.value
+  if (!el) return
+  const sig = [
+    el.clientWidth, el.clientHeight,
+    props.theme.isDark ? 'd' : 'l',
+    props.nodes.length,
+    props.clouds.map(c => `${c.id}:${Math.round(c.radius || 0)}`).join(',')
+  ].join('|')
+  if (sig === skySig) return
+  skySig = sig
+  paintSky()
+}
+
+/** 视口变化 → 合并到下一帧重画（星云要跟着相机） */
+function scheduleSky() {
+  if (!props.sky || skyRaf) return
+  skyRaf = window.requestAnimationFrame(() => {
+    skyRaf = 0
+    paintSky()
+  })
+}
+
+// ==================== 星海牵引（拖一颗星，两跳内的星跟着摆） ====================
+
+/**
+ * 牵引权重（按跳数）：1 跳明显跟动，2 跳轻微牵连，3 跳以外一律不动。
+ *
+ * <p>为什么不是「全图一起动」：用户的原话是「不要整体都剧烈晃动」。两跳正好覆盖
+ * 「我碰的这个人 + 他的直接关系 + 关系的关系」——看得出的因果，又不会把整张图拖走。</p>
+ */
+const PULL_WEIGHT = [0, 0.46, 0.15]
+
+/**
+ * 各跳的时间常数（秒）：2 跳慢半拍，看起来是「被带着走」而不是整体平移；
+ * 全部是<b>临界阻尼</b>（指数逼近，无过冲），所以松手不会出现果冻式回弹。
+ */
+const PULL_TAU = [0, 0.11, 0.17]
+
+/** 牵引运行时状态 */
+const pull = {
+  /** 是否正被指针拖着（true=拖拽中，false=松手归位中） */
+  active: false,
+  /** 被拖的星 ID（拖拽中由 G6 负责它的位置，本模块只读它的位移） */
+  draggingId: '',
+  /** 当前整体位移（世界坐标） */
+  delta: { x: 0, y: 0 },
+  /** id → { w, tau, home, x, y } */
+  items: new Map(),
+  raf: 0,
+  last: 0,
+  /** 上一帧的 translate 还没画完就不再叠（避免低帧率机器上请求堆积） */
+  inflight: false
+}
+
+/** 每个节点一个固定的时间常数抖动（同一个人每次被带动的手感一致） */
+function pullJitter(id) {
+  return ((hashString(String(id)) % 1000) / 1000)
+}
+
+/**
+ * 以 startId 为心，按 BFS 收集 1~2 跳邻居。
+ *
+ * @param {string} startId 起点
+ *
+ * @returns {Map<string, number>} id → 跳数（起点为 0）
+ */
+function pullDepths(startId) {
+  const adj = new Map()
+  for (const e of props.edges) {
+    if (!adj.has(e.source)) adj.set(e.source, [])
+    if (!adj.has(e.target)) adj.set(e.target, [])
+    adj.get(e.source).push(e.target)
+    adj.get(e.target).push(e.source)
+  }
+  const depth = new Map([[startId, 0]])
+  let frontier = [startId]
+  for (let hop = 1; hop <= 2; hop++) {
+    const next = []
+    for (const id of frontier) {
+      for (const nb of adj.get(id) || []) {
+        if (depth.has(nb)) continue
+        depth.set(nb, hop)
+        next.push(nb)
+      }
+    }
+    frontier = next
+  }
+  return depth
+}
+
+/**
+ * 开始牵引：记录参与节点的主位（home）与当前位，启动缓动循环。
+ *
+ * @param {string} id 被拖的星
+ */
+function beginPull(id) {
+  if (!props.sky || !graph || graph.destroyed || !id) return
+  const homes = props.positions || {}
+  if (!homes[id]) return
+  const depth = pullDepths(id)
+  pull.items.clear()
+  for (const [nid, hop] of depth) {
+    const home = homes[nid]
+    if (!home) continue
+    let cur = null
+    try { cur = graph.getElementPosition(nid) } catch (e) { cur = null }
+    const x = Array.isArray(cur) ? Number(cur[0]) : Number(cur?.x)
+    const y = Array.isArray(cur) ? Number(cur[1]) : Number(cur?.y)
+    pull.items.set(nid, {
+      w: PULL_WEIGHT[hop] || 0,
+      tau: PULL_TAU[hop] * (0.84 + 0.32 * pullJitter(nid)),
+      home: { x: home.x, y: home.y },
+      x: Number.isFinite(x) ? x : home.x,
+      y: Number.isFinite(y) ? y : home.y
+    })
+  }
+  pull.active = true
+  pull.draggingId = id
+  pull.delta.x = 0
+  pull.delta.y = 0
+  pull.last = 0
+  startPullLoop()
+}
+
+/** 启动缓动循环（已在跑则不重复排帧） */
+function startPullLoop() {
+  if (pull.raf) return
+  pull.raf = window.requestAnimationFrame(stepPull)
+}
+
+/**
+ * 缓动循环：把每颗星推向「主位 + 权重 × 位移」。
+ *
+ * <p>用指数逼近而不是弹簧：弹簧在临界阻尼附近仍有可见过冲，用户明确说过不要果冻感；
+ * 指数逼近单调收敛，松手后就是干脆地滑回去。</p>
+ *
+ * @param {number} ts 帧时间戳
+ */
+function stepPull(ts) {
+  pull.raf = 0
+  if (!props.sky || !graph || graph.destroyed) {
+    resetPull(false)
+    return
+  }
+  const dt = pull.last ? Math.min(0.05, Math.max(0.008, (ts - pull.last) / 1000)) : 0.016
+  pull.last = ts
+
+  // 拖拽中：被拖的那颗由 G6 的 drag-element 挪，这里只读它的位移（不覆盖它）
+  if (pull.active && pull.draggingId) {
+    const it = pull.items.get(pull.draggingId)
+    // 筛选/删除可能让被拖的星在循环跑到一半时消失：读不到就当作松手，交给归位逻辑
+    let cur = null
+    try { cur = graph.getElementPosition(pull.draggingId) } catch (e) { cur = null }
+    if (it && Array.isArray(cur)) {
+      it.x = Number(cur[0])
+      it.y = Number(cur[1])
+      pull.delta.x = it.x - it.home.x
+      pull.delta.y = it.y - it.home.y
+    } else {
+      pull.active = false
+      pull.delta.x = 0
+      pull.delta.y = 0
+    }
+  }
+
+  const moved = {}
+  let pending = false
+  for (const [id, it] of pull.items) {
+    const tx = it.home.x + it.w * pull.delta.x
+    const ty = it.home.y + it.w * pull.delta.y
+    const k = 1 - Math.exp(-dt / Math.max(0.02, it.tau))
+    it.x += (tx - it.x) * k
+    it.y += (ty - it.y) * k
+    if (Math.abs(tx - it.x) > 0.1 || Math.abs(ty - it.y) > 0.1) {
+      pending = true
+    } else {
+      it.x = tx
+      it.y = ty
+    }
+    // 拖拽期间跳过被拖的那颗（G6 正在管它），松手后才由这里把它送回主位
+    if (!(pull.active && id === pull.draggingId)) moved[id] = [it.x, it.y]
+  }
+
+  if (Object.keys(moved).length && !pull.inflight) {
+    pull.inflight = true
+    // ⚠ G6 v5 的位置是 [x, y] 数组（传对象会在 translateNodeTo 里解构失败）
+    // catch 兜住「元素已被筛掉」这类瞬时错误，否则一帧失败会让整个循环停摆
+    graph.translateElementTo(moved, false)
+      .catch(() => {})
+      .finally(() => { pull.inflight = false })
+  }
+
+  if (pull.active || pending) startPullLoop()
+  else resetPull(true)
+}
+
+/**
+ * 结束牵引并把所有星送回主位。
+ *
+ * @param {boolean} snap 是否立刻回到主位（销毁/切换布局时用）
+ */
+function resetPull(snap) {
+  if (pull.raf) {
+    window.cancelAnimationFrame(pull.raf)
+    pull.raf = 0
+  }
+  pull.active = false
+  pull.draggingId = ''
+  pull.delta.x = 0
+  pull.delta.y = 0
+  pull.last = 0
+  if (snap && graph && !graph.destroyed) {
+    const homes = {}
+    for (const [id, it] of pull.items) homes[id] = [it.home.x, it.home.y]
+    if (Object.keys(homes).length) graph.translateElementTo(homes, false).catch(() => {})
+  }
+  pull.items.clear()
+}
+
+/** 拖拽开始（G6 的 drag-element 已经在移动节点，这里只做登记） */
+function onPullStart(ev) {
+  if (!props.sky) return
+  const id = String(ev?.target?.id || '')
+  if (id) beginPull(id)
+}
+
+/** 拖拽结束：位移归零 → 循环把整团星滑回主位 */
+function onPullEnd() {
+  if (!props.sky) return
+  if (!pull.active) return
+  pull.active = false
+  pull.delta.x = 0
+  pull.delta.y = 0
+  startPullLoop()
 }
 
 // ==================== 对外能力（工作台通过 ref 调用） ====================
@@ -848,15 +1266,39 @@ async function flashEdges(edgeIds, duration = 1800) {
 /**
  * 导出当前画布为 PNG DataURL。
  *
+ * <p>星海模式走「所见即所得」：夜空底图 + 视口内的图叠成一张。
+ * 不能用 mode=overall —— 那是「整张图（忽略视口）」且底图透明，导出来会是一张
+ * 白底/透明底的普通关系图，夜空与星云全丢。</p>
+ *
  * @returns {Promise<string>} DataURL（失败返回空串）
  */
 async function exportPNG() {
   if (!graph || graph.destroyed) return ''
   try {
-    return await graph.toDataURL({ mode: 'overall', type: 'image/png' })
+    if (!props.sky) return await graph.toDataURL({ mode: 'overall', type: 'image/png' })
+    const shot = await graph.toDataURL({ mode: 'viewport', type: 'image/png' })
+    const img = await loadImage(shot)
+    const cv = document.createElement('canvas')
+    cv.width = img.width || (skyRef.value ? skyRef.value.width : 1200)
+    cv.height = img.height || (skyRef.value ? skyRef.value.height : 800)
+    const ctx = cv.getContext('2d')
+    if (!ctx) return shot
+    if (skyRef.value && skyRef.value.width) ctx.drawImage(skyRef.value, 0, 0, cv.width, cv.height)
+    ctx.drawImage(img, 0, 0, cv.width, cv.height)
+    return cv.toDataURL('image/png')
   } catch (e) {
     return ''
   }
+}
+
+/** DataURL → HTMLImageElement（导出叠图用） */
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('图片解码失败'))
+    img.src = src
+  })
 }
 
 /** 销毁画布实例 */
@@ -874,7 +1316,21 @@ function destroyGraph() {
 /** 主题变化：状态样式与插件配色都烘焙在实例里，直接重建最稳 */
 watch(() => props.theme, () => {
   destroyGraph()
+  skySig = ''
   void nextTick(() => sync({ fit: true }))
+})
+
+/** 星海开关（切布局）：底图重画 + 停掉牵引；否则会残留上一档的光晕与位移 */
+watch(() => props.sky, () => {
+  resetPull(false)
+  skySig = ''
+  void nextTick(() => sync({ fit: false }))
+})
+
+/** 星云团几何变化（筛选/切布局）：底图重画 */
+watch(() => props.clouds, () => {
+  skySig = ''
+  syncSky()
 })
 
 /** 数据/位置/圈子：决定重建还是位移动画 */
@@ -882,6 +1338,8 @@ watch(
   [() => props.nodes, () => props.edges, () => props.clusters, () => props.positions],
   ([, , , newPos], [, , , oldPos]) => {
     const animated = !!newPos && !!oldPos && newPos !== oldPos && props.nodes.length > 0
+    // 位置表换了（切布局/筛选）：先把牵引归零，否则旧的主位会把节点拉住
+    if (animated) resetPull(false)
     void sync({ animate: animated })
   }
 )
@@ -897,11 +1355,12 @@ watch([() => props.selectedNodeId, () => props.selectedEdgeId, () => props.hover
   void applyStates()
 })
 
-/** 拖动开关：行为集合变化只能重建 */
-watch(() => props.draggable, () => {
-  destroyGraph()
-  void nextTick(() => sync({ fit: false }))
-})
+/**
+ * 拖动开关：行为常驻、由 enable 谓词决定是否生效 —— 这里不需要任何动作。
+ *
+ * <p>历史实现是「改开关 → 销毁并重建画布」，代价是每次切换都要重新布局视野，
+ * 而且会踩到 G6 插件的销毁竞态（见 createGraph 的 behaviors 注释）。</p>
+ */
 
 /** 浮层安全边距变化（图例/小地图开合）：只重新居中，不打断用户当前缩放 */
 watch(() => props.insets, () => { void recenterToSafeArea(true) })
@@ -909,9 +1368,11 @@ watch(() => props.insets, () => { void recenterToSafeArea(true) })
 onMounted(async () => {
   await nextTick()
   await sync({ fit: true })
+  syncSky()
   if (stageRef.value) {
     resizeObserver = new ResizeObserver(() => {
       syncSize()
+      syncSky()
       void fitViewIfOverflow()
     })
     resizeObserver.observe(stageRef.value)
@@ -920,6 +1381,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
+  if (skyRaf) { window.cancelAnimationFrame(skyRaf); skyRaf = 0 }
+  resetPull(false)
   destroyGraph()
 })
 
@@ -945,8 +1408,18 @@ defineExpose({
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
 }
-.topo-canvas__stage { width: 100%; height: 100%; }
+.topo-canvas__stage { width: 100%; height: 100%; position: relative; z-index: 1; }
 .topo-canvas.tab .topo-canvas__stage { height: 100%; min-height: 380px; }
+
+/* 星海底图：铺满整块画布、压在 G6 画布之下（G6 的 background 是 transparent，
+   于是夜空、星云、星尘都能透上来；导出 PNG 时也复用这层画布） */
+.topo-canvas__sky {
+  position: absolute;
+  inset: 0;
+  display: block;
+  z-index: 0;
+  pointer-events: none;
+}
 
 /* 小地图：右下角浮动（避开左侧图例与底部状态条）。
    外层壳负责定位与外观，内层只负责装插件画布（插件会覆盖内层的 position）。 */

@@ -352,6 +352,35 @@ class MemoryWorkingServiceTest {
     }
 
     /**
+     * 系统模板句不进 L2——「觅食充饥」「…稍候片刻」是兜底/占位，不是角色想过的事；
+     * 一旦沉淀成长期记忆，每轮检索又会捞回来，形成自我强化的单调循环。
+     */
+    @Test
+    void consolidateSessionDropsRoutineTemplateItems() {
+        LocalDateTime t = LocalDateTime.now();
+        ActorMemoryWorking forage = item(1L, 100L, "npc:3", "auto", "task",
+                "当前行动：觅食充饥", MemoryWorkingService.STATUS_ACTIVE, 5, t);
+        ActorMemoryWorking wait = item(2L, 100L, "npc:3", "auto", "draft",
+                "我见河神庙正有人使用，先在附近稍候片刻，稍后再去", MemoryWorkingService.STATUS_ACTIVE, 5, t);
+        ActorMemoryWorking real = item(3L, 100L, "npc:3", "auto", "draft",
+                "在黑船码头看见账房与人低声议价", MemoryWorkingService.STATUS_ACTIVE, 5, t);
+        when(workingRepository.findBySessionKeyAndStatusAndDeletedOrderByCreatedAtDesc(
+                eq("auto"), eq(MemoryWorkingService.STATUS_ACTIVE), eq(0)))
+                .thenReturn(List.of(forage, wait, real));
+        when(memoryRepository.findByProjectIdAndCharacterRefAndDeletedOrderByCreatedAtDesc(eq(100L), eq("npc:3"), eq(0)))
+                .thenReturn(List.of());
+        when(memoryRepository.findByProjectIdAndCharacterIdAndDeletedOrderByCreatedAtDesc(eq(100L), eq(3L), eq(0)))
+                .thenReturn(List.of());
+
+        int promoted = service.consolidateSession("auto");
+
+        assertEquals(1, promoted, "只有真实经历被提升；模板句直接过期");
+        assertEquals(MemoryWorkingService.STATUS_EXPIRED, forage.getStatus(), "觅食充饥不沉淀");
+        assertEquals(MemoryWorkingService.STATUS_EXPIRED, wait.getStatus(), "稍候片刻占位不沉淀");
+        assertEquals(MemoryWorkingService.STATUS_CONSOLIDATED, real.getStatus(), "真实经历照常巩固");
+    }
+
+    /**
      * 定时巩固扫描：active 超龄项（created_at 超阈值）被巩固；TTL 清理把已过期项置 expired。
      */
     @Test

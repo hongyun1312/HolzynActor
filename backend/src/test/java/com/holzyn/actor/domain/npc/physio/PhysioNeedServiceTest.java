@@ -112,8 +112,13 @@ class PhysioNeedServiceTest {
                 st, props.getPhysio(), 12, List.of("云来茶馆", "青禾集市"), new Random(1));
         assertEquals(1, c.size());
         assertEquals("eat", PhysioNeedService.actionTypeOf("饥饿"), "候选行动类型与恢复关键词对齐");
-        assertTrue(c.get(0).action().contains("用餐") || c.get(0).action().contains("充饥"));
-        assertEquals("云来茶馆", c.get(0).target(), "地点关键词匹配（茶馆→eat）");
+        // 集市也算吃饭的地方（集市上有柜台，得掏钱买），所以目标可能是茶馆也可能是集市。
+        // 去集市时的行动文本是「前往青禾集市买些吃食」——文本里必须有「买」字，
+        // 否则裁决器不会走 TRADE，人到了集市也只是站着（整世界长跑实测 0 笔成交）。
+        assertTrue(c.get(0).action().contains("用餐") || c.get(0).action().contains("充饥")
+                || c.get(0).action().contains("买些吃食"), "行动文本要能命中恢复关键词或「买」");
+        assertTrue(List.of("云来茶馆", "青禾集市").contains(c.get(0).target()),
+                "地点关键词匹配（茶馆/集市 → eat）");
         assertTrue(c.get(0).questionText().contains("倾向"), "权重作「（倾向 x%）」情境信息");
         assertNotNull(c.get(0).weight());
         assertTrue(c.get(0).weight() > 0 && c.get(0).weight() <= 1, "权重=需求缺口比例");

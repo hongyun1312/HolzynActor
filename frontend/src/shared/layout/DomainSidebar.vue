@@ -204,11 +204,13 @@ function statusType(s) {
 </script>
 
 <style scoped>
-/* 悬浮岛侧栏：圆角卡片 + 留白 + 柔和阴影；宽度由 --shell-side-w 驱动（可拖拽记忆） */
+/* 悬浮岛侧栏：圆角卡片 + 四边等距留白 + 柔和阴影；宽度由 --shell-side-w 驱动（可拖拽记忆）。
+   留白用 margin 简写一次吃满四边：左/右必须相等（旧版只给左边距，右缘直接贴内容区，
+   「两侧留白一致」不成立）；上/下也同值，悬浮岛才是同一张卡片。 */
 .domain-sidebar {
-  width: var(--shell-side-w, 210px);
+  width: var(--shell-side-w, 232px);
   flex-shrink: 0;
-  margin: var(--shell-side-margin, 12px) 0 var(--shell-side-margin, 12px) var(--shell-side-margin, 12px);
+  margin: var(--shell-side-margin, 12px);
   background: var(--bg-nav);
   border: 1px solid var(--border-l1);
   border-radius: var(--radius-lg, 16px);
@@ -222,49 +224,58 @@ function statusType(s) {
 /* 拖拽过程中禁用宽度过渡，避免跟手感变差 */
 :global(body.is-resizing) .domain-sidebar { transition: none; }
 
-/* 侧栏头部：左侧「导航」小标题 + 右侧折叠按钮；收起为图标栏时只留居中按钮 */
+/* 侧栏头部：左侧「导航」小标题 + 右侧折叠按钮；收起为图标栏时只留居中按钮。
+   高度与行高体系分开（头部是区域标题，不是可点行）。
+   左右内边距都取「侧栏内留白 + 行内边距」= 18px：与行内容（图标左缘 / 折叠箭头右缘）精确对齐，
+   两端同为 18 也就满足「侧栏两侧留白一致」——旧版左 12 / 右 8 两头都不齐。 */
 .side-headbar {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 34px;
-  padding: 0 8px 0 12px;
+  height: var(--side-head-h, 44px);
+  padding: 0 calc(var(--side-inset, 8px) + var(--side-pad-x, 10px));
 }
 .side-headbar.is-icon-only { justify-content: center; padding: 0; }
 .side-headbar-title {
-  font-size: 0.72rem;
+  /* 与分组头同字号（同为「区域标签」），随三档密度一起变，不写死 */
+  font-size: var(--side-font-head, 12px);
   font-weight: 600;
-  letter-spacing: .08em;
+  letter-spacing: .06em;
   color: var(--text-tertiary);
   user-select: none;
 }
+/* 折叠按钮：32×32 热区（≥ WCAG 2.5.8 的 24，也方便鼠标点），圆角与导航行同刻度 */
 .side-collapse-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: none;
-  border-radius: var(--radius-sm, 8px);
+  border-radius: var(--side-radius, 8px);
   background: transparent;
   color: var(--text-tertiary);
   cursor: pointer;
   transition: background .15s var(--dsw-ease), color .15s var(--dsw-ease);
 }
 .side-collapse-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.side-collapse-btn:focus-visible { outline: none; box-shadow: var(--focus-ring-inset); }
 
-/* 宽度拖拽手柄（贴在右缘的 6px 热区） */
+/* 宽度拖拽手柄：贴在右缘的 8px 热区（旧 6px，鼠标要瞄得很准；右侧留白 12 足够放宽） */
 .side-resize {
   position: absolute;
-  top: 0; right: -3px; bottom: 0;
-  width: 6px;
+  top: 0; right: -4px; bottom: 0;
+  width: 8px;
   cursor: col-resize;
   z-index: 2;
 }
 .side-resize:hover { background: var(--accent-soft); }
 
-.side-status { display: flex; align-items: center; gap: 8px; padding: 0 10px; flex-wrap: wrap; }
-.status-count { font-size: 0.78rem; color: var(--text-tertiary); }
+/* 项目状态小卡：左内边距由 SideNav 的 .side-foot 统一给（与导航行图标左缘对齐），
+   这里不再叠一层，否则底部小卡会比导航行多缩进 10px、两侧留白也不对称 */
+.side-status { display: flex; align-items: center; gap: var(--side-gap, 10px); flex-wrap: wrap; }
+.side-status :deep(.el-tag) { border-radius: 6px; }
+.status-count { font-size: var(--side-font-sub, 11px); color: var(--text-tertiary); }
 </style>

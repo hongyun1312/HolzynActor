@@ -18,6 +18,8 @@
 
 package com.holzyn.actor.domain.world.service;
 
+import com.holzyn.actor.domain.market.pricing.MarketPricing;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -58,10 +60,6 @@ public final class MacroEconomyEngine {
                                 List<String> events) {
     }
 
-    /** 粮价因子钳制区间 */
-    private static final double PRICE_FACTOR_MIN = 0.6;
-    private static final double PRICE_FACTOR_MAX = 3.0;
-
     /** 库存缓冲中性天数（≥此值=充足，&lt;此值=告急陡升；与 famine-price-factor 阈值同口径） */
     private static final double BUFFER_NEUTRAL_DAYS = 30.0;
 
@@ -77,19 +75,13 @@ public final class MacroEconomyEngine {
         double production = in.grainProductionBase() * (1.0 + jitter * 0.2) * seasonFactor;
 
         // ② 粮价（流量因子 × 缓冲因子；需求随市集活跃度微调——贸易入账→需求→价格可归因链）
+        // 公式唯一源在 MarketPricing：宏观粮价与单件物品市场必须同形，
+        // 否则同一世界会出现两套经济学（AGENTS §8.1.7 跨阶段共享数值同源）。
         double consumption = in.population() * in.perCapitaConsumption();
         double demand = consumption * (0.95 + in.prevMarketActivity() / 100.0 * 0.1);
         double flowCover = demand <= 0 ? 1.0 : production / demand;
-        double flowFactor = clamp(1.0 + (1.0 - flowCover) * 0.8, 0.85, 1.6);
         double bufferDays = demand <= 0 ? BUFFER_NEUTRAL_DAYS : in.grainStock() / demand;
-        double bufferFactor;
-        if (bufferDays >= BUFFER_NEUTRAL_DAYS) {
-            bufferFactor = clamp(1.0 - (bufferDays - BUFFER_NEUTRAL_DAYS) / 500.0, 0.7, 1.0);
-        } else {
-            // 告急：每少 1 日缓冲 +5%（0 日 → 2.5 倍）
-            bufferFactor = 1.0 + (BUFFER_NEUTRAL_DAYS - bufferDays) / 20.0;
-        }
-        double priceFactor = clamp(flowFactor * bufferFactor, PRICE_FACTOR_MIN, PRICE_FACTOR_MAX);
+        double priceFactor = MarketPricing.priceFactor(flowCover, bufferDays, BUFFER_NEUTRAL_DAYS);
         double price = in.priceBase() * priceFactor;
         double priceChange = in.prevPrice() > 0 ? Math.abs(price - in.prevPrice()) / in.prevPrice() : 0.0;
 

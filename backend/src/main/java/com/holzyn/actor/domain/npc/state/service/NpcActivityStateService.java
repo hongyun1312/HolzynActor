@@ -304,7 +304,8 @@ public class NpcActivityStateService {
             if (s != null && !s.isEmpty()) {
                 st.setActivityState(s);
             }
-            st.setLastAction(blankToNull(lastAction));
+            st.setLastAction(blankToNull(com.holzyn.actor.domain.agent.runtime.DecisionLedgerService
+                    .cleanActionText(lastAction)));
             stateRepository.save(st);
         } catch (Exception e) {
             log.debug("[作息运行态] 写入活动状态失败（不阻断调度）: project={} ref={} : {}",
@@ -332,7 +333,8 @@ public class NpcActivityStateService {
             if (st == null) {
                 return;
             }
-            st.setLastAction(blankToNull(lastAction));
+            st.setLastAction(blankToNull(com.holzyn.actor.domain.agent.runtime.DecisionLedgerService
+                    .cleanActionText(lastAction)));
             stateRepository.save(st);
         } catch (Exception e) {
             log.debug("[作息运行态] 写入最近行动失败（不阻断主流程）: project={} ref={} : {}",

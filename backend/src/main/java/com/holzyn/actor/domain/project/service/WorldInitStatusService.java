@@ -186,6 +186,13 @@ public class WorldInitStatusService {
             StepState state = states.get(step.code());
             String status = state == null || state.status == null
                     ? WorldInitStepVO.STATUS_PENDING : state.status;
+            String orphanMessage = null;
+            if (WorldInitStepVO.STATUS_RUNNING.equals(status) && !WorldInitService.isInitRunning(projectId)) {
+                // 存档里的 RUNNING 但没有对应执行线程：进程退出/后端重启/线程死亡。若不改判，
+                // 界面会永久显示「正在执行…」且重试不可用（「卡在角色卡」的第二种成因）。
+                status = WorldInitStepVO.STATUS_FAILED;
+                orphanMessage = "上次执行被中断（应用退出或后端重启），请重新执行本步";
+            }
             String toneSkip = toneSkipMessage(projectId, step);
             if (toneSkip != null && WorldInitStepVO.STATUS_PENDING.equals(status)) {
                 // 档位决定这一步"本世界不需要"：直接呈现为已跳过（不是失败、也不拉低完成度）
@@ -200,7 +207,7 @@ public class WorldInitStatusService {
             }
             WorldInitStepVO vo = WorldInitStepVO.of(step, status, satisfied,
                     state == null || state.count == null ? 0 : state.count,
-                    state == null ? null : state.message,
+                    orphanMessage != null ? orphanMessage : (state == null ? null : state.message),
                     state == null || state.attempts == null ? 0 : state.attempts,
                     state == null ? null : state.finishedAt);
             steps.add(vo);
@@ -273,6 +280,11 @@ public class WorldInitStatusService {
                     return settingReady(projectId);
                 case LOCATIONS:
                     return worldLocationRepository.countByProjectId(projectId) > 0;
+                case CAST:
+                    // 「生成角色」的产物就是角色行本身：只要项目里已有特殊角色（手工建或 AI 生成），
+                    // 本步即视为满足——否则老世界（CAST 步骤诞生前就建好的角色）会被判「未完成」，
+                    // 每次打开初始化向导都提示补一步已经做过的事。
+                    return characterRepository.countByProjectIdAndTypeAndDeleted(projectId, NpcRefs.TYPE_SPECIAL, 0) > 0;
                 case CHARACTERS:
                     return characterRepository.countByProjectIdAndDeleted(projectId, 0) > 0;
                 case NPCS:

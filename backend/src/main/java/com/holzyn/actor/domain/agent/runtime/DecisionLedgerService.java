@@ -67,6 +67,70 @@ public class DecisionLedgerService {
     private static final int ACTION_TEXT_MAX = 255;
 
     /**
+     * 回填「决策落点解析留痕」（三方对账）。
+     *
+     * <p><b>为什么要回填而不是一次写完</b>：AI 调用的台账行在**模型返回时**就落了，而落点解析
+     * 发生在**行动执行时**（引用 → 要素/地点/角色 → 合法落点）。两者之间隔着一次执行，只能分两步写。</p>
+     *
+     * <p><b>为什么按「当天台账里该角色的最后一行」定位</b>：同一角色同一游戏秒可能有多条决策
+     * （引擎 tick / 刺激 / 对话后），而真正被执行的是最后一条。按 id 取最后一行与执行语义一致；
+     * 找不到就静默跳过——留痕是观测旁路，不能反过来阻断行动。</p>
+     *
+     * @param projectId    项目 ID
+     *
+     * @param characterRef 统一角色引用（前缀不敏感：{@code npc:12} 与 {@code special:12} 视为同一角色）
+     *
+     * @param gameSecond   决策感知时刻（游戏秒，可空）
+     *
+     * @param resolvedJson 解析留痕 JSON
+     */
+    @Transactional
+    public void attachResolved(Long projectId, String characterRef, Long gameSecond, String resolvedJson) {
+        if (projectId == null || characterRef == null || resolvedJson == null) {
+            return;
+        }
+        try {
+            Long day = gameSecond == null ? null : Math.floorDiv(gameSecond, 86400L);
+            if (day == null) {
+                return;
+            }
+            List<ActorDecisionLog> rows =
+                    decisionLogRepository.findByProjectIdAndGameDayOrderByIdAsc(projectId, day);
+            ActorDecisionLog hit = null;
+            for (ActorDecisionLog r : rows) {
+                if (sameCharacter(characterRef, r.getCharacterRef())) {
+                    hit = r;
+                }
+            }
+            if (hit == null) {
+                return;
+            }
+            hit.setResolvedJson(resolvedJson);
+            decisionLogRepository.save(hit);
+        } catch (Exception e) {
+            log.warn("[决策台账] 落点留痕回填失败（隔离继续）: project={} ref={} : {}",
+                    projectId, characterRef, e.getMessage());
+        }
+    }
+
+    /** 角色引用比对：前缀（special:/crowd:/npc:）不敏感，只认尾部 id。 */
+    private static boolean sameCharacter(String a, String b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a.equals(b)) {
+            return true;
+        }
+        return tailId(a).equals(tailId(b));
+    }
+
+    /** 取「:」之后的 id 片段（无前缀返回原串）。 */
+    private static String tailId(String ref) {
+        int at = ref.lastIndexOf(':');
+        return at < 0 ? ref : ref.substring(at + 1);
+    }
+
+    /**
      * 落一个决策点台账行（AI/程序化兜底/预算耗尽降级/决策缺失 共用）。
      * <p>写入方：{@code AgentRuntime} 决策循环（engine_tick/manual/stimulus 等）与
      * {@code WorldEngine}（决策缺失）。轻量短事务；失败不阻断主流程（台账是观测旁路）。</p>
@@ -101,13 +165,34 @@ public class DecisionLedgerService {
             row.setGameSecond(gameSecond);
             row.setGameDay(gameSecond == null ? null : Math.floorDiv(gameSecond, 86400L));
             row.setDecisionSource(effective.name());
-            row.setActionText(truncate(actionText, ACTION_TEXT_MAX));
+            row.setActionText(truncate(cleanActionText(actionText), ACTION_TEXT_MAX));
             row.setTriggerType(triggerType);
             decisionLogRepository.save(row);
         } catch (Exception e) {
             log.warn("[决策台账] 决策点台账写入失败（隔离继续）: project={} ref={} : {}",
                     projectId, characterRef, e.getMessage());
         }
+    }
+
+    /**
+     * 动作文本反 JSON 泄漏（修）。
+     * <p>缺陷来源：实测 120 条动作里有 1 条把整段 {@code {"action": "..."}} 当动作存下——
+     * 模型返回嵌套结构时，{@code decision.get("action")} 拿到的是 Map/JSON 串，{@code String.valueOf}
+     * 直接落库，台账与「意图可溯性」样本被污染。此处只做<b>清洗</b>不作语义判断：
+     * 是 JSON 就抽 {@code action/description/summary/type} 里的第一个非空字符串；抽不到则丢弃
+     * （宁可空串，也不把原始 JSON 当人类语言存进台账）。</p>
+     *
+     * @param raw 原始动作文本（可空）
+     *
+     * @return 可直接落库的动作文本（可能为空串）
+     */
+    public static String cleanActionText(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return raw;
+        }
+        // 规则收口：解包逻辑只有一份，见 com.holzyn.actor.common.ActionTexts；
+        // 本方法保留为台账侧入口（既有调用方/单测零改动）。
+        return com.holzyn.actor.common.ActionTexts.unwrap(raw);
     }
 
     /**

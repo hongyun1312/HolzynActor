@@ -60,6 +60,16 @@ const MINUTES_PER_SECOND = 1
  */
 const GAME_SECONDS_PER_REAL_SECOND = MINUTES_PER_SECOND * 60
 
+/**
+ * 单次快照允许向前外推的上限（游戏秒）= 1 个引擎 tick（感知周期 5 游戏分钟）。
+ *
+ * <p>为什么必须有这个上限：两次快照之间（5 秒一次轮询）前端只能靠本地时间往前推。
+ * 一旦标签页被切到后台、浏览器降频、或者接口卡住，无界外推会把人推到轨迹外面甚至推到
+ * 「到点之后」，回来时表现为「瞬移」。钳到 1 个 tick 之后，任何迟到都会被下一次快照纠正，
+ * 而且「滞后」从此是一个可断言的数字（≤300 游戏秒），不再是一句感觉。</p>
+ */
+const MAX_EXTRAPOLATE_GAME_SECONDS = 300
+
 /** 角色重绘节流（毫秒）：点跟着时钟走，不需要每帧重画。 */
 const CHAR_TICK_MS = 120
 
@@ -572,6 +582,10 @@ export class MapStage {
     this._serverGameSecond = gs
     this._serverAt = nowMs()
     this._clockPaused = !!clock?.paused
+    // 倍速以服务端为准（rate=1 真实秒推进多少游戏秒）。写死 60 的后果是：世界按 rate=24
+    // 走时前端快 2.5 倍，人已经跑到轨迹前面，看起来像「走到一半突然跳回」。
+    const rate = Number(clock?.rate)
+    this._clockRate = Number.isFinite(rate) && rate > 0 ? rate : GAME_SECONDS_PER_REAL_SECOND
     this.gameMinute = ((gs / 60) % 1440 + 1440) % 1440
   }
 
@@ -615,7 +629,9 @@ export class MapStage {
   /** 此刻的游戏秒（暂停则冻结在快照锚点）。 */
   currentGameSecond() {
     if (this._clockPaused || !this._serverAt) return this._serverGameSecond
-    return this._serverGameSecond + ((nowMs() - this._serverAt) / 1000) * GAME_SECONDS_PER_REAL_SECOND
+    const rate = Number.isFinite(this._clockRate) ? this._clockRate : GAME_SECONDS_PER_REAL_SECOND
+    const elapsed = ((nowMs() - this._serverAt) / 1000) * rate
+    return this._serverGameSecond + Math.min(Math.max(0, elapsed), MAX_EXTRAPOLATE_GAME_SECONDS)
   }
 
   /** 启动定时器（节流重绘；不占渲染帧）。 */
@@ -660,7 +676,12 @@ export class MapStage {
       const points = path.points
       const depart = Number(path.departGameSecond)
       const arrive = Number(path.arriveGameSecond)
-      const total = polylineLength(points)
+      // 归一化长度必须是**服务端落库的那个数**（lengthM）。服务端已把它改成
+      // 「按落库折线实测」，与本地 polylineLength(points) 逐位相等；这里仍优先读它，
+      // 是为了让「谁改了取整口径」在验收里立刻暴露，而不是被本地的自算悄悄盖住。
+      const declared = Number(path.lengthM)
+      const measured = polylineLength(points)
+      const total = Number.isFinite(declared) && declared > 0 ? declared : measured
       if (!Number.isFinite(total) || total <= 0) continue
       const span = Math.max(1, (Number.isFinite(arrive) ? arrive : depart) - (Number.isFinite(depart) ? depart : 0))
       const t = Math.max(0, Math.min(1, (gs - (Number.isFinite(depart) ? depart : 0)) / span))

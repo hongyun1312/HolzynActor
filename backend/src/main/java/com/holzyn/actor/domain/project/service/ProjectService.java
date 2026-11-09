@@ -30,6 +30,7 @@ import com.holzyn.actor.domain.world.model.WorldCategory;
 import com.holzyn.actor.domain.world.model.WorldTone;
 import com.holzyn.actor.common.PageResult;
 import com.holzyn.actor.domain.project.vo.ProjectVO;
+import jakarta.annotation.PreDestroy;
 import com.holzyn.actor.domain.world.vo.WorldSettingVO;
 import com.holzyn.actor.domain.npc.profile.repository.ActorCharacterRepository;
 import com.holzyn.actor.domain.project.repository.ActorProjectRepository;
@@ -45,6 +46,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 项目与世界观业务服务（A-）。
@@ -66,6 +73,29 @@ public class ProjectService {
     @org.springframework.context.annotation.Lazy
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.holzyn.actor.domain.world.service.WorldCommonKnowledgeService worldCommonKnowledgeService;
+
+    /**
+     * 世界观保存后的「知识同步 + 世界常识生成」专用执行器（虚拟线程，随服务关闭）。
+     *
+     * <p><b>为什么需要独立线程</b>：这两步里含 embedding / 大模型调用，实测 7KB 设定一次 78.9 秒；
+     * 若在保存请求线程上（含 {@code afterCommit} 回调）同步执行，HTTP 响应要等它跑完才发，
+     * 前端 axios 全局 10 秒超时直接判失败，后续「写世界名/简介」「进第三步」全部不执行。</p>
+     *
+     * <p>字段已初始化 → 不进 Lombok {@code @RequiredArgsConstructor}，构造器签名不变。</p>
+     */
+    private final ExecutorService knowledgeSyncExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
+    /**
+     * 每个项目「还有一轮保存等待处理」的标记（true = 需要再跑一轮）。
+     *
+     * <p>为什么需要：{@link WorldKnowledgeSyncService#syncWorldSetting} 按标题 upsert 做到幂等，
+     * 但两条并发跑会各自读到「标题不存在」→ 各插一份重复文档（实测两个并发任务插出 2 份
+     * 「世界设定·地理」）。串行化 + 合并排队既能去重，也能保证合并后读到的总是最新设定。</p>
+     */
+    private final Map<Long, AtomicBoolean> knowledgeSyncPending = new ConcurrentHashMap<>();
+
+    /** 正在执行知识同步的项目集合（保证同项目串行）。 */
+    private final Set<Long> knowledgeSyncRunning = ConcurrentHashMap.newKeySet();
 
     /**
      * 目录库索引 DAO（{@code actor_project} 展示列的唯一写入口）。
@@ -308,35 +338,92 @@ public class ProjectService {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
-                        try {
-                            worldKnowledgeSyncService.syncWorldSetting(userId, projectId);
-                        } catch (Exception e) {
-                            log.warn("[世界设定同步] 提交后同步失败（可手动补建）: 项目={} : {}", projectId, e.getMessage());
-                        }
-                        // 世界常识摘要（V2.0 段 1A）：依最新世界观生成/更新 300-500 字精炼常识
-                        if (worldCommonKnowledgeService != null) {
-                            try {
-                                worldCommonKnowledgeService.generate(userId, projectId);
-                            } catch (Exception e) {
-                                log.warn("[世界常识] 提交后生成失败（注入回退截断拼装）: 项目={} : {}", projectId, e.getMessage());
-                            }
-                        }
+                        submitKnowledgeSync(userId, projectId);
                     }
                 });
             } else {
-                // 无事务上下文（防御）：直接同步
-                worldKnowledgeSyncService.syncWorldSetting(userId, projectId);
-                if (worldCommonKnowledgeService != null) {
-                    try {
-                        worldCommonKnowledgeService.generate(userId, projectId);
-                    } catch (Exception e) {
-                        log.warn("[世界常识] 无事务直接生成失败（注入回退截断拼装）: 项目={} : {}", projectId, e.getMessage());
-                    }
-                }
+                // 无事务上下文（防御）：同样走异步，保证保存接口不被 AI 调用拖住
+                submitKnowledgeSync(userId, projectId);
             }
         } catch (Exception e) {
             log.warn("[世界设定同步] 注册提交后同步失败（跳过，可手动补建）: 项目={} : {}", projectId, e.getMessage());
         }
+    }
+
+    /**
+     * 把「世界设定知识同步 + 世界常识生成」投递到独立虚拟线程执行，保存请求立即返回。
+     *
+     * <p><b>为什么不在 afterCommit 里直接跑</b>：{@code afterCommit} 仍在请求线程上，
+     * HTTP 响应要等回调返回才发出；实测 7KB 设定触发世界常识生成耗时 78.9 秒，
+     * 而前端 axios 全局超时 10 秒 → 保存被判超时，向导里「写世界名/简介」「进第三步」被整段丢弃，
+     * 表现为「第二步点下一步没反应、也进不去项目页」（用户实测）。</p>
+     *
+     * <p><b>为什么换线程还能顺带修掉 {@code No active transaction}</b>：{@code afterCommit} 执行时
+     * 当前线程仍绑定着已提交完毕的 {@code EntityManager}，此时任何 Repository 写都会复用这个
+     * 「无活跃事务」的实例并抛 {@code No active transaction}；换到独立线程后由 Spring Data 自己
+     * 开短事务，同步与常识生成不再静默失败。</p>
+     *
+     * @param userId    归属用户 ID（事务内已取出，异步线程不依赖请求上下文）
+     *
+     * @param projectId 项目 ID
+     */
+    private void submitKnowledgeSync(Long userId, Long projectId) {
+        try {
+            // 合并排队：同项目已有任务在跑时只置「还有一轮」标记，绝不再起一条并发任务
+            knowledgeSyncPending.computeIfAbsent(projectId, k -> new AtomicBoolean()).set(true);
+            if (!knowledgeSyncRunning.add(projectId)) {
+                return;
+            }
+            knowledgeSyncExecutor.execute(() -> drainKnowledgeSync(userId, projectId));
+        } catch (Exception e) {
+            log.warn("[世界设定同步] 异步任务投递失败（跳过，可手动补建）: 项目={} : {}", projectId, e.getMessage());
+        }
+    }
+
+    /**
+     * 串行消费同项目的「待跑」标记，直到没有新的保存进来为止。
+     *
+     * <p>为什么串行：知识文档同步按标题 upsert 才是幂等的，两条并发会各自判定标题不存在而各插一份。
+     * 合并后每一轮都重新读最新设定，快速连点保存也只落一份、且内容是最新的。</p>
+     */
+    private void drainKnowledgeSync(Long userId, Long projectId) {
+        try {
+            AtomicBoolean pending = knowledgeSyncPending.get(projectId);
+            while (pending != null && pending.getAndSet(false)) {
+                runKnowledgeSync(userId, projectId);
+                pending = knowledgeSyncPending.get(projectId);
+            }
+        } finally {
+            knowledgeSyncRunning.remove(projectId);
+            // 竞态兜底：本轮清理前又来了新保存（它当时看到「正在跑」直接返回）→ 补投一轮
+            AtomicBoolean pending = knowledgeSyncPending.get(projectId);
+            if (pending != null && pending.get()) {
+                submitKnowledgeSync(userId, projectId);
+            }
+        }
+    }
+
+    /** 单轮：世界设定 → 项目级知识文档同步 + 世界常识摘要生成（含 embedding / 大模型调用）。 */
+    private void runKnowledgeSync(Long userId, Long projectId) {
+        try {
+            worldKnowledgeSyncService.syncWorldSetting(userId, projectId);
+        } catch (Exception e) {
+            log.warn("[世界设定同步] 提交后同步失败（可手动补建）: 项目={} : {}", projectId, e.getMessage());
+        }
+        // 世界常识摘要（段 1A）：依最新世界观生成/更新 300-500 字精炼常识
+        if (worldCommonKnowledgeService != null) {
+            try {
+                worldCommonKnowledgeService.generate(userId, projectId);
+            } catch (Exception e) {
+                log.warn("[世界常识] 提交后生成失败（注入回退截断拼装）: 项目={} : {}", projectId, e.getMessage());
+            }
+        }
+    }
+
+    /** 应用关闭时释放知识同步线程池。 */
+    @PreDestroy
+    public void shutdownKnowledgeSyncExecutor() {
+        knowledgeSyncExecutor.shutdown();
     }
 
     /**

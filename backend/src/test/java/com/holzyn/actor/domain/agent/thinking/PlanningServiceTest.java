@@ -74,6 +74,7 @@ class PlanningServiceTest {
     private AgentMemoryService agentMemoryService;
     private BudgetGuard budgetGuard;
     private NpcTypeResolver npcTypeResolver;
+    private com.holzyn.actor.domain.npc.action.repository.ActorActionLogRepository actionLogRepository;
     private PlanningService service;
 
     @BeforeEach
@@ -94,6 +95,7 @@ class PlanningServiceTest {
         // O6 G1a：npc:{id} 不再编码类型——用真实 NpcTypeResolver（类型查 actor_profile.type，
         // 查不到回退 special），夹具 character(3L) 默认 type=special、commonCharacter(...) 显式 type=common
         npcTypeResolver = new NpcTypeResolver(characterRepository);
+        actionLogRepository = Mockito.mock(com.holzyn.actor.domain.npc.action.repository.ActorActionLogRepository.class);
         // G1a：档案读取唯一来源（@Autowired(required=false) 字段注入，单测手动回填 mock）
         PersonaService personaService = Mockito.mock(PersonaService.class);
         service = new PlanningService(goalRepository, memoryRepository, characterRepository,
@@ -523,6 +525,130 @@ class PlanningServiceTest {
         when(memoryRepository.findByProjectIdAndCharacterRefAndTypeAndDeletedOrderByCreatedAtDesc(
                 100L, "npc:3", "plan", 0)).thenReturn(List.of());
         assertEquals("", service.planSummary(100L, "npc:3", 50L), "无计划返回空串");
+    }
+
+    // ====================目标状态机（生命周期扫描 + 卡住段） ====================
+
+    /** 连续 3 个游戏日无进展 → blocked（并写卡住原因）。 */
+    @Test
+    void sweepGoalLifecycle_blocksAfterStallDays() {
+        ActorCharacterGoal g = goal(9L, "攒钱修屋顶");
+        g.setProgressGameDay(10L);
+        when(goalRepository.findByProjectIdAndDeletedOrderByIdAsc(100L, 0)).thenReturn(List.of(g));
+        when(goalRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        int changed = service.sweepGoalLifecycle(100L, 13L * 86400L);
+
+        assertEquals(1, changed);
+        assertEquals(PlanningService.STATUS_BLOCKED, g.getStatus(), "3 天没动 → 卡住");
+        assertNotNull(g.getBlockedReason());
+        assertTrue(g.getBlockedReason().contains("3"), "原因应带天数: " + g.getBlockedReason());
+    }
+
+    /** 未到阈值不动；超过放弃阈值直接 abandoned。 */
+    @Test
+    void sweepGoalLifecycle_abandonsAfterAbandonDays() {
+        ActorCharacterGoal fresh = goal(9L, "攒钱修屋顶");
+        fresh.setProgressGameDay(10L);
+        ActorCharacterGoal stale = goal(10L, "把女儿嫁到县城");
+        stale.setProgressGameDay(2L);
+        when(goalRepository.findByProjectIdAndDeletedOrderByIdAsc(100L, 0))
+                .thenReturn(List.of(fresh, stale));
+        when(goalRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.sweepGoalLifecycle(100L, 11L * 86400L);
+
+        assertEquals(PlanningService.STATUS_ACTIVE, fresh.getStatus(), "1 天无进展仍在正常波动内");
+        assertEquals(PlanningService.STATUS_ABANDONED, stale.getStatus(), "9 天卡死 → 认了");
+        assertNotNull(stale.getBlockedReason());
+    }
+
+    /** 近期行动命中目标标题（≥2 个二字片段）→ 有进展：blocked 恢复 active 并清空原因。 */
+    @Test
+    void sweepGoalLifecycle_restoresActiveWhenActionMentionsGoal() {
+        ActorCharacterGoal g = goal(9L, "修屋顶");
+        g.setStatus(PlanningService.STATUS_BLOCKED);
+        g.setBlockedReason("连续 4 个游戏日没有进展");
+        g.setProgressGameDay(10L);
+        when(goalRepository.findByProjectIdAndDeletedOrderByIdAsc(100L, 0)).thenReturn(List.of(g));
+        when(goalRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        com.holzyn.actor.domain.npc.action.entity.ActorActionLog log =
+                new com.holzyn.actor.domain.npc.action.entity.ActorActionLog();
+        log.setCharacterId(3L);
+        log.setSummary("上房修屋顶，换了两片瓦");
+        when(actionLogRepository.findByCharacterIdOrderByLogTimeDesc(3L)).thenReturn(List.of(log));
+        ReflectionTestUtils.setField(service, "actionLogRepository", actionLogRepository);
+
+        service.sweepGoalLifecycle(100L, 14L * 86400L);
+
+        assertEquals(PlanningService.STATUS_ACTIVE, g.getStatus(), "有人动了一下就不该继续卡着");
+        assertNull(g.getBlockedReason());
+        assertEquals(Long.valueOf(14L), g.getProgressGameDay(), "基准日应推到当天");
+    }
+
+    /** 首次扫描到（基准日为空）→ 只记基准日，不做任何流转。 */
+    @Test
+    void sweepGoalLifecycle_seedsProgressDayOnFirstSight() {
+        ActorCharacterGoal g = goal(9L, "攒钱修屋顶");
+        g.setProgressGameDay(null);
+        when(goalRepository.findByProjectIdAndDeletedOrderByIdAsc(100L, 0)).thenReturn(List.of(g));
+        when(goalRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertEquals(0, service.sweepGoalLifecycle(100L, 30L * 86400L));
+        assertEquals(Long.valueOf(30L), g.getProgressGameDay());
+        assertEquals(PlanningService.STATUS_ACTIVE, g.getStatus());
+    }
+
+    /** 关键词命中判据：单个二字片段不算命中（防「去河边」推进「攒钱娶媳妇」）。 */
+    @Test
+    void mentionsAnyRequiresTwoBigrams() {
+        assertTrue(PlanningService.mentionsAny("上房修屋顶，换了两片瓦", "修屋顶"));
+        assertFalse(PlanningService.mentionsAny("去河边挑水", "攒钱娶媳妇"));
+        assertFalse(PlanningService.mentionsAny(null, "修屋顶"));
+        assertFalse(PlanningService.mentionsAny("上房修屋顶", null));
+    }
+
+    /** 卡住目标段：只列 blocked，带天数与「换个法子/认了」的二选一。 */
+    @Test
+    void stalledGoalsSegmentRendersBlockedGoalsOnly() {
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(character(3L)));
+        ActorCharacterGoal blocked = goal(9L, "攒钱修屋顶");
+        blocked.setStatus(PlanningService.STATUS_BLOCKED);
+        blocked.setProgressGameDay(10L);
+        when(goalRepository.findByProjectIdAndAgentRefAndStatusAndDeletedOrderByCreatedAtDesc(
+                100L, "npc:3", PlanningService.STATUS_BLOCKED, 0)).thenReturn(List.of(blocked));
+
+        String seg = service.stalledGoalsSegment(100L, "npc:3", 13L * 86400L);
+
+        assertTrue(seg.startsWith("【卡住的目标】"), seg);
+        assertTrue(seg.contains("攒钱修屋顶"));
+        assertTrue(seg.contains("3 天没动过"), "应给出卡了多久: " + seg);
+        assertTrue(seg.contains("认了"), "应给出「换个法子/认了」的选择: " + seg);
+    }
+
+    /** 无卡住目标 → 空串（决策情境零变化）。 */
+    @Test
+    void stalledGoalsSegmentEmptyWhenNone() {
+        when(characterRepository.findById(3L)).thenReturn(Optional.of(character(3L)));
+        when(goalRepository.findByProjectIdAndAgentRefAndStatusAndDeletedOrderByCreatedAtDesc(
+                100L, "npc:3", PlanningService.STATUS_BLOCKED, 0)).thenReturn(List.of());
+        assertEquals("", service.stalledGoalsSegment(100L, "npc:3", 13L * 86400L));
+    }
+
+    /** 手动流转：blocked 是合法状态；改回 active 时清空卡住原因。 */
+    @Test
+    void updateGoalAcceptsBlockedAndClearsReasonOnReactivate() {
+        ActorCharacterGoal g = goal(9L, "攒钱修屋顶");
+        g.setStatus(PlanningService.STATUS_BLOCKED);
+        g.setBlockedReason("连续 3 个游戏日没有进展");
+        when(goalRepository.findById(9L)).thenReturn(Optional.of(g));
+        when(goalRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(projectRepository.findById(100L)).thenReturn(Optional.of(project(100L)));
+
+        service.updateGoal(9L, PlanningService.STATUS_ACTIVE, null, null);
+
+        assertEquals(PlanningService.STATUS_ACTIVE, g.getStatus());
+        assertNull(g.getBlockedReason(), "恢复进行中应清空卡住原因");
     }
 
     // ==================== 辅助 ====================

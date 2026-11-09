@@ -20,6 +20,7 @@ package com.holzyn.actor.domain.growth.space;
 
 import com.holzyn.actor.domain.growth.stage.GrowthStage;
 import com.holzyn.actor.domain.growth.stage.HardGateResult;
+import com.holzyn.actor.domain.mapnav.service.NpcPlaceView;
 import com.holzyn.actor.domain.npc.state.entity.ActorNpcState;
 
 import java.util.ArrayList;
@@ -56,6 +57,38 @@ public final class ProgrammaticSpaceFactory {
      */
     public static GrowthSpaceParse.GrowthSpaceDoc build(String chName, GrowthStage stage, HardGateResult gate,
                                                         ActorNpcState state, String activity) {
+        return buildAt(null, chName, stage, gate, state, activity);
+    }
+
+    /**
+     * 生成「带地点」的程序化空间（位置变化时按新地点重算，零 AI）。
+     *
+     * <p><b>为什么要有这一版</b>：可发生空间一次生成、TTL 6~12 游戏小时，而角色会走动。
+     * 实测：角色走到阿珍家门口，空间里仍是铁匠铺的「补墙、取工具」，于是候选动作跟身体脱节——
+     * 环境进了 prompt 却没进选项集。这一版把「地点」直接变成候选池与禁止项：
+     * 在别人家门口就只会想到敲门、门外等、说明来意，不会想到「进屋拿东西」。</p>
+     *
+     * <p><b>口径</b>：地点可辨认时用它替换阶段池（阶段池是「一般情况能做什么」，地点池是
+     * 「此处能做什么」）；地点未知时退回阶段池，不做无根据的猜测。生理驱动项（饿/累/病/孤单）
+     * 仍叠加——那是身体事实，与地点无关。</p>
+     *
+     * @param place    地点快照（可空=沿用阶段池）
+     *
+     * @param chName   角色名（内心念头用）
+     *
+     * @param stage    当前阶段（null=宽松：用通用池）
+     *
+     * @param gate     硬门控结果（禁止项进空间 forbidden）
+     *
+     * @param state    状态行（可空；状态驱动项用）
+     *
+     * @param activity 当前行动描述（可空）
+     *
+     * @return 程序化空间文档（含地点候选池与地点禁止项）
+     */
+    public static GrowthSpaceParse.GrowthSpaceDoc buildAt(NpcPlaceView.Place place, String chName,
+                                                          GrowthStage stage, HardGateResult gate,
+                                                          ActorNpcState state, String activity) {
         // 内心：主导念头 = 当前行动/状态摘要；身体感受 = urgency 文本
         String thought = activity == null || activity.isBlank()
                 ? (chName == null ? "正想着接下来做点什么" : chName + "正盘算着手头的事")
@@ -68,8 +101,82 @@ public final class ProgrammaticSpaceFactory {
                 bodyFeel = "身上有些不大爽利";
             }
         }
-        return new GrowthSpaceParse.GrowthSpaceDoc(new GrowthSpaceParse.Inner(null, thought, bodyFeel.isBlank() ? null : bodyFeel),
-                statesOf(state), actionsOf(stage, state), forbiddenOf(gate));
+        List<GrowthSpaceParse.ActionItem> actions = place == null || !place.known()
+                ? actionsOf(stage, state) : actionsAt(place, state);
+        List<GrowthSpaceParse.ForbiddenItem> forbidden = forbiddenOf(gate);
+        forbidden.addAll(forbiddenAt(place));
+        return new GrowthSpaceParse.GrowthSpaceDoc(
+                new GrowthSpaceParse.Inner(null, thought, bodyFeel.isBlank() ? null : bodyFeel),
+                statesOf(state), actions, forbidden);
+    }
+
+    /**
+     * 地点候选池（此处能做什么），叠加生理驱动项。
+     *
+     * <p>权重固定 0.4（与阶段池同口径）：确定性、可复现，便于把「地点变了 → 候选集变了」
+     * 当作可断言的事实，而不是又一层随机性。</p>
+     */
+    private static List<GrowthSpaceParse.ActionItem> actionsAt(NpcPlaceView.Place place, ActorNpcState state) {
+        List<GrowthSpaceParse.ActionItem> out = new ArrayList<>();
+        for (String action : poolAt(place)) {
+            out.add(new GrowthSpaceParse.ActionItem(action, 0.4, null, null));
+        }
+        // 生理驱动项与地点无关（身体事实）：复用既有叠加口径，避免「饿了却只想着敲门」
+        for (GrowthSpaceParse.ActionItem a : actionsOf(null, state)) {
+            boolean dup = out.stream().anyMatch(x -> x.action().equals(a.action()));
+            if (!dup) {
+                out.add(a);
+            }
+        }
+        return out;
+    }
+
+    /** 地点行动池（按「谁的什么地方」分层；未知分类返回空=沿用阶段池）。 */
+    public static List<String> poolAt(NpcPlaceView.Place place) {
+        if (place == null || !place.known()) {
+            return List.of();
+        }
+        if (place.atOwnHome()) {
+            return List.of("生火做饭", "烧水沏茶", "收拾屋子", "取用自己顺手的工具", "在院里歇口气");
+        }
+        if (place.atOthersHome()) {
+            return List.of("敲门问一声", "在门外等一等", "说明来意", "改日再来");
+        }
+        String cat = place.category() == null ? "" : place.category().trim();
+        return switch (cat) {
+            case "商铺" -> List.of("进门买卖", "问个价", "跟掌柜搭话", "帮着照看门前货");
+            case "工坊" -> List.of("动手做活", "跟工匠说上话", "等他用完工具", "打磨手头的活计");
+            case "生产", "水工" -> List.of("下地看看庄稼", "打水", "清理水渠", "跟干活的人搭把手");
+            case "公共" -> List.of("在廊下歇脚", "跟人搭话", "看会儿热闹", "等个人");
+            case "自然" -> List.of("沿路走走", "看看天色", "捡拾柴草", "找地方歇脚");
+            case "道路", "街巷" -> List.of("赶路", "给来人让路", "看看天色", "加快脚步");
+            default -> List.of();
+        };
+    }
+
+    /** 地点禁止项（越界行为显式否定：写进空间 forbidden，消费侧同款渲染）。 */
+    public static List<GrowthSpaceParse.ForbiddenItem> forbiddenAt(NpcPlaceView.Place place) {
+        List<GrowthSpaceParse.ForbiddenItem> out = new ArrayList<>();
+        if (place == null || !place.known()) {
+            return out;
+        }
+        if (place.atOthersHome()) {
+            out.add(new GrowthSpaceParse.ForbiddenItem("自己推门进屋", "这是别人的住处，不是你家"));
+            out.add(new GrowthSpaceParse.ForbiddenItem("翻找或拿走屋里的东西", "主人不在场，东西动不得"));
+            return out;
+        }
+        String cat = place.category() == null ? "" : place.category().trim();
+        if ("商铺".equals(cat)) {
+            out.add(new GrowthSpaceParse.ForbiddenItem("自己进后堂取货", "后堂不是客人去的地方"));
+        } else if ("工坊".equals(cat)) {
+            out.add(new GrowthSpaceParse.ForbiddenItem("擅自动用别人的工具和料", "工具是匠人的饭碗"));
+        } else if ("生产".equals(cat) || "水工".equals(cat)) {
+            out.add(new GrowthSpaceParse.ForbiddenItem("踩庄稼", "青苗踩了就长不回来"));
+            out.add(new GrowthSpaceParse.ForbiddenItem("私自开闸放水", "水是全村分着用的"));
+        } else if ("自然".equals(cat)) {
+            out.add(new GrowthSpaceParse.ForbiddenItem("夜里往没灯的地方钻", "野外夜路不安全"));
+        }
+        return out;
     }
 
     /** 可发生状态（状态驱动 + 阶段基调）。 */

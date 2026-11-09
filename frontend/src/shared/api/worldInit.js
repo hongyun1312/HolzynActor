@@ -18,7 +18,7 @@
 
 // 世界初始化 API：初始化状态（唯一判定）、单步执行（SSE）、跳过可选步、世界名与简介建议/落库。
 // 事件约定与 workflow.js 一致：log={level,message,time}、stage={name,index,total}、result=本步结果、error={message}
-import http from './http'
+import http, { AI_TIMEOUT } from './http'
 import { streamFetch, SSE_EVENTS } from '@/shared/sse/sseClient'
 
 /**
@@ -80,7 +80,7 @@ export const skipInitStep = (projectId, stepCode) =>
 /**
  * 根据当前世界观设定生成世界名与世界简介（AI，不写库）。
  *
- * <p>含 AI 调用，超时放到 120s（与 generateCards 同档）；返回值只用于回填表单，
+ * <p>含 AI 调用，超时走 AI_TIMEOUT（300s）；返回值只用于回填表单，
  * 用户可改写后再调 {@link saveWorldMeta} 落库。</p>
  *
  * @param projectId 项目 ID
@@ -88,7 +88,24 @@ export const skipInitStep = (projectId, stepCode) =>
  * @return Promise<{name, summary}>
  */
 export const suggestWorldMeta = (projectId) =>
-  http.post(`/api/worlds/${projectId}/meta-suggest`, null, { timeout: 120000 })
+  http.post(`/api/worlds/${projectId}/meta-suggest`, null, { timeout: AI_TIMEOUT })
+
+/**
+ * 依据「尚未落库的世界观草稿」生成世界名与世界简介（AI，不读库不写库）。
+ *
+ * <p>用于创意发散刚生成完、世界观还没 confirm 落库的时刻——那时库里没有设定，
+ * {@link suggestWorldMeta} 必然 400，向导就只能拿「题材·创意前 20 字」拼接当世界名
+ * （既不像世界名，也常常超过 14 字上限）。这里把草稿直接喂给 AI 重新起名。</p>
+ *
+ * <p>含 AI 调用，超时走 AI_TIMEOUT（300s）。</p>
+ *
+ * @param draft {name?, genre?, tone?, era?, geography?, factions?, magicSystem?, culture?, history?, freeText?}
+ *              其中 name 留空表示「从设定里重新起名」，不要传拼接名（会变成 AI 回声）
+ *
+ * @return Promise<{name, summary}>
+ */
+export const suggestWorldMetaFromDraft = (draft) =>
+  http.post('/api/worlds/meta-suggest', draft, { timeout: AI_TIMEOUT })
 
 /**
  * 保存世界名与世界简介（同时写世界库项目、世界观名称与目录库画廊快照）。
@@ -126,6 +143,7 @@ export const WORLD_SUMMARY_MIN = 60
 export const INIT_STEP_LABELS = {
   worldview: '世界观设定',
   locations: '世界观地点',
+  cast: '生成角色',
   characters: '角色卡',
   npcs: '普通 NPC',
   relations: '关系拓扑',

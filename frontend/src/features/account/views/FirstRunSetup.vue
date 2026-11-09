@@ -119,38 +119,21 @@
         </section>
 
         <div class="fr-section">
-          <div class="fr-section-title">配置模型接口</div>
-
-          <!-- 已配置：只读摘要 + 去设置 -->
-          <div v-if="apiConfigured" class="fr-api-done">
-            <span class="fr-api-done-icon"><el-icon><HIcon name="Check" /></el-icon></span>
-            <span class="fr-api-done-text">已配置 {{ apiCount }} 个模型接口：{{ apiSummary }}</span>
-            <el-button link type="primary" @click="goSettingsApis">去设置管理</el-button>
+          <div class="fr-section-head">
+            <span class="fr-section-title">模型供应商</span>
+            <span v-if="apiConfigured" class="fr-section-state is-ok">
+              已配置 {{ apiCount }} 个供应商 · {{ apiSummary }}
+            </span>
+            <span v-else class="fr-section-state">还没有配置任何供应商</span>
           </div>
-
-          <!-- 未配置：紧凑表单 -->
-          <el-form v-else :model="apiForm" label-position="top" class="fr-form" @submit.prevent>
-            <div class="fr-grid-2">
-              <el-form-item label="名称">
-                <el-input v-model="apiForm.name" placeholder="如：DeepSeek 主用" maxlength="50" clearable />
-              </el-form-item>
-              <el-form-item label="模型名（可空）">
-                <el-input v-model="apiForm.model" placeholder="如 deepseek-chat" maxlength="100" clearable />
-              </el-form-item>
-            </div>
-            <el-form-item label="Base URL（OpenAI 兼容协议）">
-              <el-input v-model="apiForm.baseUrl" placeholder="如：https://api.deepseek.com/v1" maxlength="255" clearable />
-            </el-form-item>
-            <el-form-item label="API Key（加密存储）">
-              <el-input v-model="apiForm.apiKey" type="password" show-password placeholder="填写你的 API Key" maxlength="512" clearable />
-            </el-form-item>
-            <div class="fr-api-ops">
-              <el-button :loading="testing" @click="testApi">
-                <el-icon><HIcon name="Connection" /></el-icon>&nbsp;测试连接
-              </el-button>
-              <el-button type="primary" :loading="savingApi" @click="saveApi">保存模型配置</el-button>
-            </div>
-          </el-form>
+          <p class="fr-section-desc">
+            下面是「设置 → 模型供应商」的同一套界面：一个供应商填一次 Base URL 与 Key，
+            其下可添加文本 / 向量 / 决策模型、设默认、测连接、拉取接口模型列表。API Key 加密存储，仅显示末 4 位。
+          </p>
+          <!-- 与内部设置页同一个组件（embedded）：引导里做的配置与设置页完全等价，不再是另一套简化表单 -->
+          <div class="fr-api-embed">
+            <ModelApiSettings embedded compact @changed="loadApis" />
+          </div>
         </div>
       </div>
 
@@ -319,7 +302,9 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAccountStore } from '@/shared/store'
 import { useTheme } from '@/shared/theme'
-import { savePlayerProfile, fetchPlayerProfile, fetchModelApis, createModelApi, testModelApi, generatePlayerProfile } from '@/shared/api'
+import { savePlayerProfile, fetchPlayerProfile, fetchModelApis, generatePlayerProfile } from '@/shared/api'
+// 模型供应商整页组件：引导里内嵌同一个组件，配置能力与「设置 → 模型供应商」完全一致（不另做简化表单）
+import ModelApiSettings from '@/features/settings/views/ModelApiSettings.vue'
 import { armGuide } from '@/shared/onboarding/firstRunGuide'
 import CloudTrainBackground from '@/shared/components/CloudTrainBackground.vue'
 import CompactStepper from '@/shared/components/CompactStepper.vue'
@@ -423,11 +408,8 @@ const totalCount = 14
 /** 已填总数（顶部「已填 n/14」） */
 const filledCount = computed(() => secCount.value.base.done + secCount.value.npc.done + secCount.value.persona.done)
 
-// ==================== 连接模型（API 配置） ====================
-const apiForm = reactive({ name: '', baseUrl: '', apiKey: '', model: '' })
+// ==================== 连接模型（模型供应商） ====================
 const apiList = ref([])
-const savingApi = ref(false)
-const testing = ref(false)
 
 /** 是否已配置用户级模型接口（任意一个即视为已配置） */
 const apiConfigured = computed(() => apiList.value.length > 0)
@@ -436,69 +418,15 @@ const apiSummary = computed(() =>
   apiList.value.map(a => a.name || a.model || a.baseUrl).filter(Boolean).join('、')
 )
 
-/** 加载用户级 API 列表（判定已配置态） */
+/**
+ * 加载用户级供应商列表（判定「已配置」态；内嵌组件每次重载都会回调这里）
+ */
 async function loadApis() {
   try {
     apiList.value = (await fetchModelApis(null)) || []
   } catch (_) {
     apiList.value = []
   }
-}
-
-/** 未保存前连通性测试（Key 不入库） */
-async function testApi() {
-  if (!apiForm.baseUrl.trim()) {
-    ElMessage.warning('请先填写 Base URL')
-    return
-  }
-  testing.value = true
-  try {
-    const r = await testModelApi({
-      baseUrl: apiForm.baseUrl.trim(),
-      apiKey: apiForm.apiKey.trim(),
-      model: apiForm.model.trim() || undefined
-    })
-    if (r.connected) ElMessage.success(`连接成功（${r.method}，耗时 ${r.latencyMs}ms）`)
-    else ElMessage.error(r.message || '连接失败')
-  } catch (e) {
-    ElMessage.error(e?.message || '测试失败')
-  } finally {
-    testing.value = false
-  }
-}
-
-/** 保存用户级模型配置（保存后进入已配置态） */
-async function saveApi() {
-  if (!apiForm.baseUrl.trim()) {
-    ElMessage.warning('请填写 Base URL')
-    return
-  }
-  if (!apiForm.apiKey.trim()) {
-    ElMessage.warning('请填写 API Key')
-    return
-  }
-  savingApi.value = true
-  try {
-    await createModelApi({
-      name: apiForm.name.trim() || '我的模型',
-      baseUrl: apiForm.baseUrl.trim(),
-      apiKey: apiForm.apiKey.trim(),
-      model: apiForm.model.trim() || undefined,
-      supportsStream: true,
-      purpose: 'chat'
-    }, null)
-    ElMessage.success('模型配置已保存')
-    await loadApis()
-  } catch (e) {
-    ElMessage.error(e?.message || '保存失败')
-  } finally {
-    savingApi.value = false
-  }
-}
-
-/** 已配置态 → 跳全局设置 API 页（该页对未完成向导用户也放行） */
-function goSettingsApis() {
-  router.push('/settings/apis')
 }
 
 // ==================== 阶段跳转 ====================
@@ -892,29 +820,15 @@ onMounted(init)
 .avatar-line { display: flex; align-items: center; gap: 12px; width: 100%; }
 .fr-avatar { flex-shrink: 0; background: var(--brand-gradient, linear-gradient(135deg, #1d5cff, #7b4dff)); }
 
-/* 第 1 步：模型配置 */
-.fr-api-done {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--bg-layer-2);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  padding: 12px 16px;
-  font-size: 0.85rem;
-  color: var(--text-regular);
-}
-.fr-api-done-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  background: var(--state-success);
-  color: #fff;
-}
-.fr-api-done-text { flex: 1; }
-.fr-api-ops { display: flex; gap: 10px; margin-top: 2px; }
+/* 第 1 步：模型供应商（直接内嵌「设置 → 模型供应商」整页组件，外形只做外壳） */
+.fr-section-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.fr-section-head .fr-section-title { margin: 0 0 6px; }
+.fr-section-state { font-size: 0.78rem; color: var(--text-secondary); }
+.fr-section-state.is-ok { color: var(--state-success); }
+.fr-section-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.7; margin: 0 0 10px; }
+/* 内嵌组件自带卡片层级，外层只留一条分隔线，避免出现双层边框 */
+.fr-api-embed { border-top: 1px solid var(--border-light); padding-top: 8px; }
+.fr-api-embed :deep(.model-api-view) { padding: 0; }
 
 /* AI 补充生成（已提升为独立折叠分区，故内部不再套一层带边框的卡片） */
 .fr-ai-body { padding: 2px 0 0; }

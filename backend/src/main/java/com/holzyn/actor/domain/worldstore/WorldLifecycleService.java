@@ -77,6 +77,28 @@ public class WorldLifecycleService {
 
     private final WorldManifestService manifests;
 
+    /**
+     * 世界观地点表服务（打开世界后按地图要素回填地点中心坐标；
+     * 字段注入保持构造器不变，null=未装配时跳过）
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.world.service.WorldLocationService worldLocationService;
+
+    /**
+     * 坐标内存视图（打开新世界后先失效旧视图，避免读到上一个世界的行）
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcPositionService npcPositionService;
+
+    /**
+     * 开局供给（对接：打开世界时按职业/地点发放随身物品与货架存货）。
+     *
+     * <p>字段注入保持构造器不变（AGENTS §8.1.2）；null=未装配时跳过。发放本身幂等，
+     * 每次打开都跑一遍是安全的（第二次起全是 no-op）。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.item.provision.ItemProvisionService itemProvisionService;
+
     public WorldLifecycleService(WorldSessionService sessions, WorldRegistryService registry,
                                  WorldIndexDao indexDao, WorldDataSourceFactory dataSources,
                                  WorldSummaryReader summaryReader, WorldPaths paths,
@@ -162,11 +184,70 @@ public class WorldLifecycleService {
             // 世界确实已经打开：索引写失败只是列表显示滞后，由下次启动收编修正
             log.warn("[world-store] 回写挂载状态失败 uid={}（世界已打开，继续）：{}", uid, e.toString());
         }
+        if (result.newlyOpened()) {
+            afterWorldOpen(worldId);
+        }
+        // 开局供给：每次打开都跑（幂等）。放在 afterWorldOpen 之外，因为「世界是上次就开着的」
+        // 与「这个世界的角色是初始化之后才建出来的」会同时发生——只在 newlyOpened 时供给，
+        // 后建出来的角色就永远拿不到随身物品。
+        provisionOnOpen(worldId);
         long elapsed = System.currentTimeMillis() - start;
         int tables = result.mirrorReport() == null ? 0 : result.mirrorReport().tables();
         long rows = result.mirrorReport() == null ? 0 : result.mirrorReport().rows();
         log.info("[world-store] 打开完成 id={} uid={} 新打开={} 耗时={}ms", worldId, uid, result.newlyOpened(), elapsed);
         return new OpenOutcome(worldId, uid, result.newlyOpened(), tables, rows, elapsed);
+    }
+
+    /**
+     * 世界打开后的地基自检与修复。
+     *
+     * <p>全部是尽力而为：任何一步失败都只记日志，绝不让「打开世界」这个用户动作失败。
+     * 顺序有意义——先失效坐标内存视图（否则读到上一个世界的行），再回填地点中心。</p>
+     *
+     * @param projectId 世界 ID（= 项目 ID）
+     */
+    private void afterWorldOpen(long projectId) {
+        // 打开世界是目录库生命周期请求（过滤器已进入 GLOBAL 上下文），但下面的自检读世界库。
+        // 必须临时挂起 GLOBAL，否则会查目录库 → actor_world_map 不存在 → rollback-only 噪声。
+        WorldContext.callAsWorld(() -> {
+            if (npcPositionService != null) {
+                try {
+                    npcPositionService.invalidate(projectId);
+                } catch (RuntimeException e) {
+                    log.warn("[world-store] 打开后失效坐标视图失败：{}", e.toString());
+                }
+            }
+            if (worldLocationService != null) {
+                try {
+                    worldLocationService.backfillCentersFromMap(projectId);
+                } catch (RuntimeException e) {
+                    log.warn("[world-store] 打开后回填地点中心失败（继续）：{}", e.toString());
+                }
+            }
+            return null;
+        });
+    }
+
+    /**
+     * 开世界时补一次物品供给（幂等、尽力而为）。
+     *
+     * <p>为什么必须切到世界上下文：角色表、地点表、持有栈都在世界库里。目录库上下文里查
+     * 这些表会直接报「表不存在」——这正是时期踩过的坑。</p>
+     *
+     * @param projectId 世界 ID（= 项目 ID）
+     */
+    private void provisionOnOpen(long projectId) {
+        if (itemProvisionService == null) {
+            return;
+        }
+        try {
+            WorldContext.callAsWorld(() -> {
+                itemProvisionService.provisionQuietly(projectId);
+                return null;
+            });
+        } catch (RuntimeException e) {
+            log.warn("[world-store] 开局供给失败（继续）：id={} : {}", projectId, e.toString());
+        }
     }
 
     /**

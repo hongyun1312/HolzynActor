@@ -30,6 +30,7 @@ import com.holzyn.actor.ai.route.SceneRouter;
 import com.holzyn.actor.domain.debug.service.AiCallContext;
 import com.holzyn.actor.domain.debug.service.AiCallTrace;
 import com.holzyn.actor.domain.debug.service.AiCallTraceService;
+import com.holzyn.actor.domain.agent.prompt.PromptResources;
 import com.holzyn.actor.domain.settings.service.ModelApiService;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -142,6 +143,28 @@ public class AiSpringChatGateway {
 
     /** 场景-模型路由器 */
     private final SceneRouter sceneRouter;
+
+    /**
+     * 常驻稳定前缀装配器（缓存事故）。
+     *
+     * <p><b>为什么放在网关</b>：仓库里有一批服务自己拼 messages（对话/记忆/环境/部分决策），
+     * 它们把「契约 + 世界常识」塞在自己那条 user 消息里，而对话链路前面还排着几条 assistant 台词——
+     * 于是可缓存前缀只剩开头那 200 token，实测同一世界跑满一天命中率仍压在 30% 上下。</p>
+     *
+     * <p>网关是所有 AI 调用的唯一收口，在这里把「契约 + 常驻前缀」铸成<b>第二条消息</b>
+     * （system 之后、历史台词之前），全部场景的开头才逐字一致。</p>
+     *
+     * <p>字段注入 + {@code @Lazy}：保持构造器不变（不打断既有测试构造点），
+     * {@code required=false} 让单测直接 new 本类时降级为「只前置契约」，
+     * {@code @Lazy} 断开与上下文注入器之间的潜在 Bean 环（实测环会只在真实启动时炸）。</p>
+     */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.agent.context.AiContextInjector aiContextInjector;
+
+    /** 网关层「契约 + 常驻前缀」前插开关（关掉即回到改造前行为，便于 A/B）。 */
+    @org.springframework.beans.factory.annotation.Value("${holzyn.actor.ai.stable-prompt:true}")
+    private boolean stablePromptEnabled = true;
 
     /** Prompt 工程指标（版本/token/格式合规率/缓存命中；字段注入保持构造器不变） */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -377,7 +400,7 @@ public class AiSpringChatGateway {
             // 显式传入 sinks（测试）则优先用外部 sink。
             Consumer<String> reqSink = rawRequestSink != null ? rawRequestSink : trace::setInputRaw;
             Consumer<String> respSink = rawResponseSink != null ? rawResponseSink : trace::setOutputRaw;
-            AiChatResult result = doChatCompletion(config, request, reqSink, respSink);
+            AiChatResult result = doChatCompletion(config, request, projectId, reqSink, respSink);
             // 统一护栏：空输出/输出重复检测（非流式硬拦截=视为失败，业务侧程序化兜底）
             guardCheck(trace, result.content());
             trace.fillMessages(request);
@@ -660,7 +683,39 @@ public class AiSpringChatGateway {
             // 保证 detail_json input.raw/output.raw 与旧路径一致落库；显式传入 sinks（测试）优先外部 sink
             Consumer<String> reqSink = rawRequestSink != null ? rawRequestSink : trace::setInputRaw;
             Consumer<String> respSink = rawResponseSink != null ? rawResponseSink : trace::setOutputRaw;
-            StreamOutcome outcome = doChatCompletionStream(config, request, onToken, onUsage, reqSink, respSink);
+            StreamOutcome outcome;
+            // 消费端（SSE 转发）自己抛出的异常必须原样上抛：那说明浏览器已经断了，
+            // 降级重发只会把同一段话再算一遍、再把 token 吐给一个没人听的连接。
+            final boolean[] consumerFailed = {false};
+            Consumer<String> guardedTokens = onToken == null ? null : delta -> {
+                try {
+                    onToken.accept(delta);
+                } catch (RuntimeException e) {
+                    consumerFailed[0] = true;
+                    throw e;
+                }
+            };
+            try {
+                outcome = doChatCompletionStream(config, request, projectId, guardedTokens, onUsage, reqSink, respSink);
+            } catch (RuntimeException e) {
+                if (consumerFailed[0] || e instanceof AiCallException && e.getMessage() != null
+                        && e.getMessage().contains("被中断")) {
+                    throw e;
+                }
+                // 本地兼容网关（llama.cpp / vLLM 的 OpenAI 兼容层）对流式的
+                // 分块编码支持并不齐——实测直连 curl -N 正常、经 Spring AI 的 Flux 桥接却抛
+                // OpenAioException(Request failed)。流式只是传输方式，拿不到分块就读整段：
+                // 降级为非流式重发一次，把全文当单个增量回调出去（SSE 消费方无需改动）。
+                log.warn("[AI] 流式调用失败，降级为非流式重发一次：model={} : {}", config.model(), e.toString());
+                trace.setStream(false);
+                try {
+                    outcome = fallbackNonStream(config, request, projectId, onToken, onUsage, reqSink, respSink);
+                } catch (RuntimeException retryError) {
+                    // 两次都失败才算真失败：把两条原因都带上，否则排障只能看到一个「Request failed」
+                    throw new AiCallException("AI 流式调用失败，且降级为非流式后仍失败（流式："
+                            + e.getMessage() + "；非流式：" + retryError.getMessage() + "）");
+                }
+            }
             // 统一护栏：流式仅统计+告警不硬拦截（内容已逐 token 送达客户端，否决无意义）
             guardStreamCheck(trace, outcome.text());
             trace.fillMessages(request);
@@ -696,8 +751,12 @@ public class AiSpringChatGateway {
      *
      * @return 对话补全结果
      */
-    private AiChatResult doChatCompletion(ProviderConfig config, AiChatRequest request,
+    private AiChatResult doChatCompletion(ProviderConfig config, AiChatRequest request, Long projectId,
                                           Consumer<String> rawRequestSink, Consumer<String> rawResponseSink) {
+        // 统一 system 前缀：不论调用方自带什么 system，本网关都把全局 system 放在第一条，
+        // 让所有场景的请求拥有逐字相同的开头（前缀缓存的第一个可复用块）。
+        request = withUnifiedSystem(request, projectId != null ? projectId : currentProjectId());
+        dumpFinalBody(request);
         // 模型名解析：请求优先、配置回退（与旧 Provider 同口径）
         String model = (request.model() == null || request.model().isBlank()) ? config.model() : request.model();
         if (model == null || model.isBlank()) {
@@ -783,9 +842,11 @@ public class AiSpringChatGateway {
      *
      * @return 流式结果（全文 + 用量）
      */
-    private StreamOutcome doChatCompletionStream(ProviderConfig config, AiChatRequest request,
+    private StreamOutcome doChatCompletionStream(ProviderConfig config, AiChatRequest request, Long projectId,
                                                  Consumer<String> onToken, Consumer<AiUsage> onUsage,
                                                  Consumer<String> rawRequestSink, Consumer<String> rawResponseSink) {
+        request = withUnifiedSystem(request, projectId != null ? projectId : currentProjectId());
+        dumpFinalBody(request);
         // 模型名解析：请求优先、配置回退（与旧 Provider 同口径）
         String model = (request.model() == null || request.model().isBlank()) ? config.model() : request.model();
         if (model == null || model.isBlank()) {
@@ -918,6 +979,43 @@ public class AiSpringChatGateway {
      * @param usage 用量（真实或本地估算兜底）
      */
     private record StreamOutcome(String text, AiUsage usage) {
+    }
+
+    /**
+     * 流式失败后的非流式兜底。
+     *
+     * <p>拿到整段文本后<b>一次性</b>回调 {@code onToken}：SSE 消费方本来就是「收到增量就转发」，
+     * 一次给全文与分十次给是同一份输出，只是没有逐字效果——比起整条对话直接失败，这显然更好。</p>
+     *
+     * @param config          供应商运行时配置
+     * @param request         对话请求
+     * @param onToken         增量回调（可空）
+     * @param onUsage         用量回调（可空）
+     * @param rawRequestSink  raw 请求体回调（可空）
+     * @param rawResponseSink raw 响应体回调（可空）
+     * @return 流式结果（形态与真流式一致）
+     */
+    private StreamOutcome fallbackNonStream(ProviderConfig config, AiChatRequest request, Long projectId,
+                                            Consumer<String> onToken, Consumer<AiUsage> onUsage,
+                                            Consumer<String> rawRequestSink, Consumer<String> rawResponseSink) {
+        AiChatResult result = doChatCompletion(config, request, projectId, rawRequestSink, rawResponseSink);
+        String text = result.content() == null ? "" : result.content();
+        if (onToken != null && !text.isEmpty()) {
+            onToken.accept(text);
+        }
+        Integer promptTokens = result.promptTokens();
+        if (promptTokens == null || promptTokens <= 0) {
+            promptTokens = TokenEstimator.estimatePromptTokens(request.messages());
+        }
+        Integer completionTokens = result.completionTokens();
+        if (completionTokens == null || completionTokens <= 0) {
+            completionTokens = TokenEstimator.estimateTokens(text);
+        }
+        AiUsage usage = new AiUsage(promptTokens, completionTokens, 0, 0);
+        if (onUsage != null) {
+            onUsage.accept(usage);
+        }
+        return new StreamOutcome(text, usage);
     }
 
     /**
@@ -1295,5 +1393,334 @@ public class AiSpringChatGateway {
                         + "── 输出({}字) ──\n{}",
                 scene, projectId, charId, model, status,
                 sys.length(), sys, usr.length(), usr, resp.length(), resp);
+    }
+
+    // ==================== 统一 system 前缀 ====================
+
+    /**
+     * 全局统一 system 文本（{@code prompts/_shared/system.md}），类加载时读一次。
+     *
+     * <p><b>为什么在网关兜这一层</b>：模板服务只覆盖"走模板"的调用；实测仍有 60+ 处调用方自己拼
+     * system（大量是「你只输出严格的 JSON，不输出任何其他文字。」这类一行字，或各自的世界观/人设），
+     * 于是每个场景的第一条消息都不一样，前缀缓存从第一个 token 就开始分叉——同一世界跑两小时，
+     * 命中率被这些短命前缀拖到 60% 上下。网关是所有 AI 调用的唯一收口，在第一条消息前统一插入
+     * 同一个 system，等于给全部场景造出同一段最长公共前缀；调用方原有 system 保留、只是排到它后面。
+     */
+    private static final String UNIFIED_SYSTEM = loadUnifiedSystem();
+
+    /** 调用方自带 system 指令在 user 末尾的挂载标记（须逐字稳定，避免污染共享前缀）。 */
+    private static final String LEGACY_SYSTEM_MARK = "\n\n【本场景特别约定】\n";
+
+    /**
+     * 全局共享契约（{@code prompts/_shared/contract.md}），类加载时读一次。
+     *
+     * <p><b>为什么还要在网关补这一层</b>：模板链路由 {@code PromptTemplateService.render()} 前置契约，
+     * 但仓库里还有一批服务自己拼 messages（对话、记忆、环境、部分决策类），它们的 user 开头各不相同，
+     * 与模板链路之间只能共享 system 的 ~200 token。网关在 user 开头补上同一段契约后，
+     * <b>全部场景</b>的前若干个 token 逐字一致——实测命中量从 225 token 提升到 1200+ token。</p>
+     */
+    private static final String SHARED_CONTRACT = loadSharedContract();
+
+    /** 契约正文的起手片段（用于判断调用方的 user 是否已经自带契约，避免重复前置）。 */
+    private static final String CONTRACT_HEAD = "# 世界内产出通用契约";
+
+    /**
+     * 读共享契约（缺失时返回空串：网关不因为一个可选资源缺失而拒绝服务）。
+     *
+     * @return 契约文本（已 trim）
+     */
+    private static String loadSharedContract() {
+        try {
+            String s = PromptResources.shared("contract");
+            return s == null ? "" : s.trim();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 读统一 system（缺失时返回空串：网关不因为一个可选资源缺失而拒绝服务）。
+     *
+     * @return 统一 system 文本
+     */
+    private static String loadUnifiedSystem() {
+        try {
+            String s = PromptResources.system("_shared");
+            return s == null ? "" : s.trim();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * 当前调用归属的项目 ID（取自主线程绑定的 trace；无 trace 时为空）。
+     *
+     * <p>为什么要绕这一层：常驻前缀是按世界取的（名册/地点/民情都来自世界库），
+     * 而 {@code doChatCompletion} 是私有实现、签名里没有 projectId；trace 在
+     * {@code chatCompletion(projectId, ...)} 入口已经绑定，读它才不会为了一个参数
+     * 去改四个私有方法签名（也避免漏改某一处导致前缀静默丢失）。</p>
+     *
+     * @return 项目 ID（可空）
+     */
+    private static Long currentProjectId() {
+        AiCallTrace trace = AiCallContext.current();
+        return trace == null ? null : trace.getProjectId();
+    }
+
+    /**
+     * 统一 system 前缀：system 逐字恒定，调用方自带的 system 指令改挂到 user 末尾。
+     *
+     * <p>为什么不全并进 system：前缀缓存从第一个 token 开始逐字节比对，system 里只要混入一句
+     * 场景说明（「只输出严格 JSON」之类），整条前缀立刻分叉，命中量就掉到 system 的共同部分。
+     * 实测：同场景连调命中 2303 token，换场景后只剩 225 token。把场景说明挪到 user 末尾后，
+     * 所有调用的开头都是「统一 system + 契约 + 世界设定」，跨场景也能复用。</p>
+     *
+     * @param request 原始请求
+     *
+     * @return 带统一 system 的请求（原 request 不变）
+     */
+    private AiChatRequest withUnifiedSystem(AiChatRequest request, Long projectId) {
+        if (request == null || UNIFIED_SYSTEM.isEmpty()) {
+            return request;
+        }
+        List<AiChatRequest.ChatMessage> src = request.messages();
+        if (src == null || src.isEmpty()) {
+            return request;
+        }
+        // llama.cpp 的 chat template 只接受一条 system 消息（多条直接 500），故 system 恒为一条。
+        StringBuilder legacy = new StringBuilder();
+        List<AiChatRequest.ChatMessage> rest = new ArrayList<>(src.size());
+        for (AiChatRequest.ChatMessage m : src) {
+            if (m != null && "system".equalsIgnoreCase(m.role())) {
+                String c = m.content() == null ? "" : m.content().trim();
+                if (!c.isEmpty() && !UNIFIED_SYSTEM.equals(c) && !c.contains(UNIFIED_SYSTEM)
+                        && legacy.indexOf(c) < 0) {
+                    if (legacy.length() > 0) {
+                        legacy.append("\n\n");
+                    }
+                    legacy.append(c);
+                }
+            } else {
+                rest.add(m);
+            }
+        }
+        if (rest.isEmpty()) {
+            return request;
+        }
+        if (legacy.length() > 0) {
+            // 场景说明后置：既保留调用方的语气/格式约束，又不污染所有调用共享的前缀。
+            int at = -1;
+            for (int i = 0; i < rest.size(); i++) {
+                if (rest.get(i) != null && "user".equalsIgnoreCase(rest.get(i).role())) {
+                    at = i;
+                }
+            }
+            if (at < 0) {
+                at = rest.size() - 1;
+            }
+            AiChatRequest.ChatMessage tail = rest.get(at);
+            String content = (tail.content() == null ? "" : tail.content()) + LEGACY_SYSTEM_MARK + legacy;
+            rest.set(at, new AiChatRequest.ChatMessage(tail.role(), content));
+        }
+        // 常驻段（契约 + 世界常驻前缀）铸成第一条 user：稳定内容在前，历史台词与本次情境在后。
+        String stable = stablePrefix(projectId);
+        String staticBlock = staticBlock(stable);
+        if (!staticBlock.isEmpty()) {
+            stripInjectedStatic(rest, stable);
+        }
+        List<AiChatRequest.ChatMessage> out = new ArrayList<>(rest.size() + 2);
+        out.add(new AiChatRequest.ChatMessage("system", UNIFIED_SYSTEM));
+        if (!staticBlock.isEmpty()) {
+            // 第一条非 system 就是 user 时直接「并进同一条消息」：两个连续 user 段虽然合法，
+            // 但会把一条本可读的提示拆成两截（实测观感上像提示被切成两半），且多一段消息边界
+            // 对缓存毫无增益——缓存只认字节前缀。
+            int firstUser = -1;
+            for (int i = 0; i < rest.size(); i++) {
+                AiChatRequest.ChatMessage m = rest.get(i);
+                if (m != null && "user".equalsIgnoreCase(m.role())) {
+                    firstUser = i;
+                    break;
+                }
+            }
+            if (firstUser == 0) {
+                AiChatRequest.ChatMessage head = rest.get(0);
+                String merged = staticBlock + "\n\n" + (head.content() == null ? "" : head.content());
+                rest.set(0, new AiChatRequest.ChatMessage(head.role(), merged));
+            } else {
+                // 前面排着 assistant 台词（对话链路）：常驻段必须插到台词之前，否则那几行台词
+                // 会把可缓存前缀压缩到只剩 system——这正是本轮「同一世界跑满一天仍 30%」的直接原因。
+                out.add(new AiChatRequest.ChatMessage("user", staticBlock));
+            }
+        }
+        out.addAll(rest);
+        return new AiChatRequest(request.model(), out, request.temperature(), request.maxTokens(),
+                request.jsonMode());
+    }
+
+    /**
+     * 本世界的常驻前缀（人物名册 + 地点 + 民情常识），失败即空串。
+     *
+     * <p>由 {@code AiContextInjector#stablePrefix} 生成并自带 5 分钟缓存——同一游戏日里逐字相同，
+     * 这正是缓存能跨场景复用的前提。注入器未装配（单测）或项目为空时返回空串，调用方退化为「只有契约」。</p>
+     *
+     * @param projectId 项目 ID（可空）
+     *
+     * @return 常驻前缀（无则空串）
+     */
+    private String stablePrefix(Long projectId) {
+        if (!stablePromptEnabled || aiContextInjector == null || projectId == null) {
+            return "";
+        }
+        try {
+            String s = aiContextInjector.stablePrefix(projectId);
+            return s == null ? "" : s.trim();
+        } catch (Exception e) {
+            log.debug("[AI-Call] 常驻前缀生成失败（降级为只有契约）：project={} : {}", projectId, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 拼「契约 + 常驻前缀」这一整块（两部分都为空时返回空串）。
+     *
+     * @param stable 常驻前缀（可空）
+     *
+     * @return 常驻段文本
+     */
+    private static String staticBlock(String stable) {
+        if (SHARED_CONTRACT.isEmpty()) {
+            return stable == null ? "" : stable;
+        }
+        if (stable == null || stable.isEmpty()) {
+            return SHARED_CONTRACT;
+        }
+        return SHARED_CONTRACT + "\n\n" + stable;
+    }
+
+    /**
+     * 把各调用方自己拼进去的「契约 / 常驻前缀」从原消息里删掉，避免同一段文字出现两遍。
+     *
+     * <p>为什么必须删：模板链路（{@code PromptTemplateService}）本来就把契约与常驻前缀写在自己那条
+     * user 消息里；现在网关统一前置同一份，若不删就会重复注入——既浪费 token，又让模型看到两份措辞
+     * 相同的纪律（实测出现「契约重复多次」的观感）。按<b>整段原文</b>匹配替换，不做模糊匹配：
+     * 匹配不上的情况最坏只是重复一段，不会误删业务内容。</p>
+     *
+     * @param messages 已去掉 system 的消息列表（原地修改）
+     *
+     * @param stable 常驻前缀原文（可空）
+     */
+    private void stripInjectedStatic(List<AiChatRequest.ChatMessage> messages, String stable) {
+        for (int i = 0; i < messages.size(); i++) {
+            AiChatRequest.ChatMessage m = messages.get(i);
+            if (m == null || m.content() == null || m.content().isEmpty()) {
+                continue;
+            }
+            String c = m.content();
+            String orig = c;
+            if (!SHARED_CONTRACT.isEmpty() && c.contains(SHARED_CONTRACT)) {
+                c = c.replace(SHARED_CONTRACT, "");
+            }
+            if (stable != null && !stable.isEmpty() && c.contains(stable)) {
+                c = c.replace(stable, "");
+            }
+            if (!c.equals(orig)) {
+                messages.set(i, new AiChatRequest.ChatMessage(m.role(), c.stripLeading()));
+            }
+        }
+    }
+
+    // ==================== 最终请求体落盘（缓存前缀诊断） ====================
+
+    /**
+     * 是否把「收口后真正发出去」的请求体逐条落盘。
+     *
+     * <p>为什么需要：业务日志里的 {@code input.raw} 记的是<b>收口前</b>的原始请求，
+     * 与真正发给模型的消息并不是同一份。排查「跨场景只命中 225 token」这类前缀分叉时，
+     * 必须比对真正发送的字节，否则只能靠猜。</p>
+     *
+     * <p>默认开启：只保留最近 {@link #FINAL_BODY_KEEP} 条（约 2~3 MB），用于事后复盘
+     * 「真正发出去的字节」；关闭方式 {@code holzyn.actor.debug.ai-log.final-body=false}
+     * （环境变量按松弛绑定写作 {@code HOLOZYN_ACTOR_DEBUG_AILOG_FINALBODY=false}，连字符需删除）。</p>
+     */
+    @Value("${holzyn.actor.debug.ai-log.final-body:true}")
+    private boolean finalBodyEnabled = true;
+
+    /** 数据根目录（落盘位置 = {@code <data-dir>/ai-final-bodies/}）。 */
+    @Value("${holzyn.actor.data-dir:./data}")
+    private String finalBodyDataDir = "./data";
+
+    /** 落盘序号：文件名零填充，字典序即发送顺序。 */
+    private static final java.util.concurrent.atomic.AtomicLong FINAL_BODY_SEQ =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    /** 只保留最近 N 条（长期跑不至于写爆磁盘）。 */
+    private static final int FINAL_BODY_KEEP = 300;
+
+    /** 诊断用序列化器（与业务序列化无关，避免互相影响）。 */
+    private static final ObjectMapper FINAL_BODY_MAPPER = new ObjectMapper();
+
+    /**
+     * 把最终请求体写一条 JSON（含 system/user 原文与采样参数），并裁剪保留条数。
+     *
+     * @param request 收口后的请求（system 已统一、契约已前置、场景说明已后置）
+     */
+    private void dumpFinalBody(AiChatRequest request) {
+        if (!finalBodyEnabled || request == null || request.messages() == null) {
+            return;
+        }
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of(finalBodyDataDir, "ai-final-bodies");
+            java.nio.file.Files.createDirectories(dir);
+            long seq = FINAL_BODY_SEQ.incrementAndGet();
+            String scene = "";
+            AiCallTrace trace = AiCallContext.current();
+            if (trace != null && trace.getScene() != null) {
+                scene = trace.getScene();
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("seq", seq);
+            body.put("time", java.time.OffsetDateTime.now(java.time.ZoneId.of("Asia/Shanghai")).toString());
+            body.put("scene", scene);
+            body.put("model", request.model());
+            body.put("temperature", request.temperature());
+            body.put("max_tokens", request.maxTokens());
+            body.put("json_mode", request.jsonMode());
+            List<Map<String, String>> msgs = new ArrayList<>(request.messages().size());
+            for (AiChatRequest.ChatMessage m : request.messages()) {
+                Map<String, String> one = new LinkedHashMap<>();
+                one.put("role", m == null ? "" : String.valueOf(m.role()));
+                one.put("content", m == null || m.content() == null ? "" : m.content());
+                msgs.add(one);
+            }
+            body.put("messages", msgs);
+            String safeScene = scene.replaceAll("[^A-Za-z0-9_\\-]", "_");
+            java.nio.file.Path file = dir.resolve(String.format("final-%06d-%s.json", seq, safeScene));
+            java.nio.file.Files.writeString(file, FINAL_BODY_MAPPER.writeValueAsString(body),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            pruneFinalBodies(dir);
+        } catch (Exception e) {
+            // 诊断落盘失败绝不影响真实调用
+            log.debug("[AI-Call] 最终请求体落盘失败（忽略）：{}", e.getMessage());
+        }
+    }
+
+    /**
+     * 裁剪历史文件：按文件名升序删除，只保留最近 {@link #FINAL_BODY_KEEP} 条。
+     *
+     * @param dir 落盘目录
+     */
+    private void pruneFinalBodies(java.nio.file.Path dir) {
+        try (java.util.stream.Stream<java.nio.file.Path> stream = java.nio.file.Files.list(dir)) {
+            List<java.nio.file.Path> files = stream
+                    .filter(p -> p.getFileName().toString().endsWith(".json"))
+                    .sorted()
+                    .toList();
+            int overflow = files.size() - FINAL_BODY_KEEP;
+            for (int i = 0; i < overflow; i++) {
+                java.nio.file.Files.deleteIfExists(files.get(i));
+            }
+        } catch (Exception e) {
+            log.debug("[AI-Call] 裁剪最终请求体失败（忽略）：{}", e.getMessage());
+        }
     }
 }

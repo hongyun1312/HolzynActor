@@ -135,6 +135,63 @@ export function luminance(c) {
 }
 
 /**
+ * 星海（nebula）配色：夜空底 + 星尘 + 发光粒子。
+ *
+ * <p>为什么单独一套而不是复用普通的 nodeFill/nodeStroke：普通配色的编码是
+ * 「淡染圆片 + 实描边」，那在深色夜空上会变成一颗颗扁平的贴纸；星海要的是
+ * <b>亮核 + 同色光晕</b>（无芒角、无硬边）。深浅两套的分歧点只有一个：
+ * 深色下核要往白里提（自己会发光），浅色下核必须保留圈子色（白核在浅底上等于消失）。</p>
+ *
+ * <p>纯数据（函数字段只做色值混合），可在 Node 里断言。</p>
+ *
+ * @param {object} t 令牌快照
+ *
+ * @returns {object} 星海色板
+ */
+export function skyPalette(t) {
+  const dark = t.isDark
+  return {
+    /** 画布底（CSS 兜底色，真正的渐变由 sky canvas 画） */
+    base: dark ? '#060811' : '#e9eff8',
+    /** 竖向渐变：上浅下深，制造「抬头看天」的纵深 */
+    top: dark ? '#0b1226' : '#f2f6fd',
+    bottom: dark ? '#03050b' : '#dde6f4',
+    /** 星尘：深色白点、浅色深蓝点（浅底上白点等于没画） */
+    dust: dark ? '255, 255, 255' : '52, 72, 108',
+    dustAlpha: dark ? 1 : 0.5,
+    /** 星云色晕（大块柔光，循环取用） */
+    clouds: dark
+      ? ['96, 128, 235', '148, 96, 220', '56, 150, 190']
+      : ['122, 158, 226', '170, 142, 222', '98, 178, 198'],
+    cloudAlpha: dark ? 0.15 : 0.17,
+    /** 节点亮核：深色往白里提到接近白（自己会发光），浅色只提一点（白核在浅底上等于消失） */
+    nodeCore: (color) => mixColor(color, '#ffffff', dark ? 0.82 : 0.42),
+    /**
+     * 节点填充：径向渐变（中心亮、边缘落到圈子色）。
+     *
+     * <p>为什么用渐变而不是纯色：纯色圆在深色底上永远是「一块贴纸」——中心与边缘一样亮。
+     * 真实的光点是中心过曝、往外衰减；G6 v5（@antv/g）的 fill 直接吃 CSS 的
+     * {@code radial-gradient(...)}（已验证），一颗圆就能画出这层衰减，不必叠多层圆。</p>
+     */
+    nodeFill: (color) => (dark
+      ? `radial-gradient(circle, rgba(255,255,255,1) 0%, ${alphaColor(color, 0.98)} 38%, ${alphaColor(color, 0.86)} 72%, ${alphaColor(color, 0.55)} 100%)`
+      : `radial-gradient(circle, ${alphaColor(mixColor(color, '#ffffff', 0.55), 1)} 0%, ${alphaColor(color, 0.95)} 52%, ${alphaColor(color, 0.62)} 100%)`),
+    /** 节点外圈光晕（与核同色） */
+    nodeGlow: (color) => color,
+    nodeRing: (color) => alphaColor(color, dark ? 0.5 : 0.7),
+    /** 关系：一条很淡的光丝 */
+    edge: (color) => alphaColor(color, dark ? 0.30 : 0.42),
+    /** 文字与胶囊 */
+    label: dark ? 'rgba(228, 236, 252, .94)' : 'rgb(38, 48, 68)',
+    labelBg: dark ? 'rgba(8, 12, 24, .46)' : 'rgba(255, 255, 255, .76)',
+    edgeLabelBg: dark ? 'rgba(6, 10, 20, .72)' : 'rgba(255, 255, 255, .84)',
+    /** 幽灵节点（关系表引用了但角色不存在） */
+    ghostFill: dark ? 'rgba(124, 140, 172, .38)' : 'rgba(148, 160, 180, .32)',
+    ghostRing: dark ? 'rgba(160, 176, 205, .55)' : 'rgba(120, 134, 158, .6)'
+  }
+}
+
+/**
  * 构建画布主题包（节点/边/圈子/标签全部色值一次算好，回调里只做取值）。
  *
  * <p>可见性是这套配色反复踩过的坑：填充若向背景混 82%+，浅色主题下节点几乎消失。
@@ -183,6 +240,8 @@ export function buildTheme(tokens) {
     hullLabelBg: t.isDark ? 'rgba(20,22,26,.72)' : 'rgba(255,255,255,.82)',
     /** 边：关系语义色 + 新鲜度透明度 */
     edgeLabelBg: t.isDark ? 'rgba(20,22,26,.88)' : 'rgba(255,255,255,.94)',
+    /** 星海（nebula 布局专用）色板：夜空底 + 星尘 + 发光粒子 */
+    sky: skyPalette(t),
     border: t.borderL1,
     borderStrong: t.borderL2
   }

@@ -83,6 +83,15 @@ public class PhysioNeedService {
     private WorldClockService worldClockService;
 
     /**
+     * 物品端口（对接：饿了先看背包里有没有吃的）。
+     *
+     * <p>字段注入保持既有构造器不变（AGENTS §8.1.2）；{@code item.enabled=false} 时端口
+     * 不装配 → 文本与 I 线之前完全一致（「前往某处用餐」）。</p>
+     */
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.item.port.InventoryPort inventoryPort;
+
+    /**
      * 危险需求（最紧急者）。
      *
      * @param need 需求键（饥饿/口渴/膀胱/清洁）
@@ -139,22 +148,42 @@ public class PhysioNeedService {
     public static List<SpaceDecisionCandidates.SpaceCandidate> lowCandidates(
             ActorNpcState st, NpcStateProperties.Physio p, Integer hourOfDay,
             List<String> locations, Random rng) {
+        return lowCandidates(st, p, hourOfDay, locations, rng, null, null);
+    }
+
+    /**
+     * 低值区生理候选（带「就地吃/喝背包里那件」的文本覆盖）。
+     *
+     * <p><b>为什么需要覆盖文本</b>：默认文本是「前往某处用餐」——它只表达「去吃饭」，
+     * 世界并不知道他吃的是什么，于是背包里的面包永远不会少（{@code NpcStateService}
+     * 看见「用餐」两字就把饥饿补回去）。传进来「吃随身的干粮充饥」之后，
+     * 裁决层的 {@code R-REST-01} 才能把行动文本里点名的那件东西真的扣掉。</p>
+     *
+     * @param foodText  饥饿候选的行动文本覆盖（null=用默认「前往…用餐」）
+     *
+     * @param drinkText 口渴候选的行动文本覆盖（null=用默认「前往…饮水」）
+     *
+     * @return 生理候选表（键 physio0…；可空）
+     */
+    public static List<SpaceDecisionCandidates.SpaceCandidate> lowCandidates(
+            ActorNpcState st, NpcStateProperties.Physio p, Integer hourOfDay,
+            List<String> locations, Random rng, String foodText, String drinkText) {
         if (st == null || p == null || !p.isEnabled()) {
             return List.of();
         }
         List<SpaceDecisionCandidates.SpaceCandidate> out = new ArrayList<>();
         int idx = 0;
         if (valueOf(st, "饥饿") < p.getLowHunger() && isMealHour(hourOfDay, p)) {
-            out.add(buildCandidate("physio" + idx++, "饥饿", p.getLowHunger(), st, locations, rng));
+            out.add(buildCandidate("physio" + idx++, "饥饿", p.getLowHunger(), st, locations, rng, foodText));
         }
         if (valueOf(st, "口渴") < p.getLowThirst()) {
-            out.add(buildCandidate("physio" + idx++, "口渴", p.getLowThirst(), st, locations, rng));
+            out.add(buildCandidate("physio" + idx++, "口渴", p.getLowThirst(), st, locations, rng, drinkText));
         }
         if (valueOf(st, "膀胱") < p.getLowBladder()) {
-            out.add(buildCandidate("physio" + idx++, "膀胱", p.getLowBladder(), st, locations, rng));
+            out.add(buildCandidate("physio" + idx++, "膀胱", p.getLowBladder(), st, locations, rng, null));
         }
         if (valueOf(st, "清洁") < p.getLowHygiene()) {
-            out.add(buildCandidate("physio" + idx++, "清洁", p.getLowHygiene(), st, locations, rng));
+            out.add(buildCandidate("physio" + idx++, "清洁", p.getLowHygiene(), st, locations, rng, null));
         }
         return out;
     }
@@ -228,6 +257,13 @@ public class PhysioNeedService {
                     : npcStateService.locationNames(projectId);
             String target = NpcStateService.pickTarget(locations, d.actionType(), new Random());
             String actionText = actionTextOf(d.need(), target);
+            // 对接：危险区就地吃背包里那件（有的话），不写「前往…用餐」——
+            // 饿到危险线的人不会先走半个镇子，而且「就地吃」才能让那件东西真的少掉。
+            String bag = bagTextOf(projectId, ch, d.need());
+            if (bag != null) {
+                actionText = bag;
+                target = null;
+            }
             SpaceDecisionCandidates.SpaceCandidate chosen = new SpaceDecisionCandidates.SpaceCandidate(
                     "physio_danger", actionText, actionText, target, null, 1.0, false);
             Map<String, Object> decision = SpaceChoiceMapper.toDecisionMap(
@@ -264,7 +300,8 @@ public class PhysioNeedService {
             ActorNpcState st = stateOf(projectId, ch);
             List<String> locations = npcStateService == null ? List.of()
                     : npcStateService.locationNames(projectId);
-            return lowCandidates(st, physio(), hourOfDay(projectId), locations, new Random());
+            return lowCandidates(st, physio(), hourOfDay(projectId), locations, new Random(),
+                    bagTextOf(projectId, ch, "饥饿"), bagTextOf(projectId, ch, "口渴"));
         } catch (Exception e) {
             log.warn("[生理需求] 低值候选组装失败（跳过注入）: char={} : {}", ch.getId(), e.getMessage());
             return List.of();
@@ -330,9 +367,47 @@ public class PhysioNeedService {
 
     // ==================== 私有辅助（纯函数） ====================
 
+    /**
+     * 「就地吃/喝背包里那件」的行动文本（对接）。
+     *
+     * <p>挑法与 {@code InventoryService} 扣减口径一致：先吃快坏的（成色最差）。
+     * 文本里必须出现那件东西的名字——裁决层 {@code R-REST-01} 正是靠「文本点名」来决定
+     * 扣哪一件，文本和实物对不上就会出现「说了吃面包、扣了麦子」。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param ch        角色
+     *
+     * @param need      需求键（饥饿/口渴）
+     *
+     * @return 行动文本；没有可吃/可喝的、或物品域未装配返回 null（走默认文本）
+     */
+    private String bagTextOf(Long projectId, ActorCharacter ch, String need) {
+        if (inventoryPort == null || projectId == null || ch == null || ch.getId() == null) {
+            return null;
+        }
+        if (!"饥饿".equals(need) && !"口渴".equals(need)) {
+            return null;
+        }
+        try {
+            List<com.holzyn.actor.domain.item.model.ItemView> items =
+                    inventoryPort.list(projectId, NpcRefs.of(ch.getId()));
+            if ("饥饿".equals(need)) {
+                com.holzyn.actor.domain.item.model.ItemView food =
+                        com.holzyn.actor.domain.item.model.ItemCarryText.bestFoodOf(items);
+                return food == null ? null : "吃随身的" + food.name() + "充饥";
+            }
+            com.holzyn.actor.domain.item.model.ItemView drink =
+                    com.holzyn.actor.domain.item.model.ItemCarryText.bestDrinkOf(items);
+            return drink == null ? null : "喝随身的" + drink.name() + "解渴";
+        } catch (RuntimeException e) {
+            log.debug("[生理需求] 读取背包失败（按无食物处理）: char={} : {}", ch.getId(), e.getMessage());
+            return null;
+        }
+    }
+
     /** 状态行读取（经状态模块门面；null=未装配返回 null）。 */
-    private ActorNpcState stateOf(Long projectId, ActorCharacter ch) {
-        if (npcStateService == null || ch == null) {
+    private ActorNpcState stateOf(Long projectId, ActorCharacter ch) {        if (npcStateService == null || ch == null) {
             return null;
         }
         return npcStateService.stateFor(projectId, NpcRefs.of(ch.getId()));
@@ -403,9 +478,15 @@ public class PhysioNeedService {
      * 含 onNpcAction 恢复关键词：用餐/饮水/如厕/洗漱/充饥）。
      */
     public static String actionTextOf(String need, String target) {
+        // 目标若是「有买卖的地方」（店铺或聚落），说法要落在「买」上：集市上没有现成的饭，
+        // 只有柜台上的货。文本里没有「买」字，裁决器就不会走 TRADE，人到了集市也只是站着。
+        boolean shop = target != null
+                && com.holzyn.actor.domain.item.provision.ProvisionKit.isMarketLike(target);
         return switch (need) {
-            case "饥饿" -> target == null ? "觅食充饥" : "前往" + target + "用餐";
-            case "口渴" -> target == null ? "寻水饮用" : "前往" + target + "饮水";
+            case "饥饿" -> target == null ? "觅食充饥"
+                    : (shop ? "前往" + target + "买些吃食" : "前往" + target + "用餐");
+            case "口渴" -> target == null ? "寻水饮用"
+                    : (shop ? "前往" + target + "买水喝" : "前往" + target + "饮水");
             case "膀胱" -> target == null ? "寻找如厕之处" : "前往" + target + "如厕";
             case "清洁" -> target == null ? "寻水洗漱" : "前往" + target + "洗漱";
             default -> "忙于日常事务";
@@ -415,10 +496,15 @@ public class PhysioNeedService {
     /** 单个生理候选组装（权重=需求缺口/阈值比例，钳制 0~1，作「（倾向 x%）」情境信息）。 */
     private static SpaceDecisionCandidates.SpaceCandidate buildCandidate(
             String key, String need, double threshold, ActorNpcState st,
-            List<String> locations, Random rng) {
+            List<String> locations, Random rng, String overrideText) {
         int value = valueOf(st, need);
         String target = NpcStateService.pickTarget(locations, actionTypeOf(need), rng);
-        String actionText = actionTextOf(need, target);
+        boolean fromBag = overrideText != null && !overrideText.isBlank();
+        String actionText = fromBag ? overrideText : actionTextOf(need, target);
+        if (fromBag) {
+            // 就地吃/喝：不用挪窝，目标地点留空（否则决策会把「吃背包里的干粮」当成一次出行）
+            target = null;
+        }
         double gap = threshold <= 0 ? 0 : Math.max(0, Math.min(1, (threshold - value) / threshold));
         long pct = Math.round(gap * 100);
         String question = actionText + "（倾向 " + pct + "%）";

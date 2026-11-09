@@ -26,6 +26,7 @@ import com.holzyn.actor.ai.spring.AiSpringChatGateway;
 import com.holzyn.actor.common.BizException;
 import com.holzyn.actor.domain.agent.prompt.PromptSpecRegistry;
 import com.holzyn.actor.domain.debug.service.AiCallContext;
+import com.holzyn.actor.domain.project.dto.WorldMetaDraftDTO;
 import com.holzyn.actor.domain.project.vo.WorldMetaSuggestVO;
 import com.holzyn.actor.domain.usage.service.UsageLogService;
 import com.holzyn.actor.domain.world.entity.ActorWorldSetting;
@@ -37,6 +38,7 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -113,7 +115,46 @@ public class WorldMetaSuggestService {
         }
         ActorWorldSetting setting = worldSettingRepository.findTopByProjectIdOrderByVersionDesc(projectId)
                 .orElseThrow(() -> new BizException(400, "该项目还没有世界观设定，无法自动生成世界名与简介"));
-        String userPrompt = userPrompt(setting);
+        return doSuggest(userId, projectId, setting.getName(), fieldsOf(setting));
+    }
+
+    /**
+     * 依据「尚未落库的世界观草稿」生成世界名与世界简介建议（不写库、不读库）。
+     *
+     * <p><b>为什么需要这个入口</b>：创意发散刚生成完六维产物时，设定还只在前端内存里
+     * （落库发生在用户点「下一步」触发的 {@code POST /api/worldgen/tasks/{id}/confirm}），
+     * 此时调 {@link #suggest} 会因「该项目还没有世界观设定」直接 400 —— 新建向导第一步的
+     * 世界名就只能退化成「题材·创意前 20 字」的字符串拼接，既不像世界名，也会超出 14 字上限。</p>
+     *
+     * <p>这里直接吃草稿字段，AI 从设定里重新起名（草稿没给名时不吃参考名，避免回声复用）。</p>
+     *
+     * @param userId    用户 ID（用量记账归属）
+     *
+     * @param projectId 项目 ID（仅用于 AI 调用的项目归属/注入上下文，可空）
+     *
+     * @param draft     世界观草稿（全字段可选）
+     *
+     * @return 建议结果（name / summary 已按字数约束规整）
+     *
+     * @throws BizException    草稿为空
+     * @throws AiCallException AI 未配置 / 调用失败 / 输出不可解析
+     */
+    public WorldMetaSuggestVO suggestFromDraft(Long userId, Long projectId, WorldMetaDraftDTO draft) {
+        if (draft == null) {
+            throw new BizException(400, "缺少世界观草稿，无法生成世界名与简介");
+        }
+        return doSuggest(userId, projectId, draft.name(), fieldsOf(draft));
+    }
+
+    /** 生成建议的公共实现：拼提示 → 调 AI → 解析规整 → 记账。 */
+    private WorldMetaSuggestVO doSuggest(Long userId, Long projectId, String fallbackName, List<Field> fields) {
+        if (aiChatGateway == null) {
+            throw new AiCallException("AI 能力未装配，请手动填写世界名与世界简介");
+        }
+        if (fields.isEmpty()) {
+            throw new BizException(400, "世界观内容为空，无法自动生成世界名与简介");
+        }
+        String userPrompt = userPrompt(fields);
         PromptSpecRegistry.PromptSpec spec = PromptSpecRegistry.spec(SCENE_WORLD_META_SUGGEST);
         AiChatRequest request = new AiChatRequest(null,
                 List.of(new AiChatRequest.ChatMessage("system", systemPrompt()),
@@ -130,12 +171,47 @@ public class WorldMetaSuggestService {
             throw new AiCallException("世界名与简介生成失败：" + e.getMessage(), e);
         }
         String text = result == null || result.content() == null ? "" : result.content().trim();
-        WorldMetaSuggestVO vo = parse(text, setting);
+        WorldMetaSuggestVO vo = parse(text, fallbackName);
         if (vo == null) {
             throw new AiCallException("AI 未返回有效的世界名与简介，请手动填写");
         }
         recordUsage(userId, result, request, text);
         return vo;
+    }
+
+    /** 提示词里的一个设定分节。 */
+    private record Field(String label, String value) {
+    }
+
+    /** 已落库设定 → 提示词分节（顺序与旧版一致，避免提示词漂移）。 */
+    private static List<Field> fieldsOf(ActorWorldSetting s) {
+        List<Field> f = new ArrayList<>(9);
+        f.add(new Field("世界观名称", s.getName()));
+        f.add(new Field("题材", s.getGenre()));
+        f.add(new Field("时代", s.getEra()));
+        f.add(new Field("地理", s.getGeography()));
+        f.add(new Field("势力", s.getFactions()));
+        f.add(new Field("规则体系", s.getMagicSystem()));
+        f.add(new Field("文化", s.getCulture()));
+        f.add(new Field("历史", s.getHistory()));
+        f.add(new Field("补充", s.getFreeText()));
+        return f;
+    }
+
+    /** 未落库草稿 → 提示词分节（不含名称：名字本身就是要 AI 从设定里推出来的）。 */
+    private static List<Field> fieldsOf(WorldMetaDraftDTO d) {
+        List<Field> f = new ArrayList<>(8);
+        f.add(new Field("题材", d.genre()));
+        f.add(new Field("世界程度", d.tone()));
+        f.add(new Field("时代", d.era()));
+        f.add(new Field("地理", d.geography()));
+        f.add(new Field("势力", d.factions()));
+        f.add(new Field("规则体系", d.magicSystem()));
+        f.add(new Field("文化", d.culture()));
+        f.add(new Field("历史", d.history()));
+        f.add(new Field("补充", d.freeText()));
+        f.removeIf(x -> x.value() == null || x.value().isBlank());
+        return f;
     }
 
     /** 系统提示（与 PromptTemplateService.CODE_WORLD_META_SUGGEST 内置模板同口径）。 */
@@ -146,19 +222,13 @@ public class WorldMetaSuggestService {
                 """;
     }
 
-    /** 用户提示：把世界观六个分节压成可读输入。 */
-    private String userPrompt(ActorWorldSetting s) {
+    /** 用户提示：把世界观各分节压成可读输入。 */
+    private String userPrompt(List<Field> fields) {
         StringBuilder sb = new StringBuilder();
         sb.append("【世界设定】\n");
-        appendField(sb, "世界观名称", s.getName());
-        appendField(sb, "题材", s.getGenre());
-        appendField(sb, "时代", s.getEra());
-        appendField(sb, "地理", s.getGeography());
-        appendField(sb, "势力", s.getFactions());
-        appendField(sb, "规则体系", s.getMagicSystem());
-        appendField(sb, "文化", s.getCulture());
-        appendField(sb, "历史", s.getHistory());
-        appendField(sb, "补充", s.getFreeText());
+        for (Field f : fields) {
+            appendField(sb, f.label(), f.value());
+        }
         sb.append("\n【任务】\n");
         sb.append("请给出这个世界的名字（").append(NAME_MIN).append("-").append(NAME_MAX)
                 .append(" 个汉字，有辨识度，可带短副题）与一句话简介（").append(SUMMARY_MIN).append("-")
@@ -185,7 +255,7 @@ public class WorldMetaSuggestService {
      * <p>字数不达标时的处理：名字超长截断、简介超长按句读截断；短于下限不补写
      * （补写只会得到注水文案），仍返回给用户改写。</p>
      */
-    private WorldMetaSuggestVO parse(String text, ActorWorldSetting setting) {
+    private WorldMetaSuggestVO parse(String text, String fallbackName) {
         if (text == null || text.isBlank()) {
             return null;
         }
@@ -202,7 +272,7 @@ public class WorldMetaSuggestService {
         }
         String name = root.path("name").asString("").trim();
         String summary = root.path("summary").asString("").trim();
-        name = normalizeName(name, setting);
+        name = normalizeName(name, fallbackName);
         summary = normalizeSummary(summary);
         if (name.isBlank() || summary.isBlank()) {
             return null;
@@ -210,11 +280,11 @@ public class WorldMetaSuggestService {
         return new WorldMetaSuggestVO(name, summary);
     }
 
-    /** 名字规整：去引号/换行，超长截断；模型没给名字时回退世界观名称 */
-    private static String normalizeName(String name, ActorWorldSetting setting) {
+    /** 名字规整：去引号/换行，超长截断；模型没给名字时回退参考名（草稿场景可为空） */
+    private static String normalizeName(String name, String fallbackName) {
         String v = oneLine(name);
         if (v.isBlank()) {
-            v = oneLine(setting == null ? null : setting.getName());
+            v = oneLine(fallbackName);
         }
         if (v.length() > NAME_MAX) {
             v = v.substring(0, NAME_MAX);

@@ -60,6 +60,8 @@ export * from './worldgen'
 export * from './sandbox'
 // 项目记忆
 export * from './worldMemory'
+// 物品与装备（对接：背包装备槽物品流水）
+export * from './items'
 // 决策与协调
 export * from './decision'
 // 遗传婚育谱系

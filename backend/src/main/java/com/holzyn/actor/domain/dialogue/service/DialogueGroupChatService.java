@@ -125,6 +125,19 @@ public class DialogueGroupChatService {
     @Autowired(required = false)
     private ActorCharacterRepository characterRepository;
 
+    /** 关系动力学（修：群聊内 NPC↔NPC 互动需给关系值留增量；空则跳过） */
+    @Lazy
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.agent.learning.RelationDynamicsService relationDynamicsService;
+
+    /** 单轮互动好感增量（有来回的一轮里双方都发过言 → 各 +1，走既有钳制/事件/状态机）。 */
+    static final int GROUP_PAIR_DELTA = 1;
+
+    /** 世界回写（dialog 事件/位置/时间；开关关时 no-op） */
+    @Lazy
+    @Autowired(required = false)
+    private com.holzyn.actor.domain.world.dialog.service.DialogWorldService dialogWorldService;
+
     /**
      * 一轮群聊（SSE 串行流式逐角色回应）。
      *
@@ -189,6 +202,8 @@ public class DialogueGroupChatService {
         }
         sink.send("done", Map.of("sessionId", session.getId(), "replied", replied,
                 "skipped", skipped, "failed", failed, "aborted", aborted));
+        // 修：本轮真正来回过的 NPC 对 → 好感增量（此前群聊零写入，关系值恒等于种子值）
+        applyGroupRelationDelta(projectId, history.size(), running);
         // M4 长对话滚动窗口自动摘要（done 后触发；超窗才发起 AI 摘要，零开销）
         if (summaryService != null) {
             try {
@@ -197,11 +212,93 @@ public class DialogueGroupChatService {
                 log.warn("[群聊] 自动摘要触发失败（fail-open，不影响本轮回复）: {}", e.getMessage());
             }
         }
+        // 群聊一轮 → 一条 dialog 汇总事件 + 位置/时间（开关开）
+        onWorldRound(projectId, userId, session, roster, running);
+    }
+
+    /** 把群聊本轮交给世界回写（摘要取本轮最后一条回复）。 */
+    private void onWorldRound(Long projectId, Long userId, ActorDialogueSession session,
+                              List<DialogueGroupMemberVO> roster, List<ActorDialogueMessage> running) {
+        if (dialogWorldService == null || !dialogWorldService.enabled() || session == null) {
+            return;
+        }
+        try {
+            List<String> refs = roster.stream().map(DialogueGroupMemberVO::characterRef).toList();
+            ActorDialogueMessage lastMsg = running == null || running.isEmpty()
+                    ? null : running.get(running.size() - 1);
+            String tail = lastMsg == null || lastMsg.getContent() == null ? "" : lastMsg.getContent();
+            if (tail.length() > 160) {
+                tail = tail.substring(0, 160);
+            }
+            String summary = "群聊（" + roster.size() + " 人在场）：" + tail;
+            com.holzyn.actor.domain.world.dialog.model.DialogRound round =
+                    com.holzyn.actor.domain.world.dialog.model.DialogRound.builder()
+                            .channel("dialogue")
+                            .projectId(projectId)
+                            .userId(userId)
+                            .sessionId(session.getId())
+                            .sessionKey("dialogue:" + session.getId())
+                            .locationId(session.getLocationId())
+                            .locationName(session.getLocationName())
+                            .participantRefs(refs)
+                            .summary(summary)
+                            .lastMessageId(lastMsg == null ? null : lastMsg.getId())
+                            .gameSecond(session.getFrozenGameSecond())
+                            .frozen(session.getFrozenGameSecond() != null)
+                            .build();
+            dialogWorldService.onPlayerRound(round);
+        } catch (Exception e) {
+            log.warn("[群聊] 世界回写失败（fail-open，不影响回复）: session={} : {}",
+                    session.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 群聊互动关系增量（修）。
+     * <p>缺陷来源：群聊链路此前完全不写 {@code actor_character_relation}，16 对追踪里 14 对 Δ=0，
+     * 「关系亲密度随互动史惯性演化」因此无法成立。此处只对<b>本轮双方都发过言</b>的 NPC 对给小额增量，
+     * 走既有 {@link com.holzyn.actor.domain.agent.learning.RelationDynamicsService#applyDialogPairDelta}
+     * （双向对称 + 钳制 + 状态机 + 事件），不新增写入口、不新增表、零 AI 调用。</p>
+     *
+     * @param projectId  项目 ID
+     * @param startIndex 历史长度（{@code running} 中下标小于它的属于本轮之前的旧消息）
+     * @param running    本轮结束后的完整消息序列
+     */
+    private void applyGroupRelationDelta(Long projectId, int startIndex, List<ActorDialogueMessage> running) {
+        if (relationDynamicsService == null || projectId == null || running == null || running.isEmpty()) {
+            return;
+        }
+        Map<String, Integer> speaks = new LinkedHashMap<>();
+        for (int i = Math.max(0, startIndex); i < running.size(); i++) {
+            ActorDialogueMessage m = running.get(i);
+            if (m == null || m.getCharacterRef() == null || m.getCharacterRef().isBlank()) {
+                continue;
+            }
+            if (!"assistant".equals(m.getRole()) && !"group".equals(m.getRole())) {
+                continue;
+            }
+            speaks.merge(m.getCharacterRef(), 1, Integer::sum);
+        }
+        // 只有一个人说话 → 没有「互相回应」，不加
+        if (speaks.size() < 2) {
+            return;
+        }
+        List<String> refs = new ArrayList<>(speaks.keySet());
+        for (int i = 0; i < refs.size(); i++) {
+            for (int j = i + 1; j < refs.size(); j++) {
+                try {
+                    relationDynamicsService.applyDialogPairDelta(projectId, refs.get(i), refs.get(j),
+                            GROUP_PAIR_DELTA, "群聊互动：" + refs.get(i) + " ↔ " + refs.get(j));
+                } catch (Exception e) {
+                    log.warn("[群聊] 关系增量写入失败（fail-open）: {} ↔ {} : {}",
+                            refs.get(i), refs.get(j), e.getMessage());
+                }
+            }
+        }
     }
 
     /** 单成员回复结果。 */
-    private record Outcome(ActorDialogueMessage message, boolean skippedDup, boolean aborted) {
-        static Outcome saved(ActorDialogueMessage m) {
+    private record Outcome(ActorDialogueMessage message, boolean skippedDup, boolean aborted) {        static Outcome saved(ActorDialogueMessage m) {
             return new Outcome(m, false, false);
         }
         static Outcome dup() {
@@ -234,9 +331,12 @@ public class DialogueGroupChatService {
                     "你是" + member.characterName() + "，绝不能跳出角色。", "【本轮】" + content);
         }
         PromptSpecRegistry.PromptSpec spec = PromptSpecRegistry.spec(SCENE_GROUP_REPLY);
+        // 实测（群聊）：ctx.system() 是每角色恒定的角色卡段，按 system 交给网关会被整体
+        // 后置到最后一条 user 末尾——群聊 prompt 末尾 2,250 字符全是卡，可缓存前缀只剩统一 system+契约，
+        // 实测命中率被压到 44%。合并成单条 user 后，卡段进入「static 前缀 + 卡段」的长前缀。
+        String cardPart = ctx.system() == null || ctx.system().isBlank() ? "" : ctx.system() + "\n\n";
         AiChatRequest request = new AiChatRequest(null,
-                List.of(new AiChatRequest.ChatMessage("system", ctx.system()),
-                        new AiChatRequest.ChatMessage("user", ctx.user())),
+                List.of(new AiChatRequest.ChatMessage("user", cardPart + (ctx.user() == null ? "" : ctx.user()))),
                 spec.temperature(), spec.maxOutputTokens(), false);
         StringBuilder answer = new StringBuilder();
         boolean[] broken = {false};

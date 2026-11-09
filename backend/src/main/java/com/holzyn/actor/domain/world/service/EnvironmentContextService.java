@@ -49,7 +49,7 @@ import java.util.concurrent.Executors;
  * 查表 + 每日波动 ±15 分钟 + 骨架平移）、时刻阶段（夜/晨/昼/昏）、体感气温（季基准或帧温 +
  * 天气修正 + 时段修正）、环境状态文本（确定性模板组合）、感官标签；供三处注入
  * （感知段/对话【当前环境】段/决策情境）与读接口共用。</p>
- * <p><b>AI 润色（environment_desc 模板，：默认开，预算内）</b>：⚠️ 遵循 S4 冒烟教训
+ * <p><b>AI 润色（environment_desc 模板，默认开，预算内）</b>：⚠️ 遵循 S4 冒烟教训
  * （HTTP 事务内同步 AI 拖死）——润色<b>绝不在注入/读接口同步路径调用</b>，而是
  * 「帧生成/天气切换后异步预生成」：{@link #warmupAsync} 在后台虚拟线程按当日 4 个时段
  * （晨/昼/昏/夜）各润色一次并缓存（键=项目+游戏日+时段+天气指纹），注入/接口只读缓存，
@@ -226,6 +226,11 @@ public class EnvironmentContextService {
             EnvironmentContextVO ctx = computeContext(projectId, gameSecond);
             StringBuilder sb = new StringBuilder("【当前环境】");
             sb.append(ctx.getSeasonName()).append("日").append(ctx.getPhaseName());
+            // 时间性验证：环境段带星期，NPC 才能感知「工作日/周末」（7 日周通用语义，不绑定具体世界）
+            Long gs = ctx.getGameSecond() != null ? ctx.getGameSecond() : gameSecond;
+            if (gs != null) {
+                sb.append("（").append(WorldClockService.weekdayLabel(WorldClockService.weekdayIndex(gs))).append("）");
+            }
             if (ctx.getWeather() != null && !ctx.getWeather().isBlank()) {
                 sb.append("，").append(ctx.getWeather());
             }
@@ -239,6 +244,11 @@ public class EnvironmentContextService {
                 sb.append("（日落 ").append(ctx.getSunset()).append("）");
             }
             String text = sb.toString();
+            // 时间律：把「星期 + 时段」翻译成可执行的行为倾向，避免 NPC 凌晨三点照常营生。
+            // 通用 7 日周语义，不绑定具体世界；仅作提示，最终行为仍由角色 AI 决定。
+            if (gs != null) {
+                text = text + "\n【时间律】" + rhythmHint(gs) + "；行动应与这一时段、星期相符。";
+            }
             if (maxLen > 0 && text.length() > maxLen) {
                 return text.substring(0, maxLen);
             }
@@ -247,6 +257,35 @@ public class EnvironmentContextService {
             log.warn("[环境] 注入环境段失败（静默降级）: project={} : {}", projectId, e.getMessage());
             return "";
         }
+    }
+
+    /**
+     * 时间律提示：星期（工作日/周末）× 时段 → 一句话行为倾向。通用 7 日周语义，不绑定具体世界。
+     *
+     * @param gameSecond 游戏秒
+     *
+     * @return 形如「工作日·上午，营生/事务正忙」
+     */
+    static String rhythmHint(long gameSecond) {
+        int idx = WorldClockService.weekdayIndex(gameSecond);
+        int hour = (int) Math.floorMod(Math.floorDiv(gameSecond, 3600L), 24L);
+        boolean weekend = WorldClockService.isWeekend(idx);
+        String day = weekend ? "周末" : "工作日";
+        String seg;
+        if (hour >= 23 || hour < 5) {
+            seg = "深夜，多数人已入睡";
+        } else if (hour < 8) {
+            seg = "清晨，多数人刚起身";
+        } else if (hour < 12) {
+            seg = weekend ? "上午，营生多已歇息" : "上午，营生/事务正忙";
+        } else if (hour < 18) {
+            seg = weekend ? "午后，多在外走动、访友或赶集" : "午后，继续营生/事务";
+        } else if (hour < 22) {
+            seg = "傍晚，陆续收工归家";
+        } else {
+            seg = "夜里，准备歇息";
+        }
+        return day + "·" + seg;
     }
 
     // ==================== AI 润色（异步预生成，S4 教训：同步路径零 AI） ====================

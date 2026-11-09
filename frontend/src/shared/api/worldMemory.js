@@ -33,3 +33,11 @@ export const fetchEntityHistory = (projectId, entityKey) => http.get(`/api/world
 export const updateEntity = (projectId, data) => http.post(`/api/worlds/${projectId}/world-memory/entities`, data)
 // 项目记忆概览（编年史条数/实体数/归档数/最新条目/近期实体变化）
 export const fetchWorldMemoryOverview = (projectId) => http.get(`/api/worlds/${projectId}/world-memory/overview`)
+
+// ==================== 世界事实台账 ====================
+// 事实列表（status 默认 active；factType 九类；keyword 命中 factKey/name/stateText；limit≤500）
+export const fetchWorldFacts = (projectId, params) =>
+  http.get(`/api/worlds/${projectId}/world-facts`, { params })
+// 某事实版本链（新→旧，含 before/after/delta/来源事件）
+export const fetchWorldFactVersions = (projectId, factId) =>
+  http.get(`/api/worlds/${projectId}/world-facts/${factId}/versions`)

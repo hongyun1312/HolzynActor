@@ -239,4 +239,64 @@ class WaitPlanServiceTest {
         verify(agentRuntime, never()).trigger(any(), any(), any());
         verify(agentActionService, never()).execute(any());
     }
+
+    // ====================等待占位符 ====================
+
+    /**
+     * action_json 里没有 {@code action} 键（schedule.plan 效果包常用 ReAct 契约名）→
+     * 从 {@code action_detail} 取到原动作，而不是回退占位句。
+     */
+    @Test
+    void originalActionOfFallsBackToActionDetailKey() {
+        ActorActionPlan plan = new ActorActionPlan();
+        plan.setActionJson("{\"action_detail\":\"去铁匠铺催铁料\",\"action_type\":\"move_to\"}");
+        assertEquals("去铁匠铺催铁料", service.originalActionOf(plan));
+    }
+
+    /**
+     * action_json 内层又是 JSON 字符串 → 解包成人话（不再把 JSON 当动作拼进刺激）。
+     */
+    @Test
+    void originalActionOfUnwrapsNestedJson() {
+        ActorActionPlan plan = new ActorActionPlan();
+        plan.setActionJson("{\"action\":\"{\\\"action\\\":\\\"去米行讨碗水喝\\\"}\"}");
+        assertEquals("去米行讨碗水喝", service.originalActionOf(plan));
+    }
+
+    /**
+     * 取不到人话 → 返回 null（调用方改写成不含引用的中性提示，
+     * 不再把「那件原本打算去做的事」当成角色真说过的话）。
+     */
+    @Test
+    void originalActionOfReturnsNullWhenNothingExtractable() {
+        ActorActionPlan empty = new ActorActionPlan();
+        assertNull(service.originalActionOf(empty));
+        ActorActionPlan blank = new ActorActionPlan();
+        blank.setActionJson("   ");
+        assertNull(service.originalActionOf(blank));
+        ActorActionPlan noHumanText = new ActorActionPlan();
+        noHumanText.setActionJson("{\"foo\": 1}");
+        assertNull(service.originalActionOf(noHumanText));
+    }
+
+    /**
+     * 原动作取不到时，刺激文本里不得出现占位句或空的引用括号。
+     */
+    @Test
+    void runDueWaitPlans_placeholderNeverLeaksIntoStimulus() throws Exception {
+        ActorActionPlan plan = waitPlan(11L, 1L, "去河边打水");
+        plan.setActionJson("{\"foo\": 1}");
+        when(planRepository.findByStatusAndPlannedGameSecondLessThanEqual(eq("planned"), eq(36000L)))
+                .thenReturn(List.of(plan));
+        when(characterRepository.findById(1L)).thenReturn(java.util.Optional.of(charOf(1L)));
+
+        service.runDueWaitPlans(1L, 36000L);
+
+        awaitTriggered(1);
+        assertEquals(1, triggeredCtxs.size());
+        String situation = triggeredCtxs.get(0).situation();
+        assertTrue(!situation.contains("那件原本打算去做的事"), "不得再出现占位句：" + situation);
+        assertTrue(!situation.contains("「」"), "不得出现空引用：" + situation);
+        assertTrue(situation.contains("时候到了"), "仍要给「到点了」的提示：" + situation);
+    }
 }

@@ -251,9 +251,21 @@ public class DialogueContextAssembler {
         }
         String who = characterName == null || characterName.isBlank() ? "你" : characterName;
         String you = playerName == null || playerName.isBlank() ? "你" : playerName;
+        // 修（信念面）：反事实前提"当轮记住、下一轮就丢"，因为前提只躺在对话历史里，
+        // 而角色卡写着旧事实，模型两头冲突时选卡片。这里把对方最近说过的三句话单独再列一遍，
+        // 明确要求"这些是你已经知道的事、不许忘"——不新增表、不改 schema，纯投影。
+        String recent = recentUserUtterances(history, 3);
+        if (!recent.isBlank()) {
+            segs.add("【" + you + "此前告诉过你的事（你已经知道，不许忘）】\n" + recent);
+        }
+        // 修（复读面）：实测同一问题在注入新信息后再问，模型会把自己上一轮的答复
+        // 整段照抄（连"沉默片刻才开口"都一样），表现为"听了等于没听"。这里在动态段末尾
+        // 加一条硬要求：先回应对方刚说的新信息，且不得整段复述自己说过的话。
         segs.add("【本轮】" + you + "对你说：" + (userMessage == null ? "" : userMessage.trim()) + "\n"
                 + "请直接以" + who + "的口吻回复正文（第一人称，像真人一样自然回应），不要输出任何 JSON 外壳、"
-                + "不要标注角色名、不要替" + you + "说话。");
+                + "不要标注角色名、不要替" + you + "说话。\n"
+                + "先回应" + you + "刚说的这句话——若有新信息（关于你自己、你的亲人、村里的事），"
+                + "必须先对此作出反应再谈别的；不得整段照抄你先前说过的内容。");
         return String.join("\n\n", segs).trim();
     }
 
@@ -602,8 +614,65 @@ public class DialogueContextAssembler {
         return sb.toString();
     }
 
-    /** 历史文本行（记忆注入去重用：剔除与历史窗口重叠的记忆）。 */
-    private List<String> historyTextLines(List<ActorDialogueMessage> history) {
+    /**
+     * 取对方（玩家）最近 {@code n} 句原话，用于「你已经知道、不许忘」段（修信念面）。
+     * <p>只取 user 角色、跳过空串，按时间正序用「·」串起来；不足一句返回空串（fail-open）。
+     * 不做任何语义判断——就是在历史之外再投影一遍，保证反事实前提不会因为窗口/摘要而消失。</p>
+     */
+    private String recentUserUtterances(List<ActorDialogueMessage> history, int n) {
+        if (history == null || history.isEmpty() || n <= 0) {
+            return "";
+        }
+        // 两遍扫：先挑「陈述句」（对方告诉你的事），不够再用最近的问句兜底。
+        // 依据是实测：注入的反事实前提在第 3 个追问时已经退到窗口第 4–6 位，
+        // 只取「最近三句」会把它挤掉；而问句只问不告诉，本来就不承载事实。
+        List<String> statements = new ArrayList<>();
+        for (int i = history.size() - 1; i >= 0 && statements.size() < n; i--) {
+            String text = userTextOf(history.get(i));
+            if (text == null) {
+                continue;
+            }
+            if (isStatement(text)) {
+                statements.add(clipHistory(text));
+            }
+        }
+        if (!statements.isEmpty()) {
+            java.util.Collections.reverse(statements);
+            return "· " + String.join("\n· ", statements);
+        }
+        List<String> picked = new ArrayList<>();
+        for (int i = history.size() - 1; i >= 0 && picked.size() < 2; i--) {
+            String text = userTextOf(history.get(i));
+            if (text != null) {
+                picked.add(clipHistory(text));
+            }
+        }
+        if (picked.isEmpty()) {
+            return "";
+        }
+        java.util.Collections.reverse(picked);
+        return "· " + String.join("\n· ", picked);
+    }
+
+    /** user 角色的非空正文；其它角色/空串返回 null。 */
+    private String userTextOf(ActorDialogueMessage m) {
+        if (m == null || !"user".equals(m.getRole()) || m.getContent() == null
+                || m.getContent().isBlank()) {
+            return null;
+        }
+        return m.getContent().trim();
+    }
+
+    /** 粗判陈述句：不以问号结尾、且够长（问句只问不告诉，不承载事实）。 */
+    private boolean isStatement(String text) {
+        if (text == null || text.length() < 12) {
+            return false;
+        }
+        String t = text.trim();
+        return !(t.endsWith("？") || t.endsWith("?")) && !t.endsWith("吗") && !t.endsWith("呢");
+    }
+
+    /** 历史文本行（记忆注入去重用：剔除与历史窗口重叠的记忆）。 */    private List<String> historyTextLines(List<ActorDialogueMessage> history) {
         List<String> out = new ArrayList<>();
         if (history == null) {
             return out;

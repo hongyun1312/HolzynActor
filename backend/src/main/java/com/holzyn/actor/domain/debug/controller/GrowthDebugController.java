@@ -89,6 +89,14 @@ public class GrowthDebugController {
     private final ActorCharacterRepository characterRepository;
     private final WorldClockService worldClockService;
     private final TestRunService testRunService;
+
+    /**
+     * 地点读口（权威坐标 → 要素 → 归属住户；null=未装配）。
+     * <p>字段注入而非 final：既有多处测试按 {@code @RequiredArgsConstructor} 的签名单建本类，
+     * 改构造器会让那些测试大改（AGENTS.md 8.1.2「禁止修改既有服务的构造器签名」同口径）。</p>
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.holzyn.actor.domain.mapnav.service.NpcPlaceView placeView;
     private final tools.jackson.databind.ObjectMapper objectMapper;
     /** 人格演化（shift/assess 测试操作 + shift-log 只读） */
     private final PersonalityShiftService personalityShiftService;
@@ -236,6 +244,61 @@ public class GrowthDebugController {
         GrowthSpace current = growthSpaceService.currentSpace(projectId, npcRef);
         out.put("current", current);
         out.put("history", growthSpaceService.historyOf(projectId, npcRef));
+        return out;
+    }
+
+    /**
+     * 决策口径的空间（走 {@code ensureSpace}）：位置变化时按新地点零 AI 重算，并回显地点与候选。
+     *
+     * <p><b>为什么需要这个只读口</b>：「环境进入决策」不能只验提示词里有没有那句话，
+     * 必须能直接看到<b>候选集</b>随地点变化——站在阿珍家门口时选项应是「敲门/门外等」，
+     * 站在自家灶房时是「生火做饭/取用工具」。这个接口把地点快照、空间来源、触发码、候选与禁止项
+     * 一次列出来，供测试逐位比对。</p>
+     *
+     * @param projectId  项目 ID
+     *
+     * @param npcRef     角色引用（npc:{id}）
+     *
+     * @param gameSecond 游戏秒（可空=引擎当前时刻）
+     *
+     * @return 地点 + 空间来源/触发码/候选/禁止项
+     */
+    @GetMapping("/space/ensure")
+    public Map<String, Object> ensureSpace(@RequestParam Long projectId, @RequestParam String npcRef,
+                                           @RequestParam(required = false) Long gameSecond) {
+        testRunService.requireTestEnabled();
+        Long engineSecond = worldClockService.currentEngineGameSecond(projectId);
+        long gs = gameSecond != null && gameSecond > 0
+                ? gameSecond : (engineSecond == null ? 0L : engineSecond);
+        GrowthSpace space = growthSpaceService.ensureSpace(projectId, npcRef, gs);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("gameSecond", gs);
+        if (placeView != null) {
+            com.holzyn.actor.domain.mapnav.service.NpcPlaceView.Place place = placeView.at(projectId, npcRef);
+            Map<String, Object> p = new LinkedHashMap<>();
+            p.put("name", place.name());
+            p.put("category", place.category());
+            p.put("known", place.known());
+            p.put("ownHome", place.atOwnHome());
+            p.put("othersHome", place.atOthersHome());
+            out.put("place", p);
+            out.put("arrivedAfter", placeView.arrivedAfter(projectId, npcRef, space == null ? null : space.getGameSecond()));
+        }
+        if (space != null) {
+            out.put("source", space.getSource());
+            out.put("triggerCode", space.getTriggerCode());
+            out.put("spaceGameSecond", space.getGameSecond());
+            com.holzyn.actor.domain.growth.space.GrowthSpaceParse.GrowthSpaceDoc doc =
+                    com.holzyn.actor.domain.growth.space.GrowthSpaceParse.parse(space.getSpaceJson());
+            if (doc != null) {
+                out.put("actions", doc.possibleActions() == null ? List.of()
+                        : doc.possibleActions().stream().map(com.holzyn.actor.domain.growth.space.GrowthSpaceParse
+                        .ActionItem::action).toList());
+                out.put("forbidden", doc.forbidden() == null ? List.of()
+                        : doc.forbidden().stream().map(com.holzyn.actor.domain.growth.space.GrowthSpaceParse
+                        .ForbiddenItem::what).toList());
+            }
+        }
         return out;
     }
 

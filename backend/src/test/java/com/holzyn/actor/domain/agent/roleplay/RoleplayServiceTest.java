@@ -230,7 +230,7 @@ class RoleplayServiceTest {
         ActorConversationMember member = new ActorConversationMember();
         member.setCharacterId(3L);
         member.setMemberType("special");
-        when(memberRepository.findByConversationId(200L)).thenReturn(List.of(member));
+        when(memberRepository.findActiveByConversationId(200L)).thenReturn(List.of(member));
         when(roleplayContextService.resolveCharacterPrompt(100L, "special", 3L)).thenReturn("你是茶馆掌柜玄铁。");
         when(worldClockService.currentGameHour(100L)).thenReturn(100L);
         when(worldClockService.gameTimeTextOf(100L, 100L)).thenReturn("第三日午时");
@@ -249,8 +249,11 @@ class RoleplayServiceTest {
         List<AiChatRequest.ChatMessage> messages = service.buildReplyMessages(conv, pending, 1L);
 
         assertNotNull(messages);
-        assertTrue(messages.stream().anyMatch(m -> "system".equals(m.role()) && m.content().contains("你是茶馆掌柜玄铁。")),
-                "应含角色卡 system_prompt（normalizeForLlm 合并 system 段后按包含匹配）");
+        // 角色卡从 system 改挂首条 user——网关会把调用方 system 内容整体后置到最后一条
+        // user 末尾，卡段因此吃不到前缀缓存（群聊实测卡落在 prompt 最末端 2,250 字符）。
+        assertTrue("user".equals(messages.get(0).role())
+                        && messages.get(0).content().contains("你是茶馆掌柜玄铁。"),
+                "角色卡应挂在首条 user（前缀缓存修复：卡段前置、与常驻段连成一条长前缀）");
         assertTrue(messages.stream().anyMatch(m -> "user".equals(m.role()) && m.content().contains("第三日午时")),
                 "应含场景注入（O4 分层：场景变化段在 user 触发消息中，随时钟刷新）");
         assertTrue(messages.stream().anyMatch(m -> "user".equals(m.role()) && "掌柜，来壶茶".equals(m.content())));
@@ -275,7 +278,7 @@ class RoleplayServiceTest {
         ActorConversationMember member = new ActorConversationMember();
         member.setCharacterId(3L);
         member.setMemberType("special");
-        when(memberRepository.findByConversationId(200L)).thenReturn(List.of(member));
+        when(memberRepository.findActiveByConversationId(200L)).thenReturn(List.of(member));
         when(roleplayContextService.resolveCharacterPrompt(100L, "special", 3L)).thenReturn("你是茶馆掌柜玄铁。");
         when(worldClockService.currentGameHour(100L)).thenReturn(100L);
         when(worldClockService.gameTimeTextOf(100L, 100L)).thenReturn("第三日午时");
@@ -298,9 +301,11 @@ class RoleplayServiceTest {
         pending.setCharacterId(3L);
         List<AiChatRequest.ChatMessage> messages = service.buildReplyMessages(conv, pending, 1L);
 
-        assertTrue(messages.stream().anyMatch(m -> "system".equals(m.role())
-                        && m.content().contains("【世界观】") && m.content().contains("青禾村是大雍朝")),
-                "段 1A 世界观（common_knowledge 精炼常识）应拼入 system 前缀（批 2 对话链）");
+        // 段 1A 与角色卡同挂首条 user（卡段前置），不再拼进 system 前缀。
+        assertTrue("user".equals(messages.get(0).role())
+                        && messages.get(0).content().contains("【世界观】")
+                        && messages.get(0).content().contains("青禾村是大雍朝"),
+                "段 1A 世界观（common_knowledge 精炼常识）应拼入首条 user 卡段（前缀缓存修复）");
         String trigger = messages.stream().filter(m -> "user".equals(m.role()))
                 .map(AiChatRequest.ChatMessage::content).collect(Collectors.joining("\n"));
         assertTrue(trigger.contains("【当前世界动态】"), "段 2D 世界动态应注入触发消息");
@@ -323,7 +328,7 @@ class RoleplayServiceTest {
         ActorConversationMember crowd = new ActorConversationMember();
         crowd.setCharacterId(38L);
         crowd.setMemberType("common");
-        when(memberRepository.findByConversationId(9L)).thenReturn(List.of(crowd));
+        when(memberRepository.findActiveByConversationId(9L)).thenReturn(List.of(crowd));
         // G1a：是否普通型查 actor_profile.type（引用不再编码类型）；38=common、3=special
         when(characterRepository.findById(38L)).thenReturn(Optional.of(npc(38L, "common")));
         when(characterRepository.findById(3L)).thenReturn(Optional.of(character()));
@@ -515,7 +520,7 @@ class RoleplayServiceTest {
      * @param replyText  回复生成文本（可空=不生成回复）
      */
     private void stubGroupRound(List<ActorConversationMember> members, String decideJson, String replyText) {
-        when(memberRepository.findByConversationId(9L)).thenReturn(members);
+        when(memberRepository.findActiveByConversationId(9L)).thenReturn(members);
         when(groupChatConfigService.getMaxReplies(1L)).thenReturn(5);
         // 轮级清醒过滤以「引擎实际推进位置」为基准（P0 修复：不用流动时钟）
         when(worldClockService.currentEngineGameHour(100L)).thenReturn(12L);
@@ -978,7 +983,7 @@ class RoleplayServiceTest {
         ActorConversationMember member = new ActorConversationMember();
         member.setCharacterId(3L);
         member.setMemberType("special");
-        when(memberRepository.findByConversationId(201L)).thenReturn(List.of(member));
+        when(memberRepository.findActiveByConversationId(201L)).thenReturn(List.of(member));
         when(roleplayContextService.resolveCharacterPrompt(100L, "special", 3L)).thenReturn("你是玄铁。");
         when(worldClockService.currentGameHour(100L)).thenReturn(100L);
         when(worldClockService.gameTimeTextOf(100L, 100L)).thenReturn("第三日午时");

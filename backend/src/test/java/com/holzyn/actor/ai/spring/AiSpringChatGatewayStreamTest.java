@@ -209,11 +209,16 @@ class AiSpringChatGatewayStreamTest {
     }
 
     /**
-     * Flux 底层错误（网络中断/供应商错误）→ 包装为 AiCallException（与旧路径「AI 流式调用失败」契约一致）+ trace failed。
+     * Flux 底层错误（网络中断/供应商错误）+ 降级非流式也失败 → 包装为 AiCallException，两条原因都带上 + trace failed。
+     *
+     * <p>流式契约变化：单纯一次流式传输失败不再直接判死，会先降级非流式重发一次；
+     * 只有两条路都失败才上抛，且消息里必须同时能看到流式与非流式的真实原因。</p>
      */
     @Test
     void streamFluxErrorWrapsAiCallException() {
         when(chatModel.stream(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(Flux.error(new RuntimeException("connection reset")));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("connection reset"));
         AiChatRequest request = new AiChatRequest(null, List.of(new ChatMessage("user", "hi")), null, null, false);
 
         AiCallException ex = assertThrows(AiCallException.class,
@@ -225,6 +230,7 @@ class AiSpringChatGatewayStreamTest {
                 }));
 
         assertTrue(ex.getMessage().contains("connection reset"));
+        assertTrue(ex.getMessage().contains("降级为非流式后仍失败"), "必须说清两条路都试过了，否则排障会误以为没重试");
         traceService.awaitIdle(2000);
 
         ArgumentCaptor<ActorAiCallLog> captor = ArgumentCaptor.forClass(ActorAiCallLog.class);
@@ -296,6 +302,43 @@ class AiSpringChatGatewayStreamTest {
                 }));
 
         assertTrue(ex.getMessage().contains("对话消息不能为空"));
+    }
+
+    /**
+     * 流式传输失败 → 自动降级非流式重发一次，全文以单个增量回调送出，trace 标记 stream=false。
+     *
+     * <p>实测背景：本地兼容网关（llama.cpp / vLLM 的 OpenAI 兼容层）对 SSE 分块编码支持不齐——
+     * 直连 {@code curl -N} 能收到 chunk，经 Spring AI 的 Flux 桥接却抛 {@code OpenAioException: Request failed}，
+     * 整条对话直接失败。流式只是传输方式，拿不到分块就该读整段。</p>
+     */
+    @Test
+    void streamFallsBackToNonStreamWhenTransportFails() {
+        when(chatModel.stream(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(Flux.error(new IllegalStateException("Request failed")));
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(buildResponse("整段回复", usage(40, 12)));
+        AiChatRequest request = new AiChatRequest(null,
+                List.of(new ChatMessage("system", "sys"), new ChatMessage("user", "usr")), 0.5, 100, false);
+        List<String> tokens = new ArrayList<>();
+        List<AiUsage> usages = new ArrayList<>();
+
+        gateway.chatCompletionStream(9L, CONFIG, request, tokens::add, usages::add);
+        traceService.awaitIdle(2000);
+
+        assertEquals(List.of("整段回复"), tokens, "降级后应把全文一次性回调给 SSE 消费方");
+        assertEquals(1, usages.size(), "降级后仍要回调一次用量");
+        assertEquals(40, usages.get(0).promptTokens());
+        ArgumentCaptor<ActorAiCallLog> captor = ArgumentCaptor.forClass(ActorAiCallLog.class);
+        verify(repository).save(captor.capture());
+        assertTrue(captor.getValue().getDetailJson().contains("\"stream\":false"),
+                "降级调用必须把 trace 标成非流式，否则事后对 AI 调用做统计会把两种传输混在一起");
+    }
+
+    /** 构造带用量/模型元数据的非流式响应 */
+    private static ChatResponse buildResponse(String text, Usage usage) {
+        Generation gen = new Generation(new AssistantMessage(text));
+        ChatResponseMetadata meta = ChatResponseMetadata.builder().model("m").usage(usage).build();
+        return new ChatResponse(List.of(gen), meta);
     }
 
     /** 构造流式块：text 为增量文本（可空=usage-only 末块）；usage 可空=该块不携带用量（metadata 不带 usage 字段） */

@@ -28,6 +28,8 @@ import com.holzyn.actor.domain.agent.runtime.ActorWorldEngine;
 import com.holzyn.actor.domain.agent.runtime.ActorWorldEngineRepository;
 import com.holzyn.actor.domain.agent.runtime.BudgetGuard;
 import com.holzyn.actor.domain.agent.runtime.RunModes;
+import com.holzyn.actor.domain.npc.action.entity.ActorActionLog;
+import com.holzyn.actor.domain.npc.action.repository.ActorActionLogRepository;
 import com.holzyn.actor.domain.npc.goal.entity.ActorCharacterGoal;
 import com.holzyn.actor.domain.npc.goal.repository.ActorCharacterGoalRepository;
 import com.holzyn.actor.domain.npc.profile.entity.ActorCharacter;
@@ -91,6 +93,44 @@ public class PlanningService {
 
     /** 无外层预算窗口时自开的预算值（手动「AI 生成目标/日计划」路径，对齐 AgentRuntime ownsTick 模式） */
     private static final int SELF_BUDGET = 5;
+
+    // ==================== 目标状态机 ====================
+
+    /** 目标状态：进行中 */
+    public static final String STATUS_ACTIVE = "active";
+    /** 目标状态：已有进展之外的另一面——<b>卡住了</b>（连续 N 个游戏日无进展，还没到放弃） */
+    public static final String STATUS_BLOCKED = "blocked";
+    /** 目标状态：已达成 */
+    public static final String STATUS_DONE = "done";
+    /** 目标状态：已放弃 */
+    public static final String STATUS_ABANDONED = "abandoned";
+
+    /** 全部合法状态（手动 CRUD / 反思流转 / 生命周期扫描同口径） */
+    private static final List<String> GOAL_STATUSES =
+            List.of(STATUS_ACTIVE, STATUS_BLOCKED, STATUS_DONE, STATUS_ABANDONED);
+
+    /**
+     * 卡住阈值（游戏日）：连续这么多天没有任何行动命中目标 → blocked。
+     * <p>为什么是 3：二日实跑的观测粒度是一日一次跨日规划，1 天太容易误判（今天没轮到），
+     * 2 天仍在正常波动范围内；3 天没碰这件事，已经可以称之为「卡住了」。</p>
+     */
+    @org.springframework.beans.factory.annotation.Value("${holzyn.actor.thinking.goal.stall-days:3}")
+    private int goalStallDays = 3;
+
+    /** 放弃阈值（游戏日）：卡住之后再无进展这么多天 → abandoned（认了，不再空耗） */
+    @org.springframework.beans.factory.annotation.Value("${holzyn.actor.thinking.goal.abandon-days:7}")
+    private int goalAbandonDays = 7;
+
+    /** 判定「有进展」时回看的行动条数（够覆盖一个游戏日的行动密度，又不至于全表扫） */
+    private static final int PROGRESS_LOOKBACK_ACTIONS = 40;
+
+    /** 卡住目标注入决策的上限条数 */
+    private static final int STALLED_INJECT_MAX = 2;
+
+    /** 行动日志仓库（进展判定：目标标题关键词命中近期行动 = 有进展；可空=跳过进展判定） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ActorActionLogRepository actionLogRepository;
+
 
     /** 日计划条目数（对齐 Smallville 5~8 条） */
     private static final int PLAN_ITEMS_MIN = 5;
@@ -200,12 +240,18 @@ public class PlanningService {
                 .orElseThrow(() -> new BizException(404, "目标不存在：" + goalId));
         requireProject(g.getProjectId());
         if (status != null && !status.isBlank()) {
-            if (!List.of("active", "done", "abandoned").contains(status)) {
+            if (!GOAL_STATUSES.contains(status)) {
                 throw new BizException(400, "目标状态非法：" + status);
             }
             g.setStatus(status);
-            if ("active".equals(status)) {
+            if (STATUS_ACTIVE.equals(status)) {
                 g.setFinishedAt(null);
+                g.setBlockedReason(null);
+            } else if (STATUS_BLOCKED.equals(status)) {
+                g.setFinishedAt(null);
+                if (g.getBlockedReason() == null || g.getBlockedReason().isBlank()) {
+                    g.setBlockedReason("手动标记为卡住");
+                }
             }
         }
         if (title != null && !title.isBlank()) {
@@ -452,6 +498,230 @@ public class PlanningService {
         return json;
     }
 
+    // ==================== 目标状态机 ====================
+
+    /**
+     * 目标生命周期扫描（跨日执行一次）：按「最近一次有进展的游戏日」推进目标状态。
+     *
+     * <p><b>为什么必须做这件事</b>：澄江镇二日实跑的目标审计是「零状态流转」——
+     * 51 个目标全程 {@code active}，达成 0、放弃 0、卡住 0。目标在 prompt 里只是一行装饰：
+     * 既不会因为推进而向前，也不会因为做不到而退场，于是行动层永远围着生理需求打转。
+     * 目标系统真正缺的不是状态枚举，而是<b>时间轴</b>。</p>
+     *
+     * <p><b>状态流转规则</b>（只对 active/blocked 生效，done/abandoned 是终态）：</p>
+     * <ul>
+     * <li>首次被扫描到（{@code progressGameDay} 为空）→ 记当天为基准日，先观察；</li>
+     * <li>近期行动文本命中目标标题关键词（≥2 个二字片段）→ 视为<b>有进展</b>：基准日推到当天，
+     * 若此前 blocked 则恢复 active 并清空原因（卡住的东西有人动了一下，就不该继续卡着）；</li>
+     * <li>连续 {@code goalStallDays}（默认 3）个游戏日无进展 → {@code blocked}；</li>
+     * <li>连续 {@code goalAbandonDays}（默认 7）个游戏日无进展 → {@code abandoned}。</li>
+     * </ul>
+     *
+     * <p><b>为什么用行动文本命中而不是等 AI 判断</b>：AI 判断（反思链 goal_updates）是双通道之一，
+     * 但它依赖反思触发与预算，实跑里一次都没发生；确定性超时是<b>兜底地板</b>——
+     * 「三天没碰这件事」不需要模型也会被发现。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param gameSecond 当前游戏时刻（秒；空/非法则跳过，不猜日号）
+     *
+     * @return 本次流转的目标数（0=无变化/未装配）
+     */
+    @Transactional
+    public int sweepGoalLifecycle(Long projectId, Long gameSecond) {
+        if (projectId == null || gameSecond == null || gameSecond <= 0) {
+            return 0;
+        }
+        long day = Math.floorDiv(gameSecond, 86400L);
+        int changed = 0;
+        List<ActorCharacterGoal> goals;
+        try {
+            goals = goalRepository.findByProjectIdAndDeletedOrderByIdAsc(projectId, 0);
+        } catch (Exception e) {
+            log.warn("[规划] 目标生命周期扫描读取失败: project={} : {}", projectId, e.getMessage());
+            return 0;
+        }
+        // 行动文本按角色缓存一次（同一角色的多个目标共用一份回看窗口，避免 N 次查询）
+        Map<String, String> actionTextCache = new java.util.HashMap<>();
+        for (ActorCharacterGoal g : goals) {
+            try {
+                if (g == null || g.getDeleted() != null && g.getDeleted() != 0) {
+                    continue;
+                }
+                if (!STATUS_ACTIVE.equals(g.getStatus()) && !STATUS_BLOCKED.equals(g.getStatus())) {
+                    continue;
+                }
+                if (g.getProgressGameDay() == null) {
+                    g.setProgressGameDay(day);
+                    goalRepository.save(g);
+                    continue;
+                }
+                long idle = day - g.getProgressGameDay();
+                if (idle <= 0) {
+                    continue;
+                }
+                String actions = actionTextCache.computeIfAbsent(
+                        g.getAgentRef() == null ? "" : g.getAgentRef(), ref -> recentActionText(ref));
+                if (mentionsAny(actions, g.getTitle())) {
+                    g.setProgressGameDay(day);
+                    if (STATUS_BLOCKED.equals(g.getStatus())) {
+                        g.setStatus(STATUS_ACTIVE);
+                        g.setBlockedReason(null);
+                    }
+                    goalRepository.save(g);
+                    changed++;
+                    continue;
+                }
+                int stall = goalStallDays > 0 ? goalStallDays : 3;
+                int abandon = goalAbandonDays > stall ? goalAbandonDays : stall + 4;
+                if (idle >= abandon && !STATUS_ABANDONED.equals(g.getStatus())) {
+                    g.setStatus(STATUS_ABANDONED);
+                    g.setBlockedReason("连续 " + idle + " 个游戏日没有进展，认了");
+                    goalRepository.save(g);
+                    changed++;
+                } else if (idle >= stall && STATUS_ACTIVE.equals(g.getStatus())) {
+                    g.setStatus(STATUS_BLOCKED);
+                    g.setBlockedReason("连续 " + idle + " 个游戏日没有进展");
+                    goalRepository.save(g);
+                    changed++;
+                }
+            } catch (Exception e) {
+                log.warn("[规划] 目标生命周期扫描单条失败（隔离继续）: goal={} : {}",
+                        g == null ? null : g.getId(), e.getMessage());
+            }
+        }
+        if (changed > 0) {
+            log.info("[规划] 目标生命周期扫描: project={} day={} 流转 {} 条", projectId, day, changed);
+        }
+        return changed;
+    }
+
+    /**
+     * 【卡住的目标】决策注入段：把「这件事卡住了」摆到决策桌面上，让角色自己选择换法子/认了。
+     *
+     * <p>为什么要有这一段：{@link #sweepGoalLifecycle} 只改状态，状态本身不会进 prompt——
+     * 只有 {@code active} 目标会经 {@link #goalsSummary} 注入【当前目标】。
+     * 卡住的目标如果只是从 active 名单里消失，角色会像什么都没发生一样继续过日子，
+     * 那就把「受挫」变成了「遗忘」。这一段的作用是把受挫<b>变成一次可决策的机会</b>：
+     * 要么换个法子（继续 active），要么认了（abandoned），要么先放着（blocked）。</p>
+     *
+     * @param projectId 项目 ID
+     *
+     * @param characterRef 统一角色引用
+     *
+     * @param gameSecond 当前游戏时刻（秒；可空）
+     *
+     * @return 段文本（无卡住目标/未装配返回空串）
+     */
+    public String stalledGoalsSegment(Long projectId, String characterRef, Long gameSecond) {
+        if (projectId == null || characterRef == null || characterRef.isBlank()) {
+            return "";
+        }
+        try {
+            if (!npcTypeResolver.isSpecial(projectId, characterRef)) {
+                return "";
+            }
+            List<ActorCharacterGoal> blocked = goalRepository
+                    .findByProjectIdAndAgentRefAndStatusAndDeletedOrderByCreatedAtDesc(
+                            projectId, characterRef, STATUS_BLOCKED, 0);
+            if (blocked.isEmpty()) {
+                return "";
+            }
+            long day = gameSecond == null || gameSecond <= 0 ? -1L : Math.floorDiv(gameSecond, 86400L);
+            StringBuilder sb = new StringBuilder("【卡住的目标】");
+            int n = 0;
+            for (ActorCharacterGoal g : blocked) {
+                if (n >= STALLED_INJECT_MAX) {
+                    break;
+                }
+                sb.append("\n- 「").append(g.getTitle()).append("」");
+                if (day > 0 && g.getProgressGameDay() != null) {
+                    long idle = day - g.getProgressGameDay();
+                    if (idle > 0) {
+                        sb.append("已经 ").append(idle).append(" 天没动过了");
+                    }
+                }
+                sb.append("。要么换个法子，要么就此认了，别再空耗着。");
+                n++;
+            }
+            return n == 0 ? "" : sb.toString();
+        } catch (Exception e) {
+            log.warn("[规划] 卡住目标段组装失败（跳过）: project={} ref={} : {}",
+                    projectId, characterRef, e.getMessage());
+            return "";
+        }
+    }
+
+    /** 某角色近期行动文本（summary 拼接，最多 {@link #PROGRESS_LOOKBACK_ACTIONS} 条；失败返回空串）。 */
+    private String recentActionText(String agentRef) {
+        if (actionLogRepository == null || agentRef == null || agentRef.isBlank()) {
+            return "";
+        }
+        Long id = NpcRefs.idOf(agentRef);
+        if (id == null) {
+            return "";
+        }
+        try {
+            List<ActorActionLog> logs = actionLogRepository.findByCharacterIdOrderByLogTimeDesc(id);
+            if (logs == null || logs.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            int n = 0;
+            for (ActorActionLog l : logs) {
+                if (n >= PROGRESS_LOOKBACK_ACTIONS) {
+                    break;
+                }
+                if (l.getSummary() != null) {
+                    sb.append(l.getSummary()).append('；');
+                }
+                if (l.getDetail() != null) {
+                    sb.append(l.getDetail()).append('；');
+                }
+                n++;
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.debug("[规划] 近期行动文本读取失败（按无进展处理）: ref={} : {}", agentRef, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 目标标题是否被行动文本「碰到」（进展判定，纯静态可单测）。
+     *
+     * <p>判据取标题的<b>二字片段</b>，命中 ≥2 个不同片段才算有进展：
+     * 单个片段太容易误命中（「去河边」与「攒钱娶媳妇」共享一个「钱」字就断言有进展，显然不对），
+     * 两个片段才构成语义锚点。宁可漏判（目标多卡一天）也不误判（把无关行动当成推进）。</p>
+     *
+     * @param actionText 行动文本拼串（可空）
+     *
+     * @param title 目标标题（可空）
+     *
+     * @return true=有进展迹象
+     */
+    static boolean mentionsAny(String actionText, String title) {
+        if (actionText == null || actionText.isBlank() || title == null || title.isBlank()) {
+            return false;
+        }
+        String t = title.trim();
+        if (t.length() < 2) {
+            return actionText.contains(t);
+        }
+        java.util.Set<String> distinct = new java.util.HashSet<>();
+        int hits = 0;
+        for (int i = 0; i + 2 <= t.length(); i++) {
+            String bigram = t.substring(i, i + 2);
+            if (!distinct.add(bigram)) {
+                continue;
+            }
+            if (actionText.contains(bigram) && ++hits >= 2) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ==================== 感知注入文本（目标 + 计划） ====================
 
     /**
@@ -585,6 +855,22 @@ public class PlanningService {
 
     // ==================== AI 生成内部 ====================
 
+    /**
+     * 星期提示（时间性验证）：形如「第 3 日，周三，工作日」。
+     * <p>只陈述事实、不指示行为差异——工作日/周末的分布差异必须由模型自发产生，
+     * 否则审计测到的是提示词而非时间理解。</p>
+     *
+     * @param gameSecond 规划基准游戏秒（与世界历同源）
+     *
+     * @return 星期提示文本
+     */
+    private String weekdayHint(long gameSecond) {
+        long dayIndex = Math.floorDiv(gameSecond, 86400L);
+        int weekday = WorldClockService.weekdayIndex(gameSecond);
+        String kind = WorldClockService.isWeekend(weekday) ? "周末" : "工作日";
+        return "第 " + (dayIndex + 1) + " 日，" + WorldClockService.weekdayLabel(weekday) + "，" + kind;
+    }
+
     /** AI 生成日计划（plan_day 模板，scene=plan_day 用量）；失败返回 null（调用方回退机制） */
     private PlanData generatePlanAi(Long projectId, String characterRef, ActorCharacter ch, long gameDay) {
         Long userId = projectOwner(projectId);
@@ -594,6 +880,7 @@ public class PlanningService {
         placeholders.put("current_state", currentState(ch, gameDay * 24L + 8));
         placeholders.put("goals", goalsSummary(projectId, characterRef));
         placeholders.put("date_game_day", gameDay + 1);
+        placeholders.put("weekday_hint", weekdayHint(gameDay * 86400L + 8 * 3600L));
         String prompt = promptTemplateService.render(userId, projectId, PromptTemplateService.CODE_PLAN_DAY, placeholders);
         String sys = promptTemplateService.systemMessage(userId, projectId, PromptTemplateService.CODE_PLAN_DAY, null);
         // 批5 世界与叙事（2026-10-10）：日计划生成属「角色视角」生成——前置 V2.0 段1A+1C+2D+2E
@@ -630,6 +917,7 @@ public class PlanningService {
         placeholders.put("goals", goalsSummary(projectId, characterRef));
         placeholders.put("date_game_day", gameDay + 1);
         placeholders.put("current_hour", hourOfDay);
+        placeholders.put("weekday_hint", weekdayHint(gameDay * 86400L + hourOfDay * 3600L));
         placeholders.put("disruption_event", eventText == null || eventText.isBlank() ? "（无）" : eventText);
         placeholders.put("old_plan", oldPlan == null ? "（无）" : oldPlan.getContent());
         String prompt = promptTemplateService.render(userId, projectId, PromptTemplateService.CODE_PLAN_REPLAN, placeholders);

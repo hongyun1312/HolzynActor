@@ -271,7 +271,7 @@ public class ConversationService {
      * @return VO 对象
      */
     private ConversationVO detailVO(ActorConversation c) {
-        List<ConversationMemberVO> members = memberRepository.findByConversationId(c.getId())
+        List<ConversationMemberVO> members = memberRepository.findActiveByConversationId(c.getId())
                 .stream().map(m -> {
                     // ：npc:{id} 不再编码类型，此处按意图 B 处理（member_type 经 NpcRefs 归一）
                     String type = NpcRefs.normalizeType(m.getMemberType());

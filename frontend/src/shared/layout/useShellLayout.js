@@ -49,7 +49,7 @@ export const BREAKPOINT_SMALL = 960 // = --bp-shell-overlay：低于此值侧栏
  */
 export const BREAKPOINT_CONTENT = 1152
 
-/** 侧栏与内容区之间的留白（悬浮岛左右各一份；沙盘 3D 向左延伸需用同一数值） */
+/** 侧栏与内容区之间的留白（悬浮岛**左右各一份**；沙盘 3D 向左延伸需用同一数值） */
 export const SIDEBAR_MARGIN = 12
 
 /** 视口宽度（模块级单例：整个应用只挂一份监听，避免每个组件各挂一套） */
@@ -134,9 +134,10 @@ export function useShellLayout() {
     const root = document.documentElement
     root.style.setProperty('--shell-side-w', `${effectiveSidebarWidth.value}px`)
     root.style.setProperty('--shell-side-margin', `${SIDEBAR_MARGIN}px`)
-    // 世界沙盘 3D 画布向左延伸量 = 侧栏左留白 + 侧栏宽度（= 内容区左边缘距视口左边的距离；
-    // 旧实现硬编码 264 = 248 侧栏 + 16 左留白，语义相同，现改为实测值）
-    root.style.setProperty('--sb-inset-left', `${effectiveSidebarWidth.value + SIDEBAR_MARGIN}px`)
+    // 世界沙盘 3D 画布向左延伸量 = 内容区左边缘距视口左边的距离
+    // = 侧栏左留白 + 侧栏宽度 + 侧栏右留白（两侧留白一致，所以这里必须乘 2；
+    //   旧实现只有左留白，是因为侧栏右缘直接贴内容区）
+    root.style.setProperty('--sb-inset-left', `${effectiveSidebarWidth.value + SIDEBAR_MARGIN * 2}px`)
     root.setAttribute('data-density', density.value)
     root.setAttribute('data-content-mode', contentMode.value)
     root.setAttribute('data-shell-mode', shellMode.value)

@@ -231,15 +231,18 @@ public class WorldGenPersistService {
             vo.getDimensions().add(d);
         }
 
-        // 分节映射
+        // 分节映射（**出口即合规**：这里按落库同一套上限截断，预览 VO 与 confirm 共用这份 sections，
+        // 于是前端回填、用户手改、旧客户端都不可能出现超长 era 被 saveWorldSetting 打回 400 的情况——
+        // 实测「时代背景最长 50 字符」就是创意发散路径上第二个卡点）
         Map<String, String> sections = new LinkedHashMap<>();
         String projectName = projectRepository.findById(task.getProjectId())
                 .map(ActorProject::getName).orElse("未命名项目");
         String existingName = worldSettingRepository.findTopByProjectIdOrderByVersionDesc(task.getProjectId())
                 .map(ActorWorldSetting::getName).orElse(null);
-        sections.put("name", existingName != null && !existingName.isBlank() ? existingName : projectName);
+        sections.put("name", truncate(existingName != null && !existingName.isBlank() ? existingName : projectName, 100));
         sections.put("genre", inputOf(task, "genre"));
-        sections.put("era", prose(dims, "space_time", "era"));
+        sections.put("era", WorldGenSchemaValidator.truncateAtSentence(
+                prose(dims, "space_time", "era"), WorldGenSchemaValidator.ERA_MAX_CHARS));
         sections.put("magicSystem", assembleMagicSystem(dims));
         sections.put("geography", assembleGeography(dims));
         sections.put("factions", assembleFactions(dims));

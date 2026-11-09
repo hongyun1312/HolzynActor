@@ -396,7 +396,7 @@ class AgentRuntimeTest {
     void evaluateAfterDialogTriggersHighImportanceMembers() {
         ActorConversationMember m1 = member(1L, 1L); // importance 4（高，触发）
         ActorConversationMember m2 = member(1L, 9L); // importance 2（低，跳过）
-        when(memberRepository.findByConversationId(100L)).thenReturn(List.of(m1, m2));
+        when(memberRepository.findActiveByConversationId(100L)).thenReturn(List.of(m1, m2));
         // 低重要度角色（importance=2）：自动评估应跳过
         ActorCharacter low = new ActorCharacter();
         low.setId(9L);
@@ -409,7 +409,7 @@ class AgentRuntimeTest {
         // 同步调用评估核心（包内方法，确定性验证；异步包装由 evaluateAfterDialogAsync 覆盖）
         runtime.evaluateMembers(100L, 1L, "after_dialog");
 
-        verify(memberRepository).findByConversationId(100L);
+        verify(memberRepository).findActiveByConversationId(100L);
         verify(characterRepository).findById(1L);
         verify(characterService).requireOwned(1L, 1L);
         verify(characterService, never()).requireOwned(9L, 1L);

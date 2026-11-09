@@ -48,6 +48,15 @@ public interface ActorNpcPathRepository extends JpaRepository<ActorNpcPath, Long
     List<ActorNpcPath> findByProjectIdAndNpcRefAndStatusOrderByIdDesc(Long projectId, String npcRef, String status);
 
     /**
+     * 某角色的全部轨迹（不区分状态；时间性审计口径细分用）。
+     *
+     * @param projectId 项目 ID
+     * @param npcRef    角色引用
+     * @return 轨迹（最近的在前）
+     */
+    List<ActorNpcPath> findByProjectIdAndNpcRefOrderByIdDesc(Long projectId, String npcRef);
+
+    /**
      * 某张图的全部轨迹（重生成时清理）。
      *
      * @param mapId 地图 ID

@@ -188,11 +188,32 @@ public class DialogueGroupService {
     public List<DialogueGroupMemberVO> members(Long projectId, Long sessionId) {
         requireGroup(projectId, sessionId);
         return memberRepository.findBySessionIdOrderByIdAsc(sessionId).stream()
+                .filter(this::isActiveMember)
                 .sorted(Comparator.comparingInt((ActorTalkGroupMember m) ->
                         SOURCE_MANUAL.equals(m.getSource()) ? 1 : 0)
                         .thenComparingLong(ActorTalkGroupMember::getId))
                 .map(this::toVO)
                 .toList();
+    }
+
+    /**
+     * 成员是否仍对应一个未删除角色（玩家侧群聊的幽灵过滤）。
+     * <p>非数字 ref（特殊/历史命名）无法核对时保留，避免误杀；能解析出 id 的一律以角色 deleted 为准。</p>
+     *
+     * @param m 群聊成员行
+     *
+     * @return true=有效成员
+     */
+    private boolean isActiveMember(ActorTalkGroupMember m) {
+        if (m == null || characterRepository == null) {
+            return m != null;
+        }
+        Long cid = NpcRefs.parseLenient(m.getCharacterRef());
+        if (cid == null || cid <= 0) {
+            return true;
+        }
+        ActorCharacter ch = characterRepository.findById(cid).orElse(null);
+        return ch == null || !Integer.valueOf(1).equals(ch.getDeleted());
     }
 
     /**
